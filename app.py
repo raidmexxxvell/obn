@@ -4,11 +4,13 @@ import json
 import time
 import hmac
 import hashlib
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
 from flask import Flask, render_template, request, jsonify
 from urllib.parse import parse_qs
 import gspread
 from google.oauth2.service_account import Credentials
+from sqlalchemy import create_engine, Column, Integer, String, Date, DateTime, Text
+from sqlalchemy.orm import declarative_base, sessionmaker, Session
 
 app = Flask(__name__)
 
@@ -18,6 +20,73 @@ LEAGUE_TABLE_CACHE = {
     'data': None   # кэшированные данные таблицы
 }
 LEAGUE_TABLE_TTL = 60 * 60  # 1 час
+
+# ---------------- PostgreSQL / SQLAlchemy -----------------
+DATABASE_URL = os.environ.get('DATABASE_URL') or os.environ.get('DATABASE_URL_RENDER')
+if not DATABASE_URL:
+    # позволяем локально запускаться без БД, но в лог
+    print('[WARN] DATABASE_URL не задан. БД не будет использована.')
+
+def _normalize_db_url(url: str) -> str:
+    if not url:
+        return ''
+    # Render часто даёт postgres:// — SQLAlchemy предпочитает postgresql+psycopg2://
+    if url.startswith('postgres://'):
+        url = 'postgresql+psycopg2://' + url[len('postgres://'):]
+    elif url.startswith('postgresql://') and 'psycopg2' not in url:
+        url = 'postgresql+psycopg2://' + url[len('postgresql://'):]
+    # Требуем sslmode=require если не указан
+    if 'sslmode=' not in url:
+        sep = '&' if '?' in url else '?'
+        url = f"{url}{sep}sslmode=require"
+    return url
+
+engine = None
+SessionLocal = None
+Base = declarative_base()
+
+if DATABASE_URL:
+    engine = create_engine(_normalize_db_url(DATABASE_URL), pool_pre_ping=True)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+class User(Base):
+    __tablename__ = 'users'
+    user_id = Column(Integer, primary_key=True, index=True)
+    display_name = Column(String(255))
+    tg_username = Column(String(255))
+    credits = Column(Integer, default=1000)
+    xp = Column(Integer, default=0)
+    level = Column(Integer, default=1)
+    consecutive_days = Column(Integer, default=1)
+    last_checkin_date = Column(Date, nullable=True)
+    badge_tier = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+class LeagueTableRow(Base):
+    __tablename__ = 'league_table'
+    row_index = Column(Integer, primary_key=True)
+    c1 = Column(Text)
+    c2 = Column(Text)
+    c3 = Column(Text)
+    c4 = Column(Text)
+    c5 = Column(Text)
+    c6 = Column(Text)
+    c7 = Column(Text)
+    c8 = Column(Text)
+    updated_at = Column(DateTime(timezone=True))
+
+if engine is not None:
+    try:
+        Base.metadata.create_all(engine)
+        print('[INFO] DB tables ensured')
+    except Exception as e:
+        print(f'[ERROR] DB init failed: {e}')
+
+def get_db() -> Session:
+    if SessionLocal is None:
+        raise RuntimeError('База данных не сконфигурирована (DATABASE_URL не задан).')
+    return SessionLocal()
 
 # Настройка Google Sheets
 def get_google_client():
@@ -123,25 +192,51 @@ def find_user_row(user_id):
         app.logger.error(f"Ошибка API при поиске пользователя: {e}")
         return None
 
-def initialize_new_user(user_data):
-    """Инициализирует нового пользователя"""
-    sheet = get_user_sheet()
-    new_row = [
-        user_data['id'],
-        user_data.get('first_name', 'User'),
-        user_data.get('username', ''),
-        '1000',  # credits
-        '0',     # xp
-        '1',     # level
-        '1',     # consecutive_days
-        '',      # last_checkin_date
-        '0',     # badge_tier
-        '',      # badge_unlocked_at (J)
-        datetime.now(timezone.utc).isoformat(),  # created_at (K)
-        datetime.now(timezone.utc).isoformat()   # updated_at (L)
-    ]
-    sheet.append_row(new_row)
-    return new_row
+def mirror_user_to_sheets(db_user: 'User'):
+    """Создаёт или обновляет запись пользователя в Google Sheets по данным из БД."""
+    try:
+        sheet = get_user_sheet()
+    except Exception as e:
+        app.logger.warning(f"Не удалось получить лист users для зеркалирования: {e}")
+        return
+    row_num = find_user_row(db_user.user_id)
+    # Подготовка значений под формат таблицы
+    last_checkin_str = db_user.last_checkin_date.isoformat() if isinstance(db_user.last_checkin_date, date) else ''
+    created_at = (db_user.created_at or datetime.now(timezone.utc)).isoformat()
+    updated_at = (db_user.updated_at or datetime.now(timezone.utc)).isoformat()
+    if not row_num:
+        new_row = [
+            str(db_user.user_id),
+            db_user.display_name or 'User',
+            db_user.tg_username or '',
+            str(db_user.credits or 0),
+            str(db_user.xp or 0),
+            str(db_user.level or 1),
+            str(db_user.consecutive_days or 0),
+            last_checkin_str,
+            str(db_user.badge_tier or 0),
+            '',  # badge_unlocked_at (не ведём в БД)
+            created_at,
+            updated_at
+        ]
+        try:
+            sheet.append_row(new_row)
+        except Exception as e:
+            app.logger.warning(f"Не удалось добавить пользователя в лист users: {e}")
+    else:
+        try:
+            sheet.batch_update([
+                {'range': f'B{row_num}', 'values': [[db_user.display_name or 'User']]},
+                {'range': f'C{row_num}', 'values': [[db_user.tg_username or '']]},
+                {'range': f'D{row_num}', 'values': [[str(db_user.credits or 0)]]},
+                {'range': f'E{row_num}', 'values': [[str(db_user.xp or 0)]]},
+                {'range': f'F{row_num}', 'values': [[str(db_user.level or 1)]]},
+                {'range': f'G{row_num}', 'values': [[str(db_user.consecutive_days or 0)]]},
+                {'range': f'H{row_num}', 'values': [[last_checkin_str]]},
+                {'range': f'L{row_num}', 'values': [[updated_at]]}
+            ])
+        except Exception as e:
+            app.logger.warning(f"Не удалось обновить пользователя в листе users: {e}")
 
 def _to_int(val, default=0):
     try:
@@ -149,23 +244,19 @@ def _to_int(val, default=0):
     except Exception:
         return default
 
-def parse_user_data(row):
-    """Преобразует строку таблицы в объект пользователя"""
-    # Гарантируем длину массива значений
-    row = list(row) + [''] * (12 - len(row))
+def serialize_user(db_user: 'User'):
     return {
-        'user_id': _to_int(row[0]),                # A
-        'display_name': row[1],                    # B
-        'tg_username': row[2],                     # C
-        'credits': _to_int(row[3]),                # D
-        'xp': _to_int(row[4]),                     # E
-        'level': _to_int(row[5], 1),               # F
-        'consecutive_days': _to_int(row[6]),       # G
-        'last_checkin_date': row[7],               # H
-        'badge_tier': _to_int(row[8]),             # I
-        # row[9] = J (badge_unlocked_at) — сейчас в ответ не включаем
-        'created_at': row[10],                     # K
-        'updated_at': row[11]                      # L
+        'user_id': db_user.user_id,
+        'display_name': db_user.display_name or 'User',
+        'tg_username': db_user.tg_username or '',
+        'credits': int(db_user.credits or 0),
+        'xp': int(db_user.xp or 0),
+        'level': int(db_user.level or 1),
+        'consecutive_days': int(db_user.consecutive_days or 0),
+        'last_checkin_date': (db_user.last_checkin_date.isoformat() if isinstance(db_user.last_checkin_date, date) else ''),
+        'badge_tier': int(db_user.badge_tier or 0),
+        'created_at': (db_user.created_at or datetime.now(timezone.utc)).isoformat(),
+        'updated_at': (db_user.updated_at or datetime.now(timezone.utc)).isoformat(),
     }
 def parse_and_verify_telegram_init_data(init_data: str, max_age_seconds: int = 24*60*60):
     """Парсит и проверяет initData из Telegram WebApp.
@@ -231,17 +322,72 @@ def get_user():
             return jsonify({'error': 'Недействительные данные'}), 401
         user_data = parsed['user']
 
-        row_num = find_user_row(user_data['id'])
-        sheet = get_user_sheet()
+        if SessionLocal is None:
+            # Fallback без БД: старый путь через таблицу (на случай локальной разработки)
+            row_num = find_user_row(user_data['id'])
+            sheet = get_user_sheet()
+            if not row_num:
+                # инициализация в листе
+                new_row = [
+                    user_data['id'], user_data.get('first_name', 'User'), user_data.get('username', ''),
+                    '1000','0','1','1','', '0','', datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat()
+                ]
+                sheet.append_row(new_row)
+                row = new_row
+            else:
+                row = sheet.row_values(row_num)
+            # формируем ответ из строки
+            row = list(row) + [''] * (12 - len(row))
+            resp = {
+                'user_id': _to_int(row[0]),
+                'display_name': row[1],
+                'tg_username': row[2],
+                'credits': _to_int(row[3]),
+                'xp': _to_int(row[4]),
+                'level': _to_int(row[5], 1),
+                'consecutive_days': _to_int(row[6]),
+                'last_checkin_date': row[7],
+                'badge_tier': _to_int(row[8]),
+                'created_at': row[10],
+                'updated_at': row[11]
+            }
+            return jsonify(resp)
 
-        if not row_num:
-            new_user = initialize_new_user(user_data)
-            user = parse_user_data(new_user)
-        else:
-            row = sheet.row_values(row_num)
-            user = parse_user_data(row)
+        # Основной путь: через БД
+        db: Session = get_db()
+        try:
+            db_user = db.get(User, int(user_data['id']))
+            now = datetime.now(timezone.utc)
+            if not db_user:
+                db_user = User(
+                    user_id=int(user_data['id']),
+                    display_name=user_data.get('first_name') or 'User',
+                    tg_username=user_data.get('username') or '',
+                    credits=1000,
+                    xp=0,
+                    level=1,
+                    consecutive_days=1,
+                    last_checkin_date=None,
+                    badge_tier=0,
+                    created_at=now,
+                    updated_at=now,
+                )
+                db.add(db_user)
+            else:
+                # just update updated_at
+                db_user.updated_at = now
+            db.commit()
+            db.refresh(db_user)
+        finally:
+            db.close()
 
-        return jsonify(user)
+        # Зеркалим в Google Sheets (best-effort)
+        try:
+            mirror_user_to_sheets(db_user)
+        except Exception as e:
+            app.logger.warning(f"Mirror user to sheets failed: {e}")
+
+        return jsonify(serialize_user(db_user))
 
     except Exception as e:
         app.logger.error(f"Ошибка получения пользователя: {str(e)}")
@@ -260,17 +406,36 @@ def update_name():
         if not user_id or not new_name:
             return jsonify({'error': 'user_id и new_name обязательны'}), 400
         
-        row_num = find_user_row(user_id)
-        if not row_num:
-            return jsonify({'error': 'Пользователь не найден'}), 404
-        
-        sheet = get_user_sheet()
-        # Обновляем имя (B) и updated_at (L)
-        sheet.batch_update([
-            {'range': f'B{row_num}', 'values': [[new_name]]},
-            {'range': f'L{row_num}', 'values': [[datetime.now(timezone.utc).isoformat()]]}
-        ])
-        
+        if SessionLocal is None:
+            # Fallback в лист (если нет БД)
+            row_num = find_user_row(user_id)
+            if not row_num:
+                return jsonify({'error': 'Пользователь не найден'}), 404
+            sheet = get_user_sheet()
+            sheet.batch_update([
+                {'range': f'B{row_num}', 'values': [[new_name]]},
+                {'range': f'L{row_num}', 'values': [[datetime.now(timezone.utc).isoformat()]]}
+            ])
+            return jsonify({'status': 'success', 'display_name': new_name})
+
+        db: Session = get_db()
+        try:
+            db_user = db.get(User, int(user_id))
+            if not db_user:
+                return jsonify({'error': 'Пользователь не найден'}), 404
+            db_user.display_name = new_name
+            db_user.updated_at = datetime.now(timezone.utc)
+            db.commit()
+            db.refresh(db_user)
+        finally:
+            db.close()
+
+        # Зеркалим в Google Sheets
+        try:
+            mirror_user_to_sheets(db_user)
+        except Exception as e:
+            app.logger.warning(f"Mirror user name to sheets failed: {e}")
+
         return jsonify({'status': 'success', 'display_name': new_name})
     
     except Exception as e:
@@ -286,13 +451,29 @@ def daily_checkin():
             return jsonify({'error': 'Недействительные данные'}), 401
         user_id = parsed['user'].get('id')
 
-        row_num = find_user_row(user_id)
-        if not row_num:
-            return jsonify({'error': 'Пользователь не найден'}), 404
-
-        sheet = get_user_sheet()
-        row = sheet.row_values(row_num)
-        user = parse_user_data(row)
+        if SessionLocal is None:
+            # Fallback: старая логика через лист
+            row_num = find_user_row(user_id)
+            if not row_num:
+                return jsonify({'error': 'Пользователь не найден'}), 404
+            sheet = get_user_sheet()
+            row = sheet.row_values(row_num)
+            # Гарантируем длину
+            row = list(row) + [''] * (12 - len(row))
+            user = {
+                'user_id': _to_int(row[0]), 'display_name': row[1], 'tg_username': row[2],
+                'credits': _to_int(row[3]), 'xp': _to_int(row[4]), 'level': _to_int(row[5], 1),
+                'consecutive_days': _to_int(row[6]), 'last_checkin_date': row[7]
+            }
+        else:
+            db: Session = get_db()
+            try:
+                db_user = db.get(User, int(user_id))
+                if not db_user:
+                    return jsonify({'error': 'Пользователь не найден'}), 404
+                user = serialize_user(db_user)
+            finally:
+                db.close()
 
         # Проверка даты чекина
         today = datetime.now(timezone.utc).date()
@@ -321,25 +502,47 @@ def daily_checkin():
         credits_reward = 50 * cycle_day
 
         # Обновление данных
-        new_xp = user['xp'] + xp_reward
-        new_credits = user['credits'] + credits_reward
+        new_xp = int(user['xp']) + xp_reward
+        new_credits = int(user['credits']) + credits_reward
 
         # Расчет уровня
-        new_level = user['level']
+        new_level = int(user['level'])
         while new_xp >= new_level * 100:
             new_xp -= new_level * 100
             new_level += 1
 
-        # Обновление строки
-        # Групповое обновление ячеек одним запросом
-        sheet.batch_update([
-            {'range': f'H{row_num}', 'values': [[today.isoformat()]]},       # last_checkin_date
-            {'range': f'G{row_num}', 'values': [[str(new_consecutive)]]},    # consecutive_days
-            {'range': f'E{row_num}', 'values': [[str(new_xp)]]},             # xp
-            {'range': f'D{row_num}', 'values': [[str(new_credits)]]},        # credits
-            {'range': f'F{row_num}', 'values': [[str(new_level)]]},          # level
-            {'range': f'L{row_num}', 'values': [[datetime.now(timezone.utc).isoformat()]]}  # updated_at
-        ])
+        if SessionLocal is None:
+            # Обновление в Google Sheets (fallback)
+            sheet.batch_update([
+                {'range': f'H{row_num}', 'values': [[today.isoformat()]]},       # last_checkin_date
+                {'range': f'G{row_num}', 'values': [[str(new_consecutive)]]},    # consecutive_days
+                {'range': f'E{row_num}', 'values': [[str(new_xp)]]},             # xp
+                {'range': f'D{row_num}', 'values': [[str(new_credits)]]},        # credits
+                {'range': f'F{row_num}', 'values': [[str(new_level)]]},          # level
+                {'range': f'L{row_num}', 'values': [[datetime.now(timezone.utc).isoformat()]]}  # updated_at
+            ])
+        else:
+            # Обновляем в БД
+            db: Session = get_db()
+            try:
+                db_user = db.get(User, int(user_id))
+                if not db_user:
+                    return jsonify({'error': 'Пользователь не найден'}), 404
+                db_user.last_checkin_date = today
+                db_user.consecutive_days = new_consecutive
+                db_user.xp = new_xp
+                db_user.credits = new_credits
+                db_user.level = new_level
+                db_user.updated_at = datetime.now(timezone.utc)
+                db.commit()
+                db.refresh(db_user)
+            finally:
+                db.close()
+            # Зеркалим в Google Sheets
+            try:
+                mirror_user_to_sheets(db_user)
+            except Exception as e:
+                app.logger.warning(f"Mirror checkin to sheets failed: {e}")
 
         return jsonify({
             'status': 'success',
@@ -363,13 +566,34 @@ def get_achievements():
             return jsonify({'error': 'Недействительные данные'}), 401
         user_id = parsed['user'].get('id')
 
-        row_num = find_user_row(user_id)
-        if not row_num:
-            return jsonify({'error': 'Пользователь не найден'}), 404
-
-        sheet = get_user_sheet()
-        row = sheet.row_values(row_num)
-        user = parse_user_data(row)
+        # Получаем пользователя из БД либо (fallback) из листа
+        if SessionLocal is None:
+            row_num = find_user_row(user_id)
+            if not row_num:
+                return jsonify({'error': 'Пользователь не найден'}), 404
+            sheet = get_user_sheet()
+            row = sheet.row_values(row_num)
+            row = list(row) + [''] * (12 - len(row))
+            user = {
+                'user_id': _to_int(row[0]),
+                'display_name': row[1],
+                'tg_username': row[2],
+                'credits': _to_int(row[3]),
+                'xp': _to_int(row[4]),
+                'level': _to_int(row[5], 1),
+                'consecutive_days': _to_int(row[6]),
+                'last_checkin_date': row[7],
+                'badge_tier': _to_int(row[8]),
+            }
+        else:
+            db: Session = get_db()
+            try:
+                db_user = db.get(User, int(user_id))
+                if not db_user:
+                    return jsonify({'error': 'Пользователь не найден'}), 404
+                user = serialize_user(db_user)
+            finally:
+                db.close()
         # Пороговые значения и названия
         streak_thresholds = [(120, 3), (30, 2), (7, 1)]
         credits_thresholds = [(500000, 3), (50000, 2), (10000, 1)]
@@ -452,6 +676,30 @@ def api_league_table():
         }
         LEAGUE_TABLE_CACHE['data'] = payload
         LEAGUE_TABLE_CACHE['ts'] = now
+        # Сохраняем в БД (если настроена)
+        if SessionLocal is not None:
+            db: Session = get_db()
+            try:
+                for idx, r in enumerate(normalized, start=1):
+                    row = db.get(LeagueTableRow, idx)
+                    when = datetime.now(timezone.utc)
+                    if not row:
+                        row = LeagueTableRow(
+                            row_index=idx,
+                            c1=str(r[0] or ''), c2=str(r[1] or ''), c3=str(r[2] or ''), c4=str(r[3] or ''),
+                            c5=str(r[4] or ''), c6=str(r[5] or ''), c7=str(r[6] or ''), c8=str(r[7] or ''),
+                            updated_at=when
+                        )
+                        db.add(row)
+                    else:
+                        row.c1, row.c2, row.c3, row.c4 = str(r[0] or ''), str(r[1] or ''), str(r[2] or ''), str(r[3] or '')
+                        row.c5, row.c6, row.c7, row.c8 = str(r[4] or ''), str(r[5] or ''), str(r[6] or ''), str(r[7] or '')
+                        row.updated_at = when
+                db.commit()
+            except Exception as e:
+                app.logger.warning(f"Не удалось сохранить лигу в БД: {e}")
+            finally:
+                db.close()
         return jsonify(payload)
     except Exception as e:
         app.logger.error(f"Ошибка загрузки таблицы лиги: {str(e)}")

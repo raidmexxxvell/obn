@@ -2,3 +2,5 @@ Flask==2.3.3
 gspread==5.12.1
 google-auth==2.33.0
 python-dotenv==1.0.1
+SQLAlchemy==2.0.32
+psycopg2-binary==2.9.9
