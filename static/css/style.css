@@ -1,0 +1,220 @@
+:root {
+    --primary-gradient: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
+    --card-bg: rgba(255, 255, 255, 0.1);
+    --text-color: #ffffff;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+body {
+    background: var(--primary-gradient);
+    color: var(--text-color);
+    min-height: 100vh;
+    padding: 20px;
+    line-height: 1.6;
+}
+
+.container {
+    max-width: 600px;
+    margin: 0 auto;
+}
+
+.profile-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 25px;
+    position: relative;
+}
+
+.avatar {
+    width: 70px;
+    height: 70px;
+    border-radius: 50%;
+    background: var(--card-bg);
+    margin-right: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+#user-name {
+    font-size: 1.8rem;
+    font-weight: 600;
+}
+
+.edit-name {
+    position: absolute;
+    top: 10px;
+    right: 0;
+    cursor: pointer;
+    opacity: 0.7;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 15px;
+    margin-bottom: 25px;
+}
+
+.stat-card {
+    background: var(--card-bg);
+    backdrop-filter: blur(10px);
+    border-radius: 15px;
+    padding: 15px;
+    text-align: center;
+    transition: transform 0.3s;
+}
+
+.stat-card:hover {
+    transform: translateY(-5px);
+}
+
+.stat-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin-bottom: 5px;
+}
+
+.progress-section {
+    background: var(--card-bg);
+    backdrop-filter: blur(10px);
+    border-radius: 15px;
+    padding: 15px;
+    margin-bottom: 25px;
+}
+
+.progress-label {
+    font-size: 0.9rem;
+    margin-bottom: 8px;
+    opacity: 0.8;
+}
+
+.progress-bar {
+    height: 12px;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #00c9ff, #92fe9d);
+    border-radius: 6px;
+    width: 0%;
+    transition: width 1.5s ease;
+}
+
+.checkin-section, .achievements-section {
+    background: var(--card-bg);
+    backdrop-filter: blur(10px);
+    border-radius: 15px;
+    padding: 20px;
+    margin-bottom: 25px;
+}
+
+.checkin-days {
+    display: flex;
+    justify-content: space-between;
+    margin: 15px 0;
+}
+
+.day-indicator {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.day-indicator.active {
+    background: #00c9ff;
+    color: #000;
+}
+
+.day-indicator.completed {
+    background: #92fe9d;
+}
+
+.checkin-btn {
+    width: 100%;
+    padding: 12px;
+    background: linear-gradient(90deg, #00c9ff, #92fe9d);
+    border: none;
+    border-radius: 10px;
+    color: #000;
+    font-weight: bold;
+    font-size: 1.1rem;
+    cursor: pointer;
+    transition: opacity 0.3s;
+}
+
+.checkin-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.checkin-status {
+    text-align: center;
+    margin-top: 10px;
+    min-height: 20px;
+}
+
+.badges-container {
+    display: flex;
+    gap: 15px;
+    overflow-x: auto;
+    padding: 10px 0;
+}
+
+.badge {
+    min-width: 80px;
+    text-align: center;
+}
+
+.badge-icon {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    margin: 0 auto 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+}
+
+.badge-name {
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+/* Адаптивность для мобильных */
+@media (max-width: 480px) {
+    .stats-grid {
+        grid-template-columns: 1fr 1fr 1fr;
+    }
+    
+    .profile-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .avatar {
+        margin: 0 0 15px 0;
+    }
+}

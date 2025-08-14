@@ -1,0 +1,60 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Football League</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="profile-header">
+            <div class="avatar" id="user-avatar"></div>
+            <h1 id="user-name">Загрузка...</h1>
+            <div class="edit-name" id="edit-name">✎</div>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value" id="credits">0</div>
+                <div class="stat-label">Кредиты</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="level">1</div>
+                <div class="stat-label">Уровень</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="xp">0/100</div>
+                <div class="stat-label">Опыт</div>
+            </div>
+        </div>
+
+        <div class="progress-section">
+            <div class="progress-label">Прогресс до следующего уровня</div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="xp-progress"></div>
+            </div>
+        </div>
+
+        <div class="checkin-section">
+            <h2>Ежедневный чекин</h2>
+            <div class="checkin-days" id="checkin-days">
+                <!-- Дни цикла будут сгенерированы JS -->
+            </div>
+            <button class="checkin-btn" id="checkin-btn">Получить награду</button>
+            <div class="checkin-status" id="checkin-status"></div>
+        </div>
+
+        <div class="achievements-section">
+            <h2>Достижения</h2>
+            <div class="badges-container" id="badges">
+                <!-- Достижения будут сгенерированы JS -->
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/profile.js"></script>
+</body>
+</html>
