@@ -29,29 +29,20 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     function startLoadingAnimation() {
-    if (!loadingProgress) return () => {};
-    let progress = 0;
-    const interval = setInterval(() => {
-        progress += Math.floor(Math.random() * 5) + 1;
-        if (progress >= 95) {
-            progress = 95;
-        }
-        loadingProgress.style.width = `${progress}%`;
-    }, 150);
+        if (!loadingProgress) return () => {};
+        let progress = 0;
+        const interval = setInterval(() => {
+            progress += Math.floor(Math.random() * 5) + 1;
+            if (progress >= 95) {
+                progress = 95;
+            }
+            loadingProgress.style.width = `${progress}%`;
+        }, 150);
 
-    return () => { 
-        clearInterval(interval); 
-        if (loadingProgress) loadingProgress.style.width = '100%';
-    };
-}
-
-    function hideSplash() {
-        if (splash) splash.style.opacity = '0';
-        setTimeout(() => {
-            if (splash) splash.style.display = 'none';
-            if (appContent) appContent.style.display = 'block';
-            document.body.classList.add('loaded');
-        }, 450);
+        return () => { 
+            clearInterval(interval); 
+            if (loadingProgress) loadingProgress.style.width = '100%';
+        };
     }
 
     function initApp() {
@@ -64,14 +55,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const cancelLoading = startLoadingAnimation();
 
         // загружаем данные (в dev режиме вернём заглушку)
-        setTimeout(() => {
-            Promise.all([ fetchUserData(), fetchAchievements() ])
-                .catch(err => console.error('Init error', err))
-                .finally(() => {
-                    cancelLoading();
-                    hideSplash();
-                });
-        }, 400); // минимальное время показа
+        Promise.all([ fetchUserData(), fetchAchievements() ])
+            .catch(err => console.error('Init error', err))
+            .finally(() => {
+                cancelLoading();
+                window.hideSplash(); // Используем функцию из splash.js
+            });
     }
 
     function fetchUserData() {
@@ -237,11 +226,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function setupEventListeners() {
         if (elements.checkinBtn) elements.checkinBtn.addEventListener('click', handleCheckin);
-        if (elements.editName) { elements.editName.style.cursor='pointer'; elements.editName.addEventListener('click', handleNameChange); }
+        if (elements.editName) { 
+            elements.editName.style.cursor = 'pointer'; 
+            elements.editName.addEventListener('click', handleNameChange); 
+        }
     }
 
     // старт
     initApp();
     setupEventListeners();
 });
-
