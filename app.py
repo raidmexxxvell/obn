@@ -21,6 +21,13 @@ LEAGUE_TABLE_CACHE = {
 }
 LEAGUE_TABLE_TTL = 60 * 60  # 1 час
 
+# Кеш для таблицы статистики (A1:G11)
+STATS_TABLE_CACHE = {
+    'ts': 0,
+    'data': None
+}
+STATS_TABLE_TTL = 60 * 60  # 1 час
+
 # ---------------- PostgreSQL / SQLAlchemy -----------------
 DATABASE_URL = os.environ.get('DATABASE_URL') or os.environ.get('DATABASE_URL_RENDER')
 if not DATABASE_URL:
@@ -75,6 +82,18 @@ class LeagueTableRow(Base):
     c6 = Column(Text)
     c7 = Column(Text)
     c8 = Column(Text)
+    updated_at = Column(DateTime(timezone=True))
+
+class StatsTableRow(Base):
+    __tablename__ = 'stats_table'
+    row_index = Column(Integer, primary_key=True)
+    c1 = Column(Text)
+    c2 = Column(Text)
+    c3 = Column(Text)
+    c4 = Column(Text)
+    c5 = Column(Text)
+    c6 = Column(Text)
+    c7 = Column(Text)
     updated_at = Column(DateTime(timezone=True))
 
 if engine is not None:
@@ -142,6 +161,15 @@ def get_table_sheet():
         raise ValueError("SHEET_ID не установлен в переменных окружения")
     doc = client.open_by_key(sheet_id)
     return doc.worksheet("ТАБЛИЦА")
+
+def get_stats_sheet():
+    """Возвращает лист статистики 'СТАТИСТИКА'."""
+    client = get_google_client()
+    sheet_id = os.environ.get('SHEET_ID')
+    if not sheet_id:
+        raise ValueError("SHEET_ID не установлен в переменных окружения")
+    doc = client.open_by_key(sheet_id)
+    return doc.worksheet("СТАТИСТИКА")
 
 def get_user_achievements_row(user_id):
     """Читает или инициализирует строку достижений пользователя."""
@@ -732,6 +760,61 @@ def api_league_table():
     except Exception as e:
         app.logger.error(f"Ошибка загрузки таблицы лиги: {str(e)}")
         return jsonify({'error': 'Не удалось загрузить таблицу'}), 500
+
+@app.route('/api/stats-table', methods=['GET'])
+def api_stats_table():
+    """Возвращает таблицу статистики (A1:G11) с кешем на 1 час и сохраняет в БД."""
+    try:
+        now = int(time.time())
+        if STATS_TABLE_CACHE['data'] and (now - STATS_TABLE_CACHE['ts'] < STATS_TABLE_TTL):
+            return jsonify(STATS_TABLE_CACHE['data'])
+
+        ws = get_stats_sheet()
+        values = ws.get('A1:G11') or []
+        # Гарантируем 11 строк и 7 столбцов
+        normalized = []
+        for i in range(11):
+            row = values[i] if i < len(values) else []
+            row = list(row) + [''] * (7 - len(row))
+            normalized.append(row[:7])
+
+        payload = {
+            'range': 'A1:G11',
+            'updated_at': datetime.now(timezone.utc).isoformat(),
+            'values': normalized
+        }
+        STATS_TABLE_CACHE['data'] = payload
+        STATS_TABLE_CACHE['ts'] = now
+
+        # Сохраняем в БД (если настроена)
+        if SessionLocal is not None:
+            db: Session = get_db()
+            try:
+                when = datetime.now(timezone.utc)
+                for idx, r in enumerate(normalized, start=1):
+                    row = db.get(StatsTableRow, idx)
+                    if not row:
+                        row = StatsTableRow(
+                            row_index=idx,
+                            c1=str(r[0] or ''), c2=str(r[1] or ''), c3=str(r[2] or ''), c4=str(r[3] or ''),
+                            c5=str(r[4] or ''), c6=str(r[5] or ''), c7=str(r[6] or ''),
+                            updated_at=when
+                        )
+                        db.add(row)
+                    else:
+                        row.c1, row.c2, row.c3, row.c4 = str(r[0] or ''), str(r[1] or ''), str(r[2] or ''), str(r[3] or '')
+                        row.c5, row.c6, row.c7 = str(r[4] or ''), str(r[5] or ''), str(r[6] or '')
+                        row.updated_at = when
+                db.commit()
+            except Exception as e:
+                app.logger.warning(f"Не удалось сохранить статистику в БД: {e}")
+            finally:
+                db.close()
+
+        return jsonify(payload)
+    except Exception as e:
+        app.logger.error(f"Ошибка загрузки таблицы статистики: {str(e)}")
+        return jsonify({'error': 'Не удалось загрузить статистику'}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

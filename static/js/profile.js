@@ -290,6 +290,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     subtabMap[key].style.display = '';
                     if (key === 'table') {
                         loadLeagueTable();
+                    } else if (key === 'stats') {
+                        loadStatsTable();
                     }
                 }
             });
@@ -338,6 +340,40 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function loadStatsTable() {
+        const table = document.getElementById('stats-table');
+        const updated = document.getElementById('stats-table-updated');
+        if (!table) return;
+        fetch('/api/stats-table').then(r => r.json()).then(data => {
+            const tbody = table.querySelector('tbody');
+            tbody.innerHTML = '';
+            const rows = data.values || [];
+            for (let i = 0; i < 11; i++) {
+                const r = rows[i] || [];
+                const tr = document.createElement('tr');
+                for (let j = 0; j < 7; j++) {
+                    const td = document.createElement('td');
+                    td.textContent = (r[j] ?? '').toString();
+                    tr.appendChild(td);
+                }
+                tbody.appendChild(tr);
+            }
+            // подсветка топ-3 для строк 2..4 (0 — заголовки)
+            const trs = tbody.querySelectorAll('tr');
+            trs.forEach((rowEl, idx) => {
+                if (idx === 1) rowEl.classList.add('rank-1');
+                if (idx === 2) rowEl.classList.add('rank-2');
+                if (idx === 3) rowEl.classList.add('rank-3');
+            });
+            if (updated && data.updated_at) {
+                const d = new Date(data.updated_at);
+                updated.textContent = `Обновлено: ${d.toLocaleString()}`;
+            }
+        }).catch(err => {
+            console.error('stats table load error', err);
+        });
+    }
+
     let _achLoaded = false;
     let _tableLoaded = false;
     function trySignalAllReady() {
@@ -351,6 +387,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const item = e.target.closest('.nav-item[data-tab="ufo"]');
         if (item) {
             loadLeagueTable();
+            // первичная загрузка статистики, чтобы не ждать при переключении
+            loadStatsTable();
         }
     }, { once: true });
 
