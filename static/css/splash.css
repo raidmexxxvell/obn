@@ -1,56 +1,80 @@
-/* --- ЗАСТАВКА (SPLASH) --- */
+/* static/css/splash.css */
+
+/* Полноэкранная заставка */
 #splash {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    text-align: center;
-    background: linear-gradient(135deg, var(--dark), var(--darker));
-    z-index: 1000;
-    opacity: 1;
-    transition: opacity 0.7s cubic-bezier(.4,0,.2,1);
+  position: fixed;
+  inset: 0; /* top:0; right:0; bottom:0; left:0; */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: #ffffff; /* явно белый фон — чтобы не было серого экрана */
+  color: #222;
+  z-index: 9999;
+  transition: opacity 0.45s ease, visibility 0.45s ease;
+  opacity: 1;
 }
+
+/* Логотип */
 .splash-logo-img {
-    width: 120px;
-    height: 120px;
-    margin-bottom: 32px;
-    object-fit: contain;
-    animation: pulse 2s infinite;
+  width: 120px;
+  height: auto;
+  max-width: 40%;
+  object-fit: contain;
 }
+
+/* Текст заставки */
 .splash-text {
-    font-size: 24px;
-    font-weight: 700;
-    margin-bottom: 24px;
-    color: var(--light);
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
-.loading-bar {
-    width: 80%;
-    max-width: 300px;
-    height: 8px;
-    background: rgba(255,255,255,0.1);
-    border-radius: 8px;
-    overflow: hidden;
-    margin: 0 auto 16px auto;
-}
-.loading-progress {
-    height: 100%;
-    width: 0%;
-    background: linear-gradient(90deg, var(--primary), var(--secondary));
-    border-radius: 4px;
-    transition: width 0.5s cubic-bezier(.4,0,.2,1);
-}
+
+/* Подпись "Идет загрузка..." */
 .splash-loading-label {
-    font-size: 18px;
-    color: var(--gray);
-    margin-bottom: 8px;
+  font-size: 0.9rem;
+  color: #666;
 }
-@keyframes pulse {
-    0% { transform: scale(1); }
-    50% { transform: scale(1.05); }
-    100% { transform: scale(1); }
+
+/* Индикатор загрузки */
+.loading-bar {
+  width: 60%;
+  max-width: 420px;
+  height: 8px;
+  background: rgba(0,0,0,0.06);
+  border-radius: 999px;
+  overflow: hidden;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.5);
+}
+
+.loading-progress {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #4CAF50, #2E8B57);
+  border-radius: 999px;
+  transition: width 0.15s linear;
+}
+
+/* Когда заставка скрыта (класс .loaded на body) */
+body.loaded #splash {
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+/* Основной контент скрываем по умолчанию (на уровне CSS, на случай если inline style нет) */
+#app-content {
+  display: none;
+}
+
+/* После загрузки показываем контейнер (блокируется script-ом) */
+body.loaded #app-content {
+  display: block;
+}
+
+/* Небольшая адаптивность */
+@media (max-width: 480px) {
+  .splash-logo-img { width: 90px; }
+  .loading-bar { width: 80%; }
 }

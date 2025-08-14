@@ -1,36 +1,43 @@
+// static/js/splash.js
 document.addEventListener('DOMContentLoaded', () => {
     const splash = document.getElementById('splash');
     const loadingProgress = document.getElementById('loading-progress');
     const appContent = document.getElementById('app-content');
 
-    if (!splash) return; // если нет элемента - выходим
+    // Если шаблона нет — выходим
+    if (!splash) return;
+
+    // Защитный фон — явно показываем заставку (если CSS/inline меняли)
+    splash.style.opacity = '1';
+    splash.style.display = 'flex';
+    if (appContent) appContent.style.display = 'none';
 
     let progress = 0;
-    const duration = 5000; // 5 секунд
+    const duration = 3000; // делаем чуть быстрее — 3 секунды
     const intervalTime = 50;
     const step = 100 / (duration / intervalTime);
-
-    // Показать заставку (защита на случай, если CSS менял display)
-    splash.style.opacity = '1';
-    if (appContent) appContent.style.display = 'none';
 
     const interval = setInterval(() => {
         progress += step;
         if (!isFinite(progress)) progress = 100;
+        // предотвращаем переполнение
+        progress = Math.min(Math.max(progress, 0), 100);
+
+        if (loadingProgress) loadingProgress.style.width = `${progress}%`;
+
         if (progress >= 100) {
-            progress = 100;
             clearInterval(interval);
-            if (loadingProgress) loadingProgress.style.width = '100%';
+            // небольшая задержка чтобы анимация дошла до конца
             setTimeout(() => {
+                // плавно скрываем заставку
                 splash.style.opacity = '0';
+                // переключаем видимость после анимации
                 setTimeout(() => {
                     splash.style.display = 'none';
                     if (appContent) appContent.style.display = 'block';
                     document.body.classList.add('loaded');
-                }, 700);
-            }, 400);
-        } else {
-            if (loadingProgress) loadingProgress.style.width = `${Math.min(Math.max(progress,0),100)}%`;
+                }, 450);
+            }, 200);
         }
     }, intervalTime);
 });
