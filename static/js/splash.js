@@ -8,10 +8,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Явно показываем заставку
     splash.style.display = 'flex';
-    if (appContent) appContent.style.display = 'none';
+    splash.style.opacity = '1';
+    
+    if (appContent) {
+        appContent.style.display = 'none';
+    }
 });
 
-// Экспортируем функцию скрытия заставки
+// Экспортируем функцию скрытия заставки для использования в profile.js
 window.hideSplash = function() {
     const splash = document.getElementById('splash');
     const appContent = document.getElementById('app-content');
