@@ -13,74 +13,6 @@
     --transition: all 0.3s ease;
 }
 
-/* --- ЗАСТАВКА (SPLASH) --- */
-#splash {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100vh;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    text-align: center;
-    background: linear-gradient(135deg, var(--dark), var(--darker));
-    z-index: 1000;
-    opacity: 1;
-    transition: opacity 0.5s ease;
-}
-
-.splash-logo {
-    width: 140px;
-    height: 140px;
-    margin-bottom: 32px;
-    animation: pulse 2s infinite;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    background: linear-gradient(135deg, var(--primary), var(--secondary));
-    border-radius: 50%;
-    color: white;
-    font-weight: bold;
-    font-size: 48px;
-    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
-}
-
-.splash-text {
-    font-size: 28px;
-    font-weight: 700;
-    margin-bottom: 40px;
-    background: linear-gradient(90deg, var(--primary), var(--secondary));
-    -webkit-background-clip: text;
-    background-clip: text;
-    -webkit-text-fill-color: transparent;
-}
-
-.loading-bar {
-    width: 80%;
-    max-width: 300px;
-    height: 6px;
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
-    overflow: hidden;
-    margin: 0 auto;
-}
-
-.loading-progress {
-    height: 100%;
-    width: 0%;
-    background: linear-gradient(90deg, var(--primary), var(--secondary));
-    border-radius: 4px;
-    transition: width 0.3s ease;
-}
-
-@keyframes pulse {
-    0% { transform: scale(1); }
-    50% { transform: scale(1.05); }
-    100% { transform: scale(1); }
-}
-
 /* --- ОСНОВНОЕ ПРИЛОЖЕНИЕ --- */
 body {
     background: linear-gradient(135deg, var(--dark), var(--darker));
@@ -404,4 +336,5 @@ body.loaded {
     .stat-value {
         font-size: 20px;
     }
+
 }
