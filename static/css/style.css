@@ -1,22 +1,104 @@
 :root {
-    --primary-gradient: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
-    --card-bg: rgba(255, 255, 255, 0.1);
-    --text-color: #ffffff;
+    --primary: #1e40af;
+    --primary-dark: #1d4ed8;
+    --secondary: #f59e0b;
+    --success: #10b981;
+    --danger: #ef4444;
+    --dark: #0f172a;
+    --darker: #020617;
+    --light: #f1f5f9;
+    --gray: #94a3b8;
+    --card-bg: rgba(30, 41, 59, 0.7);
+    --border-radius: 12px;
+    --transition: all 0.3s ease;
 }
 
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+/* --- ЗАСТАВКА (SPLASH) --- */
+#splash, #loading-screen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    background: linear-gradient(135deg, var(--dark), var(--darker));
+    z-index: 1000;
+    opacity: 1;
+    transition: opacity 0.5s ease;
+}
+#splash.active, #loading-screen:not(.hidden) {
+    display: flex !important;
+    z-index: 2000;
 }
 
+.splash-logo {
+    width: 140px;
+    height: 140px;
+    margin-bottom: 32px;
+    animation: pulse 2s infinite;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: linear-gradient(135deg, var(--primary), var(--secondary));
+    border-radius: 50%;
+    color: white;
+    font-weight: bold;
+    font-size: 48px;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+}
+
+.splash-text {
+    font-size: 28px;
+    font-weight: 700;
+    margin-bottom: 40px;
+    background: linear-gradient(90deg, var(--primary), var(--secondary));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.loading-bar {
+    width: 80%;
+    max-width: 300px;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    overflow: hidden;
+    margin: 0 auto;
+}
+
+.loading-progress {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--primary), var(--secondary));
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1); }
+}
+
+/* --- ОСНОВНОЕ ПРИЛОЖЕНИЕ --- */
 body {
-    background: var(--primary-gradient);
-    color: var(--text-color);
+    background: linear-gradient(135deg, var(--dark), var(--darker));
+    color: var(--light);
     min-height: 100vh;
     padding: 20px;
     line-height: 1.6;
+    margin: 0;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    display: none;
+}
+
+body.loaded {
+    display: block;
 }
 
 .container {
@@ -24,197 +106,293 @@ body {
     margin: 0 auto;
 }
 
+/* --- СТИЛИ ПРОФИЛЯ --- */
 .profile-header {
     display: flex;
     align-items: center;
-    margin-bottom: 25px;
-    position: relative;
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.avatar {
+.profile-avatar {
     width: 70px;
     height: 70px;
     border-radius: 50%;
-    background: var(--card-bg);
-    margin-right: 15px;
+    background: linear-gradient(135deg, var(--primary), var(--secondary));
     display: flex;
     align-items: center;
     justify-content: center;
+    font-size: 28px;
+    font-weight: bold;
+    margin-right: 15px;
     overflow: hidden;
+    color: white;
+    text-transform: uppercase;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
 }
 
-.avatar img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-}
-
-#user-name {
-    font-size: 1.8rem;
-    font-weight: 600;
+.profile-info h2 {
+    font-size: 22px;
+    margin-bottom: 5px;
+    display: flex;
+    align-items: center;
 }
 
 .edit-name {
-    position: absolute;
-    top: 10px;
-    right: 0;
+    margin-left: 8px;
     cursor: pointer;
     opacity: 0.7;
+    font-size: 16px;
+    transition: var(--transition);
 }
 
-.stats-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
+.edit-name:hover {
+    opacity: 1;
+}
+
+.profile-stats {
+    display: flex;
     gap: 15px;
-    margin-bottom: 25px;
+    margin-bottom: 20px;
 }
 
 .stat-card {
+    flex: 1;
     background: var(--card-bg);
-    backdrop-filter: blur(10px);
-    border-radius: 15px;
+    border-radius: var(--border-radius);
     padding: 15px;
     text-align: center;
-    transition: transform 0.3s;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    transition: var(--transition);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
 }
 
 .stat-card:hover {
-    transform: translateY(-5px);
+    transform: translateY(-3px);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2);
 }
 
 .stat-value {
-    font-size: 1.5rem;
-    font-weight: 700;
-    margin-bottom: 5px;
+    font-size: 24px;
+    font-weight: bold;
+    color: var(--secondary);
+    margin: 5px 0;
 }
 
-.progress-section {
-    background: var(--card-bg);
-    backdrop-filter: blur(10px);
-    border-radius: 15px;
-    padding: 15px;
-    margin-bottom: 25px;
+.stat-label {
+    font-size: 14px;
+    color: var(--gray);
 }
 
-.progress-label {
-    font-size: 0.9rem;
-    margin-bottom: 8px;
-    opacity: 0.8;
-}
-
-.progress-bar {
-    height: 12px;
-    background: rgba(255, 255, 255, 0.2);
-    border-radius: 6px;
+.xp-progress-container {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 20px;
+    height: 10px;
     overflow: hidden;
+    margin: 15px 0;
 }
 
-.progress-fill {
+.xp-progress {
     height: 100%;
-    background: linear-gradient(90deg, #00c9ff, #92fe9d);
-    border-radius: 6px;
-    width: 0%;
-    transition: width 1.5s ease;
+    background: linear-gradient(90deg, var(--primary), var(--secondary));
+    border-radius: 20px;
+    width: 0;
+    transition: width 1s ease-out;
 }
 
-.checkin-section, .achievements-section {
+.level-info {
+    display: flex;
+    justify-content: space-between;
+    font-size: 14px;
+    color: var(--gray);
+}
+
+.checkin-section {
     background: var(--card-bg);
+    border-radius: var(--border-radius);
+    padding: 15px;
+    margin: 20px 0;
     backdrop-filter: blur(10px);
-    border-radius: 15px;
-    padding: 20px;
-    margin-bottom: 25px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.checkin-title {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+    font-weight: bold;
+    color: var(--light);
 }
 
 .checkin-days {
     display: flex;
-    justify-content: space-between;
-    margin: 15px 0;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 10px;
+    margin: 10px 0;
 }
 
-.day-indicator {
-    width: 36px;
-    height: 36px;
+.checkin-day {
+    width: 40px;
+    height: 40px;
     border-radius: 50%;
+    background: rgba(255, 255, 255, 0.1);
     display: flex;
     align-items: center;
     justify-content: center;
+    flex-shrink: 0;
     font-weight: bold;
-    background: rgba(255, 255, 255, 0.1);
+    border: 2px solid transparent;
+    transition: var(--transition);
+    color: var(--light);
 }
 
-.day-indicator.active {
-    background: #00c9ff;
-    color: #000;
+.checkin-day.active {
+    background: var(--primary);
+    border-color: var(--secondary);
+    color: white;
 }
 
-.day-indicator.completed {
-    background: #92fe9d;
+.checkin-day.completed {
+    background: var(--success);
+    color: white;
 }
 
-.checkin-btn {
-    width: 100%;
-    padding: 12px;
-    background: linear-gradient(90deg, #00c9ff, #92fe9d);
+.checkin-button {
+    background: linear-gradient(90deg, var(--primary), var(--primary-dark));
+    color: white;
     border: none;
-    border-radius: 10px;
-    color: #000;
+    border-radius: 8px;
+    padding: 10px 15px;
     font-weight: bold;
-    font-size: 1.1rem;
+    width: 100%;
+    margin-top: 15px;
     cursor: pointer;
-    transition: opacity 0.3s;
+    transition: var(--transition);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
 }
 
-.checkin-btn:disabled {
-    opacity: 0.6;
+.checkin-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 7px 10px -3px rgba(0, 0, 0, 0.3);
+}
+
+.checkin-button:disabled {
+    background: linear-gradient(90deg, #4b5563, #374151);
     cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+.achievements-section {
+    margin-top: 20px;
+}
+
+.section-title {
+    font-size: 18px;
+    margin: 20px 0 15px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: var(--light);
+}
+
+.achievements-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 15px;
+}
+
+.achievement-card {
+    background: var(--card-bg);
+    border-radius: var(--border-radius);
+    padding: 12px;
+    text-align: center;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    transition: var(--transition);
+    cursor: pointer;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.achievement-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2);
+}
+
+.achievement-card img {
+    width: 60px;
+    height: 60px;
+    object-fit: contain;
+    margin-bottom: 8px;
+    filter: grayscale(100%);
+    opacity: 0.7;
+}
+
+.achievement-card.bronze img {
+    filter: none;
+    opacity: 1;
+    filter: drop-shadow(0 0 5px rgba(209, 160, 59, 0.5));
+}
+
+.achievement-card.silver img {
+    filter: none;
+    opacity: 1;
+    filter: drop-shadow(0 0 5px rgba(192, 192, 192, 0.5));
+}
+
+.achievement-card.gold img {
+    filter: none;
+    opacity: 1;
+    filter: drop-shadow(0 0 8px rgba(255, 215, 0, 0.7));
+}
+
+.badge-name {
+    font-size: 14px;
+    font-weight: 600;
+    margin-top: 4px;
+    color: var(--light);
+    min-height: 20px;
 }
 
 .checkin-status {
     text-align: center;
     margin-top: 10px;
     min-height: 20px;
+    font-size: 14px;
 }
 
-.badges-container {
-    display: flex;
-    gap: 15px;
-    overflow-x: auto;
-    padding: 10px 0;
+.reward-animation {
+    animation: fadeInOut 2s ease;
+    color: var(--success);
+    font-weight: bold;
 }
 
-.badge {
-    min-width: 80px;
-    text-align: center;
+@keyframes fadeInOut {
+    0% { opacity: 0; transform: translateY(5px); }
+    20% { opacity: 1; transform: translateY(0); }
+    80% { opacity: 1; transform: translateY(0); }
+    100% { opacity: 0; transform: translateY(-5px); }
 }
 
-.badge-icon {
-    width: 60px;
-    height: 60px;
-    border-radius: 50%;
-    margin: 0 auto 10px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.5rem;
-}
-
-.badge-name {
-    font-size: 0.85rem;
-    font-weight: 600;
-}
-
-/* Адаптивность для мобильных */
+/* --- АДАПТИВНОСТЬ --- */
 @media (max-width: 480px) {
-    .stats-grid {
-        grid-template-columns: 1fr 1fr 1fr;
-    }
-    
     .profile-header {
         flex-direction: column;
         align-items: flex-start;
     }
     
-    .avatar {
+    .profile-avatar {
         margin: 0 0 15px 0;
+    }
+    
+    .stat-card {
+        padding: 12px;
+    }
+    
+    .stat-value {
+        font-size: 20px;
     }
 }

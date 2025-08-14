@@ -1,4 +1,3 @@
-<!-- templates/index.html -->
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -9,14 +8,26 @@
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
-    <div class="container">
+    <!-- ЗАСТАВКА -->
+    <div id="splash" class="active">
+        <div class="splash-logo">FL</div>
+        <div class="splash-text">Football League</div>
+        <div class="loading-bar">
+            <div class="loading-progress" id="loading-progress"></div>
+        </div>
+    </div>
+
+    <!-- ОСНОВНОЕ ПРИЛОЖЕНИЕ -->
+    <div class="container" id="app-content">
         <div class="profile-header">
-            <div class="avatar" id="user-avatar"></div>
-            <h1 id="user-name">Загрузка...</h1>
-            <div class="edit-name" id="edit-name">✎</div>
+            <div class="profile-avatar" id="user-avatar">AB</div>
+            <div class="profile-info">
+                <h2 id="user-name">Загрузка...</h2>
+                <div class="edit-name" id="edit-name">✎</div>
+            </div>
         </div>
 
-        <div class="stats-grid">
+        <div class="profile-stats">
             <div class="stat-card">
                 <div class="stat-value" id="credits">0</div>
                 <div class="stat-label">Кредиты</div>
@@ -31,26 +42,46 @@
             </div>
         </div>
 
-        <div class="progress-section">
-            <div class="progress-label">Прогресс до следующего уровня</div>
-            <div class="progress-bar">
-                <div class="progress-fill" id="xp-progress"></div>
+        <div class="xp-section">
+            <div class="level-info">
+                <span>Уровень <span id="current-level">1</span></span>
+                <span><span id="current-xp">0</span>/<span id="xp-needed">100</span> XP</span>
+            </div>
+            <div class="xp-progress-container">
+                <div class="xp-progress" id="xp-progress"></div>
             </div>
         </div>
 
         <div class="checkin-section">
-            <h2>Ежедневный чекин</h2>
+            <div class="checkin-title">
+                <span>Ежедневный чекин</span>
+                <span id="streak-days">День <span id="current-streak">1</span></span>
+            </div>
             <div class="checkin-days" id="checkin-days">
                 <!-- Дни цикла будут сгенерированы JS -->
             </div>
-            <button class="checkin-btn" id="checkin-btn">Получить награду</button>
+            <button class="checkin-button" id="checkin-btn">Получить награду</button>
             <div class="checkin-status" id="checkin-status"></div>
         </div>
 
         <div class="achievements-section">
-            <h2>Достижения</h2>
-            <div class="badges-container" id="badges">
-                <!-- Достижения будут сгенерированы JS -->
+            <div class="section-title">
+                <span>Достижения</span>
+                <span>Просмотреть все</span>
+            </div>
+            <div class="achievements-container" id="badges">
+                <div class="achievement-card bronze">
+                    <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiM4ODg4ODgiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIiBjbGFzcz0iZmVhdGhlciBmZWF0aGVyLXRyb2Z5Ij48Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSIxMCIvPjxwb2x5bGluZSBwb2ludHM9IjEyIDYgMTYgMTQgMTIgMTAgOCAxNCAxMiA2Ii8+PC9zdmc+" alt="Бронза">
+                    <div class="badge-name">Бронза</div>
+                </div>
+                <div class="achievement-card silver">
+                    <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiM4ODg4ODgiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIiBjbGFzcz0iZmVhdGhlciBmZWF0aGVyLXRyb2Z5Ij48Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSIxMCIvPjxwb2x5bGluZSBwb2ludHM9IjEyIDYgMTYgMTQgMTIgMTAgOCAxNCAxMiA2Ii8+PC9zdmc+" alt="Серебро">
+                    <div class="badge-name">Серебро</div>
+                </div>
+                <div class="achievement-card">
+                    <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiM4ODg4ODgiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIiBjbGFzcz0iZmVhdGhlciBmZWF0aGVyLXRyb2Z5Ij48Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSIxMCIvPjxwb2x5bGluZSBwb2ludHM9IjEyIDYgMTYgMTQgMTIgMTAgOCAxNCAxMiA2Ii8+PC9zdmc+" alt="Золото">
+                    <div class="badge-name">Золото</div>
+                </div>
             </div>
         </div>
     </div>

@@ -1,6 +1,10 @@
 // static/js/profile.js
 document.addEventListener('DOMContentLoaded', () => {
     const tg = window.Telegram?.WebApp;
+    const splash = document.getElementById('splash');
+    const loadingProgress = document.getElementById('loading-progress');
+    const appContent = document.getElementById('app-content');
+    
     tg.expand();
     
     // Элементы интерфейса
@@ -10,11 +14,46 @@ document.addEventListener('DOMContentLoaded', () => {
         credits: document.getElementById('credits'),
         level: document.getElementById('level'),
         xp: document.getElementById('xp'),
+        currentLevel: document.getElementById('current-level'),
+        currentXp: document.getElementById('current-xp'),
+        xpNeeded: document.getElementById('xp-needed'),
         xpProgress: document.getElementById('xp-progress'),
         checkinDays: document.getElementById('checkin-days'),
         checkinBtn: document.getElementById('checkin-btn'),
-        checkinStatus: document.getElementById('checkin-status')
+        checkinStatus: document.getElementById('checkin-status'),
+        currentStreak: document.getElementById('current-streak')
     };
+
+    // Анимация загрузки
+    function startLoadingAnimation() {
+        let progress = 0;
+        const interval = setInterval(() => {
+            progress += Math.floor(Math.random() * 5) + 1;
+            if (progress >= 95) {
+                progress = 95;
+                clearInterval(interval);
+            }
+            loadingProgress.style.width = `${progress}%`;
+        }, 150);
+        
+        // Гарантированная анимация до 100% за 3 секунды
+        setTimeout(() => {
+            loadingProgress.style.width = '100%';
+            setTimeout(hideSplash, 300);
+        }, 3000);
+        
+        return () => clearInterval(interval);
+    }
+
+    // Скрытие заставки
+    function hideSplash() {
+        splash.classList.remove('active');
+        setTimeout(() => {
+            splash.style.display = 'none';
+            appContent.style.display = 'block';
+            document.body.classList.add('loaded');
+        }, 500);
+    }
 
     // Инициализация приложения
     function initApp() {
@@ -23,15 +62,21 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        fetchUserData();
+        const cancelLoading = startLoadingAnimation();
+        
+        setTimeout(() => {
+            fetchUserData().finally(() => {
+                cancelLoading();
+                hideSplash();
+            });
+        }, 1000); // Минимальное время показа заставки
+        
         setupEventListeners();
     }
 
     // Получение данных пользователя
     function fetchUserData() {
-        showLoading();
-        
-        fetch('/api/user', {
+        return fetch('/api/user', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ user: tg.initDataUnsafe.user })
@@ -44,30 +89,29 @@ document.addEventListener('DOMContentLoaded', () => {
         .catch(error => {
             console.error('Ошибка загрузки данных:', error);
             showError("Не удалось загрузить данные. Проверьте подключение.");
-        })
-        .finally(() => {
-            hideLoading();
         });
     }
 
     // Отображение профиля
     function renderUserProfile(user) {
-        // Аватар
-        const avatar = document.createElement('img');
-        avatar.src = tg.initDataUnsafe.user.photo_url || 'https://via.placeholder.com/70';
-        elements.userAvatar.appendChild(avatar);
+        // Аватар (первая буква имени)
+        const firstName = user.display_name || tg.initDataUnsafe.user.first_name;
+        elements.userAvatar.textContent = firstName.charAt(0).toUpperCase();
         
         // Имя
-        elements.userName.textContent = user.display_name;
+        elements.userName.textContent = firstName;
         
         // Статистика
         elements.credits.textContent = user.credits.toLocaleString();
         elements.level.textContent = user.level;
+        elements.currentLevel.textContent = user.level;
         
         // XP
         const xpForNextLevel = user.level * 100;
         const currentXp = user.xp % xpForNextLevel;
         elements.xp.textContent = `${currentXp}/${xpForNextLevel}`;
+        elements.currentXp.textContent = currentXp;
+        elements.xpNeeded.textContent = xpForNextLevel;
         
         // Прогресс
         const progress = (currentXp / xpForNextLevel) * 100;
@@ -79,10 +123,11 @@ document.addEventListener('DOMContentLoaded', () => {
         // Генерация дней цикла
         elements.checkinDays.innerHTML = '';
         const cycleDay = (user.consecutive_days % 7) || 7;
+        elements.currentStreak.textContent = user.consecutive_days;
         
         for (let i = 1; i <= 7; i++) {
             const dayEl = document.createElement('div');
-            dayEl.className = 'day-indicator';
+            dayEl.className = 'checkin-day';
             dayEl.textContent = i;
             
             if (i < cycleDay) {
@@ -136,14 +181,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Вспомогательные функции
-    function showLoading() {
-        elements.userName.textContent = 'Загрузка...';
-    }
-    
-    function hideLoading() {
-        // Ничего не делаем - данные уже отображены
-    }
-    
     function showError(message) {
         elements.userName.textContent = 'Ошибка';
         elements.checkinStatus.textContent = message;
@@ -171,6 +208,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (newName && newName.trim()) {
                 // Здесь будет запрос на обновление имени
                 elements.userName.textContent = newName;
+                elements.userAvatar.textContent = newName.charAt(0).toUpperCase();
             }
         });
     }
