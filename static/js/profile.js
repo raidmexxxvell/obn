@@ -5,9 +5,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const loadingProgress = document.getElementById('loading-progress');
     const appContent = document.getElementById('app-content');
 
-    // безопасные вызовы Telegram API
-    try { tg?.expand?.(); } catch (e) { console.warn('tg.expand failed', e); }
-    try { tg?.ready?.(); } catch (e) { console.warn('tg.ready failed', e); }
+    // ПРАВИЛЬНАЯ инициализация Telegram WebApp
+    if (tg) {
+        // Устанавливаем обработчик для события готовности
+        tg.ready(); // Сообщаем Telegram, что приложение готово
+        tg.expand(); // Расширяем приложение на весь экран
+    }
 
     const elements = {
         userName: document.getElementById('user-name'),
@@ -236,4 +239,5 @@ document.addEventListener('DOMContentLoaded', () => {
     initApp();
     setupEventListeners();
 });
+
 
