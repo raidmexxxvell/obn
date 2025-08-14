@@ -72,16 +72,24 @@ document.addEventListener('DOMContentLoaded', () => {
         log('After show', after ? { display: after.display, opacity: after.opacity } : undefined);
     } catch (_) {}
 
-    // Настройки ожидания готовности профиля
+    // Настройки ожидания готовности (этапы)
     let progress = 0;
     const intervalTime = 50;
-    const targetHold = 90;           // максимум, до которого растём в ожидании
     const baseMinMs = 800;           // минимальное время показа, мс
-    const maxWaitMs = 8000;          // максимум ожидания профиля, мс
-    const stepWait = 1.5;            // шаг роста, пока ждём (в процентах за тик)
-    const stepFinish = 5;            // ускоренный шаг до 100%, когда всё готово
+    const maxWaitMs = 10000;         // максимум ожидания, мс
+    const stepWait = 1.2;            // базовый шаг
+    const stepFinish = 4.5;          // финальный шаг до 100%
+    // Целевые пороги этапов
+    const stageTargets = {
+        base: 50,
+        profile: 70,
+        data: 90
+    };
+    // Флаги этапов
+    let stageProfileReady = false;   // имя+аватар загружены
+    let stageDataReady = false;      // достижения и таблицы загружены
+    let ready = false;               // финальная готовность
     const t0 = (performance && performance.now) ? performance.now() : Date.now();
-    let ready = false;
     let finished = false;
     info('Timer config', { intervalTime, targetHold, baseMinMs, maxWaitMs, stepWait, stepFinish });
 
@@ -123,10 +131,20 @@ document.addEventListener('DOMContentLoaded', () => {
         // Обеспечиваем минимальную длительность показа
         const minElapsedReached = elapsed >= baseMinMs;
 
+        // Этапное наращивание прогресса
+        let currentTarget = stageTargets.base;
+        if (stageProfileReady) currentTarget = stageTargets.profile;
+        if (stageDataReady) currentTarget = stageTargets.data;
         if (!ready) {
-            progress = Math.min(progress + stepWait, targetHold);
+            // стремимся к текущему целевому порогу
+            if (progress < currentTarget) {
+                progress = Math.min(progress + stepWait, currentTarget);
+            } else {
+                // ждём наступления следующего этапа
+                progress = Math.min(progress + 0.2, currentTarget); // микро-тремор
+            }
         } else {
-            // готовы: ускоряемся до 100
+            // финальный добег до 100%
             progress = Math.min(progress + stepFinish, 100);
         }
 
@@ -148,13 +166,22 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }, intervalTime);
 
-    // Готовность профиля приходит событием
-    const onProfileReady = () => {
-        if (ready) return;
+    // Этапы готовности приходят событиями
+    // 1) Профиль (имя + аватар)
+    window.addEventListener('app:profile-ready', () => {
         info('Received app:profile-ready');
+        stageProfileReady = true;
+    }, { once: true });
+    // 2) Данные (достижения + таблицы)
+    window.addEventListener('app:data-ready', () => {
+        info('Received app:data-ready');
+        stageDataReady = true;
+    }, { once: true });
+    // 3) Финальная готовность (когда всё остальное сделано)
+    window.addEventListener('app:all-ready', () => {
+        info('Received app:all-ready');
         ready = true;
-    };
-    window.addEventListener('app:profile-ready', onProfileReady, { once: true });
+    }, { once: true });
 
     // Если все прошло штатно — чистим аварийный таймер при скрытии
     // Сохраняем аварийный таймер как ранее, но теперь он только форсит готовность

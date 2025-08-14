@@ -19,9 +19,9 @@
 
 /* Логотип */
 .splash-logo-img {
-  width: 120px;
+  width: 170px;
   height: auto;
-  max-width: 40%;
+  max-width: 55%;
   object-fit: contain;
   animation: splashPulse 1.6s ease-in-out infinite;
   will-change: transform, opacity;
@@ -90,6 +90,6 @@ body.loaded #app-content {
 
 /* Небольшая адаптивность */
 @media (max-width: 480px) {
-  .splash-logo-img { width: 90px; }
+  .splash-logo-img { width: 130px; max-width: 65%; }
   .loading-bar { width: 80%; }
 }

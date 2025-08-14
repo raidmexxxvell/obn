@@ -40,6 +40,10 @@ document.addEventListener('DOMContentLoaded', () => {
         // загружаем данные (в dev режиме вернём заглушку)
         setTimeout(() => {
             Promise.all([ fetchUserData(), fetchAchievements() ])
+                .then(() => {
+                    // триггерим готовность данных пользовательских
+                    window.dispatchEvent(new CustomEvent('app:data-ready'));
+                })
                 .catch(err => console.error('Init error', err));
         }, 400); // минимальное время показа
     }
@@ -190,6 +194,9 @@ document.addEventListener('DOMContentLoaded', () => {
             card.append(icon, name, req, progressWrap);
             elements.badgesContainer.appendChild(card);
         });
+    // отметим, что достижения готовы
+    _achLoaded = true;
+    trySignalAllReady();
     }
 
     function handleCheckin() {
@@ -255,6 +262,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else if (tab === 'ufo') {
                     if (prof) prof.style.display = 'none';
                     if (ufo) ufo.style.display = '';
+                    // сразу загружаем таблицу при входе на вкладку НЛО
+                    loadLeagueTable();
                 }
                 // прокрутка к верху при смене вкладки
                 window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -303,14 +312,41 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 tbody.appendChild(tr);
             }
+            // подсветка топ-3 только для строк 2..4, т.к. первая строка — заголовки
+            const trs = tbody.querySelectorAll('tr');
+            trs.forEach((rowEl, idx) => {
+                // idx: 0..9 — если 0 это заголовок, подсвечиваем 1..3
+                if (idx === 1) rowEl.classList.add('rank-1');
+                if (idx === 2) rowEl.classList.add('rank-2');
+                if (idx === 3) rowEl.classList.add('rank-3');
+            });
             if (updated && data.updated_at) {
                 const d = new Date(data.updated_at);
                 updated.textContent = `Обновлено: ${d.toLocaleString()}`;
             }
+            // после первой успешной загрузки таблицы, если достижения уже готовы — можно сигналить all-ready
+            _tableLoaded = true;
+            trySignalAllReady();
         }).catch(err => {
             console.error('league table load error', err);
         });
     }
+
+    let _achLoaded = false;
+    let _tableLoaded = false;
+    function trySignalAllReady() {
+        if (_achLoaded && _tableLoaded) {
+            window.dispatchEvent(new CustomEvent('app:all-ready'));
+        }
+    }
+
+    // загружаем таблицу при первом открытии вкладки НЛО также на всякий случай, если событие клика не перехватили
+    document.addEventListener('click', (e) => {
+        const item = e.target.closest('.nav-item[data-tab="ufo"]');
+        if (item) {
+            loadLeagueTable();
+        }
+    }, { once: true });
 
     // старт
     initApp();
