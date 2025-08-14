@@ -14,7 +14,7 @@
 }
 
 /* --- ЗАСТАВКА (SPLASH) --- */
-#splash, #loading-screen {
+#splash {
     position: fixed;
     top: 0;
     left: 0;
@@ -29,10 +29,6 @@
     z-index: 1000;
     opacity: 1;
     transition: opacity 0.5s ease;
-}
-#splash.active, #loading-screen:not(.hidden) {
-    display: flex !important;
-    z-index: 2000;
 }
 
 .splash-logo {
@@ -119,17 +115,16 @@ body.loaded {
     width: 70px;
     height: 70px;
     border-radius: 50%;
-    background: linear-gradient(135deg, var(--primary), var(--secondary));
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 28px;
-    font-weight: bold;
-    margin-right: 15px;
     overflow: hidden;
-    color: white;
-    text-transform: uppercase;
+    margin-right: 15px;
+    border: 2px solid var(--primary);
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+}
+
+.profile-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
 }
 
 .profile-info h2 {
@@ -145,6 +140,7 @@ body.loaded {
     opacity: 0.7;
     font-size: 16px;
     transition: var(--transition);
+    color: var(--secondary);
 }
 
 .edit-name:hover {
@@ -247,16 +243,31 @@ body.loaded {
     border: 2px solid transparent;
     transition: var(--transition);
     color: var(--light);
+    position: relative;
+}
+
+.checkin-day::after {
+    content: '';
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    background: var(--success);
+    border-radius: 50%;
+    display: none;
+}
+
+.checkin-day.completed::after {
+    display: block;
+}
+
+.checkin-day.completed {
+    background: var(--success);
+    color: white;
 }
 
 .checkin-day.active {
     background: var(--primary);
     border-color: var(--secondary);
-    color: white;
-}
-
-.checkin-day.completed {
-    background: var(--success);
     color: white;
 }
 
@@ -315,6 +326,11 @@ body.loaded {
     transition: var(--transition);
     cursor: pointer;
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    opacity: 0.6;
+}
+
+.achievement-card.unlocked {
+    opacity: 1;
 }
 
 .achievement-card:hover {
@@ -328,24 +344,23 @@ body.loaded {
     object-fit: contain;
     margin-bottom: 8px;
     filter: grayscale(100%);
-    opacity: 0.7;
+    opacity: 0.4;
 }
 
-.achievement-card.bronze img {
+.achievement-card.unlocked img {
     filter: none;
     opacity: 1;
+}
+
+.achievement-card.bronze.unlocked img {
     filter: drop-shadow(0 0 5px rgba(209, 160, 59, 0.5));
 }
 
-.achievement-card.silver img {
-    filter: none;
-    opacity: 1;
+.achievement-card.silver.unlocked img {
     filter: drop-shadow(0 0 5px rgba(192, 192, 192, 0.5));
 }
 
-.achievement-card.gold img {
-    filter: none;
-    opacity: 1;
+.achievement-card.gold.unlocked img {
     filter: drop-shadow(0 0 8px rgba(255, 215, 0, 0.7));
 }
 

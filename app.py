@@ -46,7 +46,7 @@ def initialize_new_user(user_data):
     sheet = get_user_sheet()
     new_row = [
         user_data['id'],
-        user_data['first_name'],
+        user_data.get('first_name', 'User'),
         user_data.get('username', ''),
         '1000',  # credits
         '0',     # xp
@@ -146,6 +146,34 @@ def get_user():
         app.logger.error(f"Ошибка получения пользователя: {str(e)}")
         return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
 
+@app.route('/api/update-name', methods=['POST'])
+def update_name():
+    """Обновляет отображаемое имя пользователя"""
+    try:
+        # Проверка подписи
+        if not verify_telegram_data(request.form):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        
+        user_id = request.form.get('user_id')
+        new_name = request.form.get('new_name')
+        
+        if not user_id or not new_name:
+            return jsonify({'error': 'user_id и new_name обязательны'}), 400
+        
+        row_num = find_user_row(user_id)
+        if not row_num:
+            return jsonify({'error': 'Пользователь не найден'}), 404
+        
+        sheet = get_user_sheet()
+        sheet.update(f'B{row_num}', new_name)
+        sheet.update(f'K{row_num}', datetime.now(timezone.utc).isoformat())
+        
+        return jsonify({'status': 'success', 'display_name': new_name})
+    
+    except Exception as e:
+        app.logger.error(f"Ошибка обновления имени: {str(e)}")
+        return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
+
 @app.route('/api/checkin', methods=['POST'])
 def daily_checkin():
     """Обрабатывает ежедневный чекин"""
@@ -218,6 +246,73 @@ def daily_checkin():
 
     except Exception as e:
         app.logger.error(f"Ошибка чекина: {str(e)}")
+        return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
+
+@app.route('/api/achievements', methods=['POST'])
+def get_achievements():
+    """Получает достижения пользователя"""
+    try:
+        # Проверка подписи
+        if not verify_telegram_data(request.form):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        
+        user_id = request.form.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'user_id обязателен'}), 400
+
+        row_num = find_user_row(user_id)
+        if not row_num:
+            return jsonify({'error': 'Пользователь не найден'}), 404
+
+        sheet = get_user_sheet()
+        row = sheet.row_values(row_num)
+        user = parse_user_data(row)
+        
+        # Определяем текущий уровень достижений
+        achievements = []
+        
+        # Бронза (7 дней)
+        if user['consecutive_days'] >= 7:
+            achievements.append({
+                'tier': 1,
+                'name': 'Бронза',
+                'days': 7,
+                'icon': 'bronze',
+                'unlocked': True
+            })
+        
+        # Серебро (30 дней)
+        if user['consecutive_days'] >= 30:
+            achievements.append({
+                'tier': 2,
+                'name': 'Серебро',
+                'days': 30,
+                'icon': 'silver',
+                'unlocked': True
+            })
+        
+        # Золото (120 дней)
+        if user['consecutive_days'] >= 120:
+            achievements.append({
+                'tier': 3,
+                'name': 'Золото',
+                'days': 120,
+                'icon': 'gold',
+                'unlocked': True
+            })
+        
+        # Если нет достижений, добавляем заглушки
+        if not achievements:
+            achievements = [
+                {'tier': 1, 'name': 'Бронза', 'days': 7, 'icon': 'bronze', 'unlocked': False},
+                {'tier': 2, 'name': 'Серебро', 'days': 30, 'icon': 'silver', 'unlocked': False},
+                {'tier': 3, 'name': 'Золото', 'days': 120, 'icon': 'gold', 'unlocked': False}
+            ]
+        
+        return jsonify({'achievements': achievements})
+    
+    except Exception as e:
+        app.logger.error(f"Ошибка получения достижений: {str(e)}")
         return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
 
 @app.route('/health')
