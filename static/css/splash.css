@@ -3,16 +3,17 @@
 /* Полноэкранная заставка */
 #splash {
   position: fixed;
-  inset: 0;
+  inset: 0; /* top:0; right:0; bottom:0; left:0; */
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 16px;
-  background: #ffffff;
-  color: #222;
+  /* соответствуем теме приложения */
+  background: linear-gradient(135deg, var(--dark, #0f172a), var(--darker, #020617));
+  color: var(--light, #f1f5f9);
   z-index: 9999;
-  transition: opacity 0.45s ease;
+  transition: opacity 0.45s ease, visibility 0.45s ease;
   opacity: 1;
 }
 
@@ -34,7 +35,7 @@
 /* Подпись "Идет загрузка..." */
 .splash-loading-label {
   font-size: 0.9rem;
-  color: #666;
+  color: var(--gray, #94a3b8);
 }
 
 /* Индикатор загрузки */
@@ -42,18 +43,35 @@
   width: 60%;
   max-width: 420px;
   height: 8px;
-  background: rgba(0,0,0,0.06);
+  background: rgba(255,255,255,0.12);
   border-radius: 999px;
   overflow: hidden;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.5);
+  box-shadow: inset 0 1px 0 rgba(0,0,0,0.3);
 }
 
 .loading-progress {
   height: 100%;
   width: 0%;
-  background: linear-gradient(90deg, #4CAF50, #2E8B57);
+  background: linear-gradient(90deg, var(--primary, #1e40af), var(--secondary, #f59e0b));
   border-radius: 999px;
   transition: width 0.15s linear;
+}
+
+/* Когда заставка скрыта (класс .loaded на body) */
+body.loaded #splash {
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+/* Основной контент скрываем по умолчанию (на уровне CSS, на случай если inline style нет) */
+#app-content {
+  display: none;
+}
+
+/* После загрузки показываем контейнер (блокируется script-ом) */
+body.loaded #app-content {
+  display: block;
 }
 
 /* Небольшая адаптивность */

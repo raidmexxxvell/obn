@@ -13,6 +13,8 @@
     --transition: all 0.3s ease;
 }
 
+/* splash-стили перенесены в splash.css */
+
 /* --- ОСНОВНОЕ ПРИЛОЖЕНИЕ --- */
 body {
     background: linear-gradient(135deg, var(--dark), var(--darker));
@@ -22,11 +24,6 @@ body {
     line-height: 1.6;
     margin: 0;
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    display: none;
-}
-
-body.loaded {
-    display: block;
 }
 
 .container {
@@ -336,5 +333,4 @@ body.loaded {
     .stat-value {
         font-size: 20px;
     }
-
 }

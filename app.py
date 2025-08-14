@@ -8,26 +8,36 @@ from datetime import datetime, timedelta, timezone
 from flask import Flask, render_template, request, jsonify
 from urllib.parse import parse_qs
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+from google.oauth2.service_account import Credentials
 
 app = Flask(__name__)
 
 # Настройка Google Sheets
 def get_google_client():
     """Создает клиент для работы с Google Sheets API"""
-    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    creds_data = json.loads(os.environ.get('GOOGLE_SHEETS_CREDENTIALS', '{}'))
+    scopes = [
+        'https://www.googleapis.com/auth/spreadsheets',
+        'https://www.googleapis.com/auth/drive'
+    ]
+    creds_raw = os.environ.get('GOOGLE_SHEETS_CREDENTIALS', '')
+    try:
+        creds_data = json.loads(creds_raw) if creds_raw else {}
+    except Exception:
+        creds_data = {}
     
     if not creds_data:
         raise ValueError("Отсутствуют данные сервисного аккаунта в переменных окружения")
-    
-    credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_data, scope)
+
+    credentials = Credentials.from_service_account_info(creds_data, scopes=scopes)
     return gspread.authorize(credentials)
 
 def get_user_sheet():
     """Получает лист пользователей из Google Sheets"""
     client = get_google_client()
-    sheet = client.open_by_key(os.environ['SHEET_ID'])
+    sheet_id = os.environ.get('SHEET_ID')
+    if not sheet_id:
+        raise ValueError("SHEET_ID не установлен в переменных окружения")
+    sheet = client.open_by_key(sheet_id)
     return sheet.worksheet("users")
 
 # Вспомогательные функции
@@ -54,62 +64,85 @@ def initialize_new_user(user_data):
         '1',     # consecutive_days
         '',      # last_checkin_date
         '0',     # badge_tier
-        '',      # badge_unlocked_at
-        datetime.now(timezone.utc).isoformat(),
-        datetime.now(timezone.utc).isoformat()
+        '',      # badge_unlocked_at (J)
+        datetime.now(timezone.utc).isoformat(),  # created_at (K)
+        datetime.now(timezone.utc).isoformat()   # updated_at (L)
     ]
     sheet.append_row(new_row)
     return new_row
 
+def _to_int(val, default=0):
+    try:
+        return int(val)
+    except Exception:
+        return default
+
 def parse_user_data(row):
     """Преобразует строку таблицы в объект пользователя"""
+    # Гарантируем длину массива значений
+    row = list(row) + [''] * (12 - len(row))
     return {
-        'user_id': int(row[0]),
-        'display_name': row[1],
-        'tg_username': row[2],
-        'credits': int(row[3]),
-        'xp': int(row[4]),
-        'level': int(row[5]),
-        'consecutive_days': int(row[6]),
-        'last_checkin_date': row[7],
-        'badge_tier': int(row[8]),
-        'created_at': row[9],
-        'updated_at': row[10]
+        'user_id': _to_int(row[0]),                # A
+        'display_name': row[1],                    # B
+        'tg_username': row[2],                     # C
+        'credits': _to_int(row[3]),                # D
+        'xp': _to_int(row[4]),                     # E
+        'level': _to_int(row[5], 1),               # F
+        'consecutive_days': _to_int(row[6]),       # G
+        'last_checkin_date': row[7],               # H
+        'badge_tier': _to_int(row[8]),             # I
+        # row[9] = J (badge_unlocked_at) — сейчас в ответ не включаем
+        'created_at': row[10],                     # K
+        'updated_at': row[11]                      # L
     }
-
-def verify_telegram_data(data):
-    """Проверяет подлинность данных от Telegram"""
-    # Токен берется ТОЛЬКО из переменных окружения
+def parse_and_verify_telegram_init_data(init_data: str, max_age_seconds: int = 24*60*60):
+    """Парсит и проверяет initData из Telegram WebApp.
+    Возвращает dict с полями 'user', 'auth_date', 'raw' при успехе, иначе None.
+    """
     bot_token = os.environ.get('BOT_TOKEN')
-    
     if not bot_token:
         raise ValueError("BOT_TOKEN не установлен в переменных окружения")
-    
-    init_data = data.get('initData', '')
-    
-    # Парсим данные
-    parsed_data = parse_qs(init_data)
-    if 'hash' not in parsed_data:
-        return False
-    
-    hash = parsed_data.pop('hash')[0]
-    data_check_string = '\n'.join([f"{key}={value[0]}" for key, value in sorted(parsed_data.items())])
-    
-    # Создаем секретный ключ
-    secret_key = hmac.new(
-        b"WebAppData", 
-        bot_token.encode(), 
-        hashlib.sha256
-    ).digest()
-    
-    # Проверяем подпись
-    calculated_hash = hmac.new(
-        secret_key,
-        data_check_string.encode(),
-        hashlib.sha256
-    ).hexdigest()
-    
-    return calculated_hash == hash
+
+    if not init_data:
+        return None
+
+    parsed = parse_qs(init_data)
+    if 'hash' not in parsed:
+        return None
+
+    received_hash = parsed.pop('hash')[0]
+    # Строка для подписи — все пары (key=value) кроме hash, отсортированные по ключу
+    data_check_string = '\n'.join([f"{k}={v[0]}" for k, v in sorted(parsed.items())])
+
+    # Секретный ключ = HMAC_SHA256("WebAppData", bot_token)
+    secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
+    calculated_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+    if calculated_hash != received_hash:
+        return None
+
+    # Проверка возраста auth_date
+    try:
+        auth_date = int(parsed.get('auth_date', ['0'])[0])
+    except Exception:
+        auth_date = 0
+    if auth_date:
+        now = int(time.time())
+        if now - auth_date > max_age_seconds:
+            return None
+
+    # Парсим user из initData (подписанный JSON)
+    user = None
+    try:
+        if 'user' in parsed:
+            user = json.loads(parsed['user'][0])
+    except Exception:
+        user = None
+
+    return {
+        'user': user,
+        'auth_date': auth_date,
+        'raw': parsed
+    }
 
 # Основные маршруты
 @app.route('/')
@@ -121,27 +154,23 @@ def index():
 def get_user():
     """Получает данные пользователя из Telegram WebApp"""
     try:
-        # Проверка подписи
-        if not verify_telegram_data(request.form):
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
             return jsonify({'error': 'Недействительные данные'}), 401
-        
-        # Извлечение данных пользователя
-        user_data = json.loads(request.form.get('user', '{}'))
-        if not user_data:
-            return jsonify({'error': 'Данные пользователя не переданы'}), 400
+        user_data = parsed['user']
 
         row_num = find_user_row(user_data['id'])
         sheet = get_user_sheet()
-        
+
         if not row_num:
             new_user = initialize_new_user(user_data)
             user = parse_user_data(new_user)
         else:
             row = sheet.row_values(row_num)
             user = parse_user_data(row)
-        
+
         return jsonify(user)
-    
+
     except Exception as e:
         app.logger.error(f"Ошибка получения пользователя: {str(e)}")
         return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
@@ -150,11 +179,10 @@ def get_user():
 def update_name():
     """Обновляет отображаемое имя пользователя"""
     try:
-        # Проверка подписи
-        if not verify_telegram_data(request.form):
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
             return jsonify({'error': 'Недействительные данные'}), 401
-        
-        user_id = request.form.get('user_id')
+        user_id = parsed['user'].get('id')
         new_name = request.form.get('new_name')
         
         if not user_id or not new_name:
@@ -165,8 +193,11 @@ def update_name():
             return jsonify({'error': 'Пользователь не найден'}), 404
         
         sheet = get_user_sheet()
-        sheet.update(f'B{row_num}', new_name)
-        sheet.update(f'K{row_num}', datetime.now(timezone.utc).isoformat())
+        # Обновляем имя (B) и updated_at (L)
+        sheet.batch_update([
+            {'range': f'B{row_num}', 'values': [[new_name]]},
+            {'range': f'L{row_num}', 'values': [[datetime.now(timezone.utc).isoformat()]]}
+        ])
         
         return jsonify({'status': 'success', 'display_name': new_name})
     
@@ -178,13 +209,10 @@ def update_name():
 def daily_checkin():
     """Обрабатывает ежедневный чекин"""
     try:
-        # Проверка подписи
-        if not verify_telegram_data(request.form):
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
             return jsonify({'error': 'Недействительные данные'}), 401
-        
-        user_id = request.form.get('user_id')
-        if not user_id:
-            return jsonify({'error': 'user_id обязателен'}), 400
+        user_id = parsed['user'].get('id')
 
         row_num = find_user_row(user_id)
         if not row_num:
@@ -196,7 +224,10 @@ def daily_checkin():
 
         # Проверка даты чекина
         today = datetime.now(timezone.utc).date()
-        last_checkin = datetime.fromisoformat(user['last_checkin_date']).date() if user['last_checkin_date'] else None
+        try:
+            last_checkin = datetime.fromisoformat(user['last_checkin_date']).date() if user['last_checkin_date'] else None
+        except Exception:
+            last_checkin = None
 
         if last_checkin == today:
             return jsonify({
@@ -228,12 +259,15 @@ def daily_checkin():
             new_level += 1
 
         # Обновление строки
-        sheet.update(f'H{row_num}', today.isoformat())
-        sheet.update(f'G{row_num}', str(new_consecutive))
-        sheet.update(f'E{row_num}', str(new_xp))
-        sheet.update(f'D{row_num}', str(new_credits))
-        sheet.update(f'F{row_num}', str(new_level))
-        sheet.update(f'K{row_num}', datetime.now(timezone.utc).isoformat())
+        # Групповое обновление ячеек одним запросом
+        sheet.batch_update([
+            {'range': f'H{row_num}', 'values': [[today.isoformat()]]},       # last_checkin_date
+            {'range': f'G{row_num}', 'values': [[str(new_consecutive)]]},    # consecutive_days
+            {'range': f'E{row_num}', 'values': [[str(new_xp)]]},             # xp
+            {'range': f'D{row_num}', 'values': [[str(new_credits)]]},        # credits
+            {'range': f'F{row_num}', 'values': [[str(new_level)]]},          # level
+            {'range': f'L{row_num}', 'values': [[datetime.now(timezone.utc).isoformat()]]}  # updated_at
+        ])
 
         return jsonify({
             'status': 'success',
@@ -252,13 +286,10 @@ def daily_checkin():
 def get_achievements():
     """Получает достижения пользователя"""
     try:
-        # Проверка подписи
-        if not verify_telegram_data(request.form):
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
             return jsonify({'error': 'Недействительные данные'}), 401
-        
-        user_id = request.form.get('user_id')
-        if not user_id:
-            return jsonify({'error': 'user_id обязателен'}), 400
+        user_id = parsed['user'].get('id')
 
         row_num = find_user_row(user_id)
         if not row_num:
