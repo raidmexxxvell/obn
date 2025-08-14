@@ -30,11 +30,12 @@ if not DATABASE_URL:
 def _normalize_db_url(url: str) -> str:
     if not url:
         return ''
-    # Render часто даёт postgres:// — SQLAlchemy предпочитает postgresql+psycopg2://
+    # Используем драйвер psycopg (v3), совместимый с Python 3.13
+    # Render часто даёт postgres:// — SQLAlchemy предпочитает postgresql+psycopg://
     if url.startswith('postgres://'):
-        url = 'postgresql+psycopg2://' + url[len('postgres://'):]
-    elif url.startswith('postgresql://') and 'psycopg2' not in url:
-        url = 'postgresql+psycopg2://' + url[len('postgresql://'):]
+        url = 'postgresql+psycopg://' + url[len('postgres://'):]
+    elif url.startswith('postgresql://') and '+psycopg' not in url and '+pg8000' not in url:
+        url = 'postgresql+psycopg://' + url[len('postgresql://'):]
     # Требуем sslmode=require если не указан
     if 'sslmode=' not in url:
         sep = '&' if '?' in url else '?'
