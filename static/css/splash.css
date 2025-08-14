@@ -1,0 +1,56 @@
+/* --- ЗАСТАВКА (SPLASH) --- */
+#splash {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    background: linear-gradient(135deg, var(--dark), var(--darker));
+    z-index: 1000;
+    opacity: 1;
+    transition: opacity 0.7s cubic-bezier(.4,0,.2,1);
+}
+.splash-logo-img {
+    width: 120px;
+    height: 120px;
+    margin-bottom: 32px;
+    object-fit: contain;
+    animation: pulse 2s infinite;
+}
+.splash-text {
+    font-size: 24px;
+    font-weight: 700;
+    margin-bottom: 24px;
+    color: var(--light);
+}
+.loading-bar {
+    width: 80%;
+    max-width: 300px;
+    height: 8px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 8px;
+    overflow: hidden;
+    margin: 0 auto 16px auto;
+}
+.loading-progress {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--primary), var(--secondary));
+    border-radius: 4px;
+    transition: width 0.5s cubic-bezier(.4,0,.2,1);
+}
+.splash-loading-label {
+    font-size: 18px;
+    color: var(--gray);
+    margin-bottom: 8px;
+}
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1); }
+}
