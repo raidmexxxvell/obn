@@ -269,51 +269,48 @@ def get_achievements():
         user = parse_user_data(row)
         
         # Определяем текущий уровень достижений
-        let achievements = [];
+        achievements = []
         
         # Золото (120 дней)
-        if (user['consecutive_days'] >= 120) {
-            achievements.push({
-                tier: 3,
-                name: 'Золото',
-                days: 120,
-                icon: 'gold',
-                unlocked: true
-            });
-        }
+        if user['consecutive_days'] >= 120:
+            achievements.append({
+                'tier': 3,
+                'name': 'Золото',
+                'days': 120,
+                'icon': 'gold',
+                'unlocked': True
+            })
         # Серебро (30 дней)
-        else if (user['consecutive_days'] >= 30) {
-            achievements.push({
-                tier: 2,
-                name: 'Серебро',
-                days: 30,
-                icon: 'silver',
-                unlocked: true
-            });
-        }
+        elif user['consecutive_days'] >= 30:
+            achievements.append({
+                'tier': 2,
+                'name': 'Серебро',
+                'days': 30,
+                'icon': 'silver',
+                'unlocked': True
+            })
         # Бронза (7 дней)
-        else if (user['consecutive_days'] >= 7) {
-            achievements.push({
-                tier: 1,
-                name: 'Бронза',
-                days: 7,
-                icon: 'bronze',
-                unlocked: true
-            });
-        }
+        elif user['consecutive_days'] >= 7:
+            achievements.append({
+                'tier': 1,
+                'name': 'Бронза',
+                'days': 7,
+                'icon': 'bronze',
+                'unlocked': True
+            })
         # Если нет достижений, добавляем заглушку
-        else {
-            achievements.push({
-                tier: 1,
-                name: 'Бронза',
-                days: 7,
-                icon: 'bronze',
-                unlocked: false
-            });
-        }
+        else:
+            achievements.append({
+                'tier': 1,
+                'name': 'Бронза',
+                'days': 7,
+                'icon': 'bronze',
+                'unlocked': False
+            })
         
-        return jsonify({'achievements': achievements});
-    
+
+        return jsonify({'achievements': achievements})
+
     except Exception as e:
         app.logger.error(f"Ошибка получения достижений: {str(e)}")
         return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
