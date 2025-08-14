@@ -72,84 +72,107 @@ document.addEventListener('DOMContentLoaded', () => {
         log('After show', after ? { display: after.display, opacity: after.opacity } : undefined);
     } catch (_) {}
 
+    // Настройки ожидания готовности профиля
     let progress = 0;
-    const duration = 3000; // 3 секунды
     const intervalTime = 50;
-    const step = 100 / (duration / intervalTime);
-    info('Timer config', { duration, intervalTime, step });
+    const targetHold = 90;           // максимум, до которого растём в ожидании
+    const baseMinMs = 800;           // минимальное время показа, мс
+    const maxWaitMs = 8000;          // максимум ожидания профиля, мс
+    const stepWait = 1.5;            // шаг роста, пока ждём (в процентах за тик)
+    const stepFinish = 5;            // ускоренный шаг до 100%, когда всё готово
+    const t0 = (performance && performance.now) ? performance.now() : Date.now();
+    let ready = false;
+    let finished = false;
+    info('Timer config', { intervalTime, targetHold, baseMinMs, maxWaitMs, stepWait, stepFinish });
 
-    // Троттлинг логов прогресса
+    const maybeHide = () => {
+        if (finished) return;
+        finished = true;
+        info('Start fade out');
+        splash.style.opacity = '0';
+        setTimeout(() => {
+            const beforeHide = window.getComputedStyle ? window.getComputedStyle(splash) : null;
+            log('Before hide', beforeHide ? { display: beforeHide.display, opacity: beforeHide.opacity } : undefined);
+
+            splash.style.display = 'none';
+            if (appContent) {
+                appContent.style.display = 'block';
+            }
+            document.body.classList.add('loaded');
+
+            const afterHide = window.getComputedStyle ? window.getComputedStyle(splash) : null;
+            log('After hide', afterHide ? { display: afterHide.display, opacity: afterHide.opacity } : undefined);
+            info('Splash hidden, app-content shown');
+        }, 450);
+    };
+
+    // Логирование прогресса с троттлингом
     let lastLogPct = -10;
     let lastLogTime = 0;
 
     const interval = setInterval(() => {
-        progress += step;
+        const now = (performance && performance.now) ? performance.now() : Date.now();
+        const elapsed = now - t0;
+
+        // Объявляем готовность по таймауту
+        if (!ready && elapsed >= maxWaitMs) {
+            warn('Max wait exceeded -> forcing ready');
+            ready = true;
+        }
+
+        // Обеспечиваем минимальную длительность показа
+        const minElapsedReached = elapsed >= baseMinMs;
+
+        if (!ready) {
+            progress = Math.min(progress + stepWait, targetHold);
+        } else {
+            // готовы: ускоряемся до 100
+            progress = Math.min(progress + stepFinish, 100);
+        }
+
         if (!isFinite(progress)) progress = 100;
         progress = Math.min(Math.max(progress, 0), 100);
-
         if (loadingProgress) loadingProgress.style.width = `${progress}%`;
 
-        const now = performance && performance.now ? performance.now() : Date.now();
         if (progress - lastLogPct >= 10 || now - lastLogTime >= 500) {
-            log('Progress', { progress: Math.round(progress) });
+            log('Progress', { progress: Math.round(progress), elapsed: Math.round(elapsed), ready, minElapsedReached });
             lastLogPct = progress;
             lastLogTime = now;
         }
 
-        if (progress >= 100) {
+        if (progress >= 100 && minElapsedReached) {
             info('Progress complete -> clearing interval');
             clearInterval(interval);
-            // небольшая задержка чтобы анимация дошла до конца
-            setTimeout(() => {
-                info('Start fade out');
-                splash.style.opacity = '0';
-                // переключаем видимость после анимации
-                setTimeout(() => {
-                    const beforeHide = window.getComputedStyle ? window.getComputedStyle(splash) : null;
-                    log('Before hide', beforeHide ? { display: beforeHide.display, opacity: beforeHide.opacity } : undefined);
-
-                    splash.style.display = 'none';
-                    if (appContent) {
-                        appContent.style.display = 'block';
-                    }
-                    document.body.classList.add('loaded');
-
-                    const afterHide = window.getComputedStyle ? window.getComputedStyle(splash) : null;
-                    log('After hide', afterHide ? { display: afterHide.display, opacity: afterHide.opacity } : undefined);
-                    info('Splash hidden, app-content shown');
-                }, 450);
-            }, 200);
+            // небольшая задержка чтобы анимация дошла до конца полосы
+            setTimeout(() => maybeHide(), 200);
         }
     }, intervalTime);
 
-    // Аварийный таймаут: через 7 секунд гарантированно показываем контент
-    const failSafeTimeout = setTimeout(() => {
-        const stillVisible = splash && splash.style.display !== 'none';
-        if (stillVisible) {
-            warn('Fail-safe timeout triggered. Forcing hide splash/show content');
-            try { clearInterval(interval); } catch (_) {}
-            try { splash.style.opacity = '0'; } catch (_) {}
-            try { splash.style.display = 'none'; } catch (_) {}
-            try { if (appContent) appContent.style.display = 'block'; } catch (_) {}
-            try { document.body.classList.add('loaded'); } catch (_) {}
-        } else {
-            log('Fail-safe timeout fired but splash already hidden');
-        }
-    }, 7000);
+    // Готовность профиля приходит событием
+    const onProfileReady = () => {
+        if (ready) return;
+        info('Received app:profile-ready');
+        ready = true;
+    };
+    window.addEventListener('app:profile-ready', onProfileReady, { once: true });
 
     // Если все прошло штатно — чистим аварийный таймер при скрытии
-    const clearFailSafe = () => {
-        try { clearTimeout(failSafeTimeout); } catch (_) {}
-    };
-    // Патчим setTimeout завершения, чтобы зачистить fail-safe в штатном сценарии
-    // (вызовем clearFailSafe в самом конце штатного скрытия)
-    // Т.к. выше мы уже логируем окончание — просто перехватим MutationObserver по display
+    // Сохраняем аварийный таймер как ранее, но теперь он только форсит готовность
+    const failSafeTimeout = setTimeout(() => {
+        if (!ready) {
+            warn('Fail-safe timeout -> set ready');
+            ready = true;
+        } else {
+            log('Fail-safe timeout fired but already ready');
+        }
+    }, maxWaitMs);
+    // Чистим аварийный таймер при скрытии
     try {
         const mo = new MutationObserver(() => {
             if (splash.style.display === 'none') {
-                clearFailSafe();
+                try { clearTimeout(failSafeTimeout); } catch (_) {}
                 mo.disconnect();
-                info('MutationObserver: splash display became none -> fail-safe cleared');
+                info('MutationObserver: splash hidden -> fail-safe cleared');
             }
         });
         mo.observe(splash, { attributes: true, attributeFilter: ['style'] });

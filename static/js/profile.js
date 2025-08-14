@@ -89,10 +89,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderUserProfile(user) {
         if (!user) return;
+        let avatarLoaded = false;
+        const tryDispatchReady = () => {
+            if (!avatarLoaded) return;
+            if (elements.userName && elements.userName.textContent && elements.userName.textContent !== 'Загрузка...') {
+                window.dispatchEvent(new CustomEvent('app:profile-ready'));
+            }
+        };
         if (elements.userAvatarImg && tg?.initDataUnsafe?.user?.photo_url) {
+            elements.userAvatarImg.onload = () => { avatarLoaded = true; tryDispatchReady(); };
+            elements.userAvatarImg.onerror = () => { avatarLoaded = true; tryDispatchReady(); };
             elements.userAvatarImg.src = tg.initDataUnsafe.user.photo_url;
+        } else {
+            avatarLoaded = true;
         }
         if (elements.userName) elements.userName.textContent = user.display_name || 'User';
+        // После установки имени пробуем диспатчить готовность
+        tryDispatchReady();
         if (elements.credits) elements.credits.textContent = (user.credits || 0).toLocaleString();
         if (elements.level) elements.level.textContent = user.level || 1;
 
@@ -102,7 +115,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (elements.xp) elements.xp.textContent = `${currentXp}/${xpForNextLevel}`;
         if (elements.currentXp) elements.currentXp.textContent = currentXp;
         if (elements.xpNeeded) elements.xpNeeded.textContent = xpForNextLevel;
-        if (elements.xpProgress) elements.xpProgress.style.width = `${Math.min(Math.max((xpForNextLevel ? (currentXp / xpForNextLevel) * 100 : 0),0),100)}%`;
+    if (elements.xpProgress) elements.xpProgress.style.width = `${Math.min(Math.max((xpForNextLevel ? (currentXp / xpForNextLevel) * 100 : 0),0),100)}%`;
     }
 
     function renderCheckinSection(user) {
