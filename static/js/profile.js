@@ -30,6 +30,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Управление заставкой вынесено в static/js/splash.js
 
+    // --- Антиспам защиты ---
+    // Делегированный троттлинг кликов по элементам с data-throttle (в миллисекундах)
+    const _clickThrottle = new WeakMap();
+    document.addEventListener('click', (e) => {
+        const el = e.target.closest('[data-throttle]');
+        if (!el) return;
+        const ms = parseInt(el.getAttribute('data-throttle'), 10) || 800;
+        const now = Date.now();
+        const last = _clickThrottle.get(el) || 0;
+        if (now - last < ms) {
+            e.stopPropagation();
+            e.preventDefault();
+            return;
+        }
+        _clickThrottle.set(el, now);
+    }, true);
+
     function initApp() {
         // если tg есть, но в нём нет user — сообщаем об ошибке
         if (tg && !tg.initDataUnsafe?.user) {
@@ -48,6 +65,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 })
                 .catch(err => console.error('Init error', err));
         }, 400); // минимальное время показа
+
+        // Автопинг сервера каждые 5 минут, чтобы не засыпал
+        setInterval(() => {
+            fetch(`/health?_=${Date.now()}`, { cache: 'no-store' }).catch(() => {});
+        }, 5 * 60 * 1000);
     }
 
     function fetchUserData() {
@@ -249,9 +271,13 @@ document.addEventListener('DOMContentLoaded', () => {
     function setupEventListeners() {
         if (elements.checkinBtn) elements.checkinBtn.addEventListener('click', handleCheckin);
         if (elements.editName) { elements.editName.style.cursor='pointer'; elements.editName.addEventListener('click', handleNameChange); }
+        // помечаем элементы для троттлинга кликов
+        if (elements.checkinBtn) elements.checkinBtn.setAttribute('data-throttle', '2000');
+        if (elements.editName) elements.editName.setAttribute('data-throttle', '1500');
         // переключение вкладок
         const navItems = document.querySelectorAll('.nav-item');
         navItems.forEach(item => {
+            item.setAttribute('data-throttle', '600');
             item.addEventListener('click', () => {
                 const tab = item.getAttribute('data-tab');
                 document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -281,6 +307,7 @@ document.addEventListener('DOMContentLoaded', () => {
             results: document.getElementById('ufo-results'),
         };
         subtabItems.forEach(btn => {
+            btn.setAttribute('data-throttle', '600');
             btn.addEventListener('click', () => {
                 const key = btn.getAttribute('data-subtab');
                 subtabItems.forEach(b => b.classList.remove('active'));
@@ -298,10 +325,13 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    let _leagueLoading = false;
     function loadLeagueTable() {
+        if (_leagueLoading) return;
         const table = document.getElementById('league-table');
         const updated = document.getElementById('league-table-updated');
         if (!table) return;
+        _leagueLoading = true;
         fetch('/api/league-table').then(r => r.json()).then(data => {
             const tbody = table.querySelector('tbody');
             tbody.innerHTML = '';
@@ -337,13 +367,17 @@ document.addEventListener('DOMContentLoaded', () => {
             // не блокируем сплэш: считаем таблицу загруженной даже при ошибке
             _tableLoaded = true;
             trySignalAllReady();
+            _leagueLoading = false;
         });
     }
 
+    let _statsLoading = false;
     function loadStatsTable() {
+        if (_statsLoading) return;
         const table = document.getElementById('stats-table');
         const updated = document.getElementById('stats-table-updated');
         if (!table) return;
+        _statsLoading = true;
         fetch('/api/stats-table').then(r => r.json()).then(data => {
             const tbody = table.querySelector('tbody');
             tbody.innerHTML = '';
@@ -369,9 +403,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 const d = new Date(data.updated_at);
                 updated.textContent = `Обновлено: ${d.toLocaleString()}`;
             }
-        }).catch(err => {
+    }).catch(err => {
             console.error('stats table load error', err);
-        });
+    }).finally(() => { _statsLoading = false; });
     }
 
     let _achLoaded = false;
