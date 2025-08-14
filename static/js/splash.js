@@ -67,6 +67,10 @@ document.addEventListener('DOMContentLoaded', () => {
     splash.style.opacity = '1';
     splash.style.display = 'flex';
     if (appContent) appContent.style.display = 'none';
+    // мгновенно сдвинем прогресс с 0 чтобы избежать визуального залипания
+    try {
+        if (loadingProgress) loadingProgress.style.width = '1%';
+    } catch (_) {}
     try {
         const after = window.getComputedStyle ? window.getComputedStyle(splash) : null;
         log('After show', after ? { display: after.display, opacity: after.opacity } : undefined);
@@ -91,7 +95,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let ready = false;               // финальная готовность
     const t0 = (performance && performance.now) ? performance.now() : Date.now();
     let finished = false;
-    info('Timer config', { intervalTime, targetHold, baseMinMs, maxWaitMs, stepWait, stepFinish });
+    info('Timer config', { intervalTime, baseMinMs, maxWaitMs, stepWait, stepFinish });
 
     const maybeHide = () => {
         if (finished) return;
@@ -148,7 +152,7 @@ document.addEventListener('DOMContentLoaded', () => {
             progress = Math.min(progress + stepFinish, 100);
         }
 
-        if (!isFinite(progress)) progress = 100;
+    if (!isFinite(progress)) progress = 100;
         progress = Math.min(Math.max(progress, 0), 100);
         if (loadingProgress) loadingProgress.style.width = `${progress}%`;
 
@@ -165,6 +169,14 @@ document.addEventListener('DOMContentLoaded', () => {
             setTimeout(() => maybeHide(), 200);
         }
     }, intervalTime);
+
+    // страховочный kickstart: если через 400мс прогресс всё ещё 0 — принудительно поставить 5%
+    setTimeout(() => {
+        try {
+            const cur = parseFloat((loadingProgress?.style?.width || '0').replace('%','')) || 0;
+            if (cur <= 0.1 && loadingProgress) loadingProgress.style.width = '5%';
+        } catch (_) {}
+    }, 400);
 
     // Этапы готовности приходят событиями
     // 1) Профиль (имя + аватар)

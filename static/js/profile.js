@@ -39,10 +39,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // загружаем данные (в dev режиме вернём заглушку)
         setTimeout(() => {
-            Promise.all([ fetchUserData(), fetchAchievements() ])
+            Promise.allSettled([ fetchUserData(), fetchAchievements() ])
                 .then(() => {
-                    // триггерим готовность данных пользовательских
+                    // триггерим готовность пользовательских данных независимо от исхода
                     window.dispatchEvent(new CustomEvent('app:data-ready'));
+                    // параллельно загружаем таблицу (фон), чтобы закрыть splash без навигации
+                    loadLeagueTable();
                 })
                 .catch(err => console.error('Init error', err));
         }, 400); // минимальное время показа
@@ -329,6 +331,10 @@ document.addEventListener('DOMContentLoaded', () => {
             trySignalAllReady();
         }).catch(err => {
             console.error('league table load error', err);
+        }).finally(() => {
+            // не блокируем сплэш: считаем таблицу загруженной даже при ошибке
+            _tableLoaded = true;
+            trySignalAllReady();
         });
     }
 
