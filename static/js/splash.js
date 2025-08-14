@@ -11,7 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (appContent) appContent.style.display = 'none';
 });
 
-// Экспортируем функцию скрытия заставки для использования в profile.js
+// Экспортируем функцию скрытия заставки
 window.hideSplash = function() {
     const splash = document.getElementById('splash');
     const appContent = document.getElementById('app-content');
