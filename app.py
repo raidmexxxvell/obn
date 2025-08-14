@@ -66,7 +66,7 @@ OWNER_ID = int(os.getenv("OWNER_TELEGRAM_ID", "0")) or None
 if not OWNER_ID:
     raise RuntimeError("OWNER_TELEGRAM_ID required")
 
-RENDER_URL = os.getenv("RENDER_URL", "https://football-league-app.onrender.com").rstrip('/')
+RENDER_URL = os.getenv("RENDER_URL", "https://obn.onrender.com").rstrip('/')
 WEBHOOK_URL = f"{RENDER_URL}/{TOKEN}"
 MINIAPP_URL = f"{RENDER_URL}/miniapp"
 
@@ -2458,4 +2458,5 @@ def miniapp_support():
 # --- Run ---
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "8000"))
+
     app.run(host="0.0.0.0", port=port)
