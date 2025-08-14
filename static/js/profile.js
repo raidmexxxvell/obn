@@ -29,24 +29,21 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     function startLoadingAnimation() {
-        if (!loadingProgress) return () => {};
-        let progress = 0;
-        const interval = setInterval(() => {
-            progress += Math.floor(Math.random() * 5) + 1;
-            if (progress >= 95) {
-                progress = 95;
-                clearInterval(interval);
-            }
-            loadingProgress.style.width = `${progress}%`;
-        }, 150);
+    if (!loadingProgress) return () => {};
+    let progress = 0;
+    const interval = setInterval(() => {
+        progress += Math.floor(Math.random() * 5) + 1;
+        if (progress >= 95) {
+            progress = 95;
+        }
+        loadingProgress.style.width = `${progress}%`;
+    }, 150);
 
-        const timeout = setTimeout(() => {
-            if (loadingProgress) loadingProgress.style.width = '100%';
-            setTimeout(hideSplash, 300);
-        }, 2000);
-
-        return () => { clearInterval(interval); clearTimeout(timeout); };
-    }
+    return () => { 
+        clearInterval(interval); 
+        if (loadingProgress) loadingProgress.style.width = '100%';
+    };
+}
 
     function hideSplash() {
         if (splash) splash.style.opacity = '0';
@@ -247,3 +244,4 @@ document.addEventListener('DOMContentLoaded', () => {
     initApp();
     setupEventListeners();
 });
+
