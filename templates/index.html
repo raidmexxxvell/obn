@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Football League</title>
-    <!-- ИСПРАВЛЕНО: Убраны лишние пробелы в URL Telegram WebApp SDK -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="stylesheet" href="/static/css/splash.css">
@@ -21,8 +20,7 @@
     </div>
 
     <!-- ОСНОВНОЕ ПРИЛОЖЕНИЕ -->
-    <!-- Скрываем по умолчанию (чтобы не было мигания) -->
-    <div class="container" id="app-content" style="display:none;">
+    <div class="container" id="app-content">
         <div class="profile-header">
             <div class="profile-avatar" id="user-avatar">
                 <img src="" alt="Аватар">
@@ -77,7 +75,7 @@
             <div class="achievements-container" id="badges">
                 <!-- Достижение будет загружено через API -->
                 <div class="achievement-card locked" id="achievement-placeholder">
-                    <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiM4ODg4ODgiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIiBjbGFzcz0iZmVhdGhlciBmZWF0aGVyLXRyb2Z5Ij48Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSIxMCIvPjxwb2x5bGluZSBwb2ludHM9IjEyIDYgMTYgMTQgMTIgMTAgOCAxNCAxMiA2Ii8+PC9zdmc+" alt="Достижение">
+                    <img src="image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiM4ODg4ODgiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIiBjbGFzcz0iZmVhdGhlciBmZWF0aGVyLXRyb2Z5Ij48Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSIxMCIvPjxwb2x5bGluZSBwb2ludHM9IjEyIDYgMTYgMTQgMTIgMTAgOCAxNCAxMiA2Ii8+PC9zdmc+" alt="Достижение">
                     <div class="badge-name">Бронза</div>
                     <div class="badge-requirements">7 дней подряд</div>
                 </div>
