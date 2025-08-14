@@ -2,18 +2,18 @@
 
 /* Полноэкранная заставка */
 #splash {
-  position: fixed;
-  inset: 0; /* top:0; right:0; bottom:0; left:0; */
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  background: #ffffff; /* явно белый фон — чтобы не было серого экрана */
-  color: #222;
-  z-index: 9999;
-  transition: opacity 0.45s ease, visibility 0.45s ease;
-  opacity: 1;
+  position: fixed !important;
+  inset: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 16px !important;
+  background: #ffffff !important; /* белый фон */
+  color: #222 !important;
+  z-index: 10000 !important; /* ДОБАВЛЕНО !important и увеличен z-index */
+  transition: opacity 0.45s ease !important;
+  opacity: 1 !important;
 }
 
 /* Логотип */
@@ -78,3 +78,4 @@ body.loaded #app-content {
   .splash-logo-img { width: 90px; }
   .loading-bar { width: 80%; }
 }
+
