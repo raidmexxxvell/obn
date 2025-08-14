@@ -24,7 +24,8 @@ document.addEventListener('DOMContentLoaded', () => {
         checkinBtn: document.getElementById('checkin-btn'),
         checkinStatus: document.getElementById('checkin-status'),
         currentStreak: document.getElementById('current-streak'),
-        badgesContainer: document.getElementById('badges')
+        badgesContainer: document.getElementById('badges'),
+        achievementPlaceholder: document.getElementById('achievement-placeholder')
     };
 
     // Анимация загрузки
@@ -71,7 +72,9 @@ document.addEventListener('DOMContentLoaded', () => {
             Promise.all([
                 fetchUserData(),
                 fetchAchievements()
-            ]).finally(() => {
+            ]).catch(error => {
+                console.error('Ошибка при инициализации:', error);
+            }).finally(() => {
                 cancelLoading();
                 hideSplash();
             });
@@ -93,7 +96,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (response.status === 401) {
                 showError("Ошибка авторизации. Перезапустите приложение.");
                 tg.close();
-                return Promise.reject(new Error("Unauthorized"));
+                throw new Error("Unauthorized");
             }
             return response.json();
         })
@@ -131,13 +134,15 @@ document.addEventListener('DOMContentLoaded', () => {
         })
         .catch(error => {
             console.error('Ошибка загрузки достижений:', error);
-            // Создаем заглушки для достижений
-            const stubs = [
-                {tier: 1, name: 'Бронза', days: 7, icon: 'bronze', unlocked: false},
-                {tier: 2, name: 'Серебро', days: 30, icon: 'silver', unlocked: false},
-                {tier: 3, name: 'Золото', days: 120, icon: 'gold', unlocked: false}
-            ];
-            renderAchievements(stubs);
+            // Создаем заглушку для достижений
+            const stub = {
+                tier: 1,
+                name: 'Бронза',
+                days: 7,
+                icon: 'bronze',
+                unlocked: false
+            };
+            renderAchievements([stub]);
         });
     }
 
@@ -148,7 +153,7 @@ document.addEventListener('DOMContentLoaded', () => {
             elements.userAvatarImg.src = tg.initDataUnsafe.user.photo_url;
         } else {
             // Заглушка если нет фото
-            elements.userAvatarImg.src = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI3MCIgaGVpZ2h0PSI3MCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiMxZTQwYWYiIHN0cm9rZS13aWR0aD0iMSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIiBjbGFzcz0iZmVhdGhlciBmZWF0aGVyLWNpcmNsZSI+PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI3MCIgaGVpZ2h0PSI3MCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiMxZTQwYWYiIHN0cm9rZS13aWR0aD0iMSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIiBjbGFzcz0iZmVhdGhlciBmZWF0aGVyLWNpcmNsZSI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiLz48cGF0aCBkPSJNMTIgMTRhMiAyIDAgMSwwIDAgNEgyYTIgMiAwIDAsMCAwLTRoOGEyIDIgMCAwLDAgMCw0eiIvPjxwYXRoIGQ9Ik0xMiAxOGgxLjJhNCA0IDAgMSwwIDAtOCAwIDQgMCAwLDAgMCw4eiIvPjwvc3ZnPg==';
+            elements.userAvatarImg.src = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI3MCIgaGVpZ2h0PSI3MCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiMxZTQwYWYiIHN0cm9rZS13aWR0aD0iMSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIiBjbGFzcz0iZmVhdGhlciBmZWF0aGVyLWNpcmNsZSI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiLz48cGF0aCBkPSJNMTIgMTRhMiAyIDAgMSwwIDAgNEgyYTIgMiAwIDAsMCAwLTRoOGEyIDIgMCAwLDAgMCw0eiIvPjxwYXRoIGQ9Ik0xMiAxOGgxLjJhNCA0IDAgMSwwIDAtOCAwIDQgMCAwLDAgMCw4eiIvPjwvc3ZnPg==';
         }
         
         // Имя
@@ -207,11 +212,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Отображение достижений
     function renderAchievements(achievements) {
-        elements.badgesContainer.innerHTML = '';
+        // Удаляем заглушку
+        if (elements.achievementPlaceholder) {
+            elements.achievementPlaceholder.remove();
+        }
         
-        achievements.forEach(achievement => {
+        // Добавляем достижение
+        if (achievements && achievements.length > 0) {
+            const achievement = achievements[0];
+            
             const card = document.createElement('div');
-            card.className = `achievement-card ${achievement.icon} ${achievement.unlocked ? 'unlocked' : ''}`;
+            card.className = `achievement-card ${achievement.unlocked ? '' : 'locked'}`;
             
             // Иконка достижения
             const icon = document.createElement('img');
@@ -223,10 +234,16 @@ document.addEventListener('DOMContentLoaded', () => {
             name.className = 'badge-name';
             name.textContent = achievement.name;
             
+            // Требования
+            const requirements = document.createElement('div');
+            requirements.className = 'badge-requirements';
+            requirements.textContent = `${achievement.days} дней подряд`;
+            
             card.appendChild(icon);
             card.appendChild(name);
+            card.appendChild(requirements);
             elements.badgesContainer.appendChild(card);
-        });
+        }
     }
 
     // Обработка чекина
@@ -309,18 +326,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Вспомогательные функции
     function showError(message) {
-        elements.userName.textContent = 'Ошибка';
         elements.checkinStatus.textContent = message;
+        elements.checkinStatus.style.color = 'var(--danger)';
+        
+        setTimeout(() => {
+            elements.checkinStatus.textContent = '';
+            elements.checkinStatus.style.color = 'var(--light)';
+        }, 3000);
     }
     
     function showSuccessMessage(message) {
-        const statusEl = elements.checkinStatus;
-        statusEl.textContent = message;
-        statusEl.style.color = 'var(--success)';
+        elements.checkinStatus.textContent = message;
+        elements.checkinStatus.style.color = 'var(--success)';
         
         setTimeout(() => {
-            statusEl.textContent = '';
-            statusEl.style.color = 'var(--light)';
+            elements.checkinStatus.textContent = '';
+            elements.checkinStatus.style.color = 'var(--light)';
         }, 2000);
     }
     
@@ -338,12 +359,29 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function setupEventListeners() {
-        elements.checkinBtn.addEventListener('click', handleCheckin);
-        
-        // Редактирование имени
-        document.getElementById('edit-name').addEventListener('click', handleNameChange);
+        // Убедимся, что элементы загружены
+        setTimeout(() => {
+            elements.checkinBtn = document.getElementById('checkin-btn');
+            elements.editName = document.getElementById('edit-name');
+            
+            if (elements.checkinBtn) {
+                elements.checkinBtn.addEventListener('click', handleCheckin);
+            }
+            
+            if (elements.editName) {
+                elements.editName.addEventListener('click', handleNameChange);
+                elements.editName.style.cursor = 'pointer';
+            }
+        }, 500);
     }
 
     // Запуск приложения
     initApp();
+    
+    // Дополнительная проверка для редактирования имени
+    document.addEventListener('click', (e) => {
+        if (e.target.closest('#edit-name')) {
+            console.log('Edit name clicked');
+        }
+    });
 });

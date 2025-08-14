@@ -268,48 +268,51 @@ def get_achievements():
         row = sheet.row_values(row_num)
         user = parse_user_data(row)
         
-        # Определяем текущий уровень достижений
-        achievements = []
+        // Определяем текущий уровень достижений
+        let achievements = [];
         
-        # Бронза (7 дней)
-        if user['consecutive_days'] >= 7:
-            achievements.append({
-                'tier': 1,
-                'name': 'Бронза',
-                'days': 7,
-                'icon': 'bronze',
-                'unlocked': True
-            })
+        // Золото (120 дней)
+        if (user['consecutive_days'] >= 120) {
+            achievements.push({
+                tier: 3,
+                name: 'Золото',
+                days: 120,
+                icon: 'gold',
+                unlocked: true
+            });
+        }
+        // Серебро (30 дней)
+        else if (user['consecutive_days'] >= 30) {
+            achievements.push({
+                tier: 2,
+                name: 'Серебро',
+                days: 30,
+                icon: 'silver',
+                unlocked: true
+            });
+        }
+        // Бронза (7 дней)
+        else if (user['consecutive_days'] >= 7) {
+            achievements.push({
+                tier: 1,
+                name: 'Бронза',
+                days: 7,
+                icon: 'bronze',
+                unlocked: true
+            });
+        }
+        // Если нет достижений, добавляем заглушку
+        else {
+            achievements.push({
+                tier: 1,
+                name: 'Бронза',
+                days: 7,
+                icon: 'bronze',
+                unlocked: false
+            });
+        }
         
-        # Серебро (30 дней)
-        if user['consecutive_days'] >= 30:
-            achievements.append({
-                'tier': 2,
-                'name': 'Серебро',
-                'days': 30,
-                'icon': 'silver',
-                'unlocked': True
-            })
-        
-        # Золото (120 дней)
-        if user['consecutive_days'] >= 120:
-            achievements.append({
-                'tier': 3,
-                'name': 'Золото',
-                'days': 120,
-                'icon': 'gold',
-                'unlocked': True
-            })
-        
-        # Если нет достижений, добавляем заглушки
-        if not achievements:
-            achievements = [
-                {'tier': 1, 'name': 'Бронза', 'days': 7, 'icon': 'bronze', 'unlocked': False},
-                {'tier': 2, 'name': 'Серебро', 'days': 30, 'icon': 'silver', 'unlocked': False},
-                {'tier': 3, 'name': 'Золото', 'days': 120, 'icon': 'gold', 'unlocked': False}
-            ]
-        
-        return jsonify({'achievements': achievements})
+        return jsonify({'achievements': achievements});
     
     except Exception as e:
         app.logger.error(f"Ошибка получения достижений: {str(e)}")

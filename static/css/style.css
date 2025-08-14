@@ -127,24 +127,31 @@ body.loaded {
     object-fit: cover;
 }
 
-.profile-info h2 {
-    font-size: 22px;
-    margin-bottom: 5px;
+.profile-info {
     display: flex;
     align-items: center;
 }
 
+.profile-info h2 {
+    font-size: 22px;
+    margin-bottom: 0;
+    margin-right: 8px;
+}
+
 .edit-name {
-    margin-left: 8px;
     cursor: pointer;
     opacity: 0.7;
     font-size: 16px;
     transition: var(--transition);
     color: var(--secondary);
+    padding: 2px 6px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.1);
 }
 
 .edit-name:hover {
     opacity: 1;
+    background: rgba(255, 255, 255, 0.2);
 }
 
 .profile-stats {
@@ -244,16 +251,15 @@ body.loaded {
     transition: var(--transition);
     color: var(--light);
     position: relative;
+    font-size: 16px;
 }
 
 .checkin-day::after {
-    content: '';
+    content: '✓';
     position: absolute;
-    width: 18px;
-    height: 18px;
-    background: var(--success);
-    border-radius: 50%;
+    font-size: 14px;
     display: none;
+    color: white;
 }
 
 .checkin-day.completed::after {
@@ -262,7 +268,7 @@ body.loaded {
 
 .checkin-day.completed {
     background: var(--success);
-    color: white;
+    color: rgba(255, 255, 255, 0.5);
 }
 
 .checkin-day.active {
@@ -311,9 +317,10 @@ body.loaded {
 }
 
 .achievements-container {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    display: flex;
     gap: 15px;
+    overflow-x: auto;
+    padding-bottom: 10px;
 }
 
 .achievement-card {
@@ -321,21 +328,17 @@ body.loaded {
     border-radius: var(--border-radius);
     padding: 12px;
     text-align: center;
+    min-width: 150px;
     backdrop-filter: blur(10px);
     border: 1px solid rgba(255, 255, 255, 0.1);
     transition: var(--transition);
     cursor: pointer;
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-    opacity: 0.6;
 }
 
-.achievement-card.unlocked {
-    opacity: 1;
-}
-
-.achievement-card:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2);
+.achievement-card.locked {
+    opacity: 0.4;
+    cursor: default;
 }
 
 .achievement-card img {
@@ -343,25 +346,11 @@ body.loaded {
     height: 60px;
     object-fit: contain;
     margin-bottom: 8px;
+}
+
+.achievement-card.locked img {
     filter: grayscale(100%);
-    opacity: 0.4;
-}
-
-.achievement-card.unlocked img {
-    filter: none;
-    opacity: 1;
-}
-
-.achievement-card.bronze.unlocked img {
-    filter: drop-shadow(0 0 5px rgba(209, 160, 59, 0.5));
-}
-
-.achievement-card.silver.unlocked img {
-    filter: drop-shadow(0 0 5px rgba(192, 192, 192, 0.5));
-}
-
-.achievement-card.gold.unlocked img {
-    filter: drop-shadow(0 0 8px rgba(255, 215, 0, 0.7));
+    opacity: 0.5;
 }
 
 .badge-name {
@@ -369,7 +358,12 @@ body.loaded {
     font-weight: 600;
     margin-top: 4px;
     color: var(--light);
-    min-height: 20px;
+}
+
+.badge-requirements {
+    font-size: 12px;
+    color: var(--gray);
+    margin-top: 2px;
 }
 
 .checkin-status {
