@@ -58,7 +58,7 @@ class User(Base):
     credits = Column(Integer, default=1000)
     xp = Column(Integer, default=0)
     level = Column(Integer, default=1)
-    consecutive_days = Column(Integer, default=1)
+    consecutive_days = Column(Integer, default=0)
     last_checkin_date = Column(Date, nullable=True)
     badge_tier = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
@@ -331,7 +331,7 @@ def get_user():
                 # инициализация в листе
                 new_row = [
                     user_data['id'], user_data.get('first_name', 'User'), user_data.get('username', ''),
-                    '1000','0','1','1','', '0','', datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat()
+                    '1000','0','1','0','', '0','', datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat()
                 ]
                 sheet.append_row(new_row)
                 row = new_row
@@ -360,15 +360,42 @@ def get_user():
             db_user = db.get(User, int(user_data['id']))
             now = datetime.now(timezone.utc)
             if not db_user:
+                # Попробуем взять стартовые данные из Google Sheets, если пользователь уже есть там
+                seed = {
+                    'display_name': user_data.get('first_name') or 'User',
+                    'tg_username': user_data.get('username') or '',
+                    'credits': 1000,
+                    'xp': 0,
+                    'level': 1,
+                    'consecutive_days': 0,
+                    'last_checkin_date': None,
+                }
+                try:
+                    row_num = find_user_row(user_data['id'])
+                    if row_num:
+                        sheet = get_user_sheet()
+                        row = sheet.row_values(row_num)
+                        row = list(row) + [''] * (12 - len(row))
+                        seed.update({
+                            'display_name': row[1] or seed['display_name'],
+                            'tg_username': row[2] or seed['tg_username'],
+                            'credits': _to_int(row[3], seed['credits']),
+                            'xp': _to_int(row[4], seed['xp']),
+                            'level': _to_int(row[5], seed['level']),
+                            'consecutive_days': _to_int(row[6], seed['consecutive_days']),
+                            'last_checkin_date': (datetime.fromisoformat(row[7]).date() if row[7] else None)
+                        })
+                except Exception as e:
+                    app.logger.warning(f"Seed from sheets failed: {e}")
                 db_user = User(
                     user_id=int(user_data['id']),
-                    display_name=user_data.get('first_name') or 'User',
-                    tg_username=user_data.get('username') or '',
-                    credits=1000,
-                    xp=0,
-                    level=1,
-                    consecutive_days=1,
-                    last_checkin_date=None,
+                    display_name=seed['display_name'],
+                    tg_username=seed['tg_username'],
+                    credits=seed['credits'],
+                    xp=seed['xp'],
+                    level=seed['level'],
+                    consecutive_days=seed['consecutive_days'],
+                    last_checkin_date=seed['last_checkin_date'],
                     badge_tier=0,
                     created_at=now,
                     updated_at=now,
