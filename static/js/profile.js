@@ -168,7 +168,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (a.icon === 'gold') {
             icon.src = '/static/img/achievements/gold.png';
         } else {
-            icon.src = a.icon ? `data:image/svg+xml;base64,PHN2...` : '';
+            icon.src = a.icon ? `image/svg+xml;base64,PHN2...` : '';
         }
         icon.alt = a.name || 'badge';
         const name = document.createElement('div'); name.className='badge-name'; name.textContent = a.name;
