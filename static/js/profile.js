@@ -6,6 +6,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const appContent = document.getElementById('app-content');
     
     tg.expand();
+    tg.ready();
     
     // Элементы интерфейса
     const elements = {
@@ -76,12 +77,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Получение данных пользователя
     function fetchUserData() {
+        // Подготовка данных для отправки
+        const formData = new FormData();
+        formData.append('initData', tg.initData);
+        formData.append('user', JSON.stringify(tg.initDataUnsafe.user));
+
         return fetch('/api/user', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user: tg.initDataUnsafe.user })
+            body: formData
         })
-        .then(response => response.json())
+        .then(response => {
+            if (response.status === 401) {
+                showError("Ошибка авторизации. Перезапустите приложение.");
+                tg.close();
+                return Promise.reject(new Error("Unauthorized"));
+            }
+            return response.json();
+        })
         .then(data => {
             renderUserProfile(data);
             renderCheckinSection(data);
@@ -89,6 +101,7 @@ document.addEventListener('DOMContentLoaded', () => {
         .catch(error => {
             console.error('Ошибка загрузки данных:', error);
             showError("Не удалось загрузить данные. Проверьте подключение.");
+            throw error;
         });
     }
 
@@ -157,12 +170,23 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.checkinBtn.disabled = true;
         elements.checkinStatus.textContent = 'Обработка...';
         
+        // Подготовка данных для отправки
+        const formData = new FormData();
+        formData.append('initData', tg.initData);
+        formData.append('user_id', tg.initDataUnsafe.user.id);
+
         fetch('/api/checkin', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_id: tg.initDataUnsafe.user.id })
+            body: formData
         })
-        .then(response => response.json())
+        .then(response => {
+            if (response.status === 401) {
+                showError("Ошибка авторизации. Перезапустите приложение.");
+                tg.close();
+                return;
+            }
+            return response.json();
+        })
         .then(data => {
             if (data.status === 'already_checked') {
                 elements.checkinStatus.textContent = '✅ Награда получена сегодня';

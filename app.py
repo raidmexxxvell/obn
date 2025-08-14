@@ -2,8 +2,11 @@
 import os
 import json
 import time
+import hmac
+import hashlib
 from datetime import datetime, timedelta, timezone
 from flask import Flask, render_template, request, jsonify
+from urllib.parse import parse_qs
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
@@ -74,6 +77,40 @@ def parse_user_data(row):
         'updated_at': row[10]
     }
 
+def verify_telegram_data(data):
+    """Проверяет подлинность данных от Telegram"""
+    # Токен берется ТОЛЬКО из переменных окружения
+    bot_token = os.environ.get('BOT_TOKEN')
+    
+    if not bot_token:
+        raise ValueError("BOT_TOKEN не установлен в переменных окружения")
+    
+    init_data = data.get('initData', '')
+    
+    # Парсим данные
+    parsed_data = parse_qs(init_data)
+    if 'hash' not in parsed_data:
+        return False
+    
+    hash = parsed_data.pop('hash')[0]
+    data_check_string = '\n'.join([f"{key}={value[0]}" for key, value in sorted(parsed_data.items())])
+    
+    # Создаем секретный ключ
+    secret_key = hmac.new(
+        b"WebAppData", 
+        bot_token.encode(), 
+        hashlib.sha256
+    ).digest()
+    
+    # Проверяем подпись
+    calculated_hash = hmac.new(
+        secret_key,
+        data_check_string.encode(),
+        hashlib.sha256
+    ).hexdigest()
+    
+    return calculated_hash == hash
+
 # Основные маршруты
 @app.route('/')
 def index():
@@ -84,7 +121,12 @@ def index():
 def get_user():
     """Получает данные пользователя из Telegram WebApp"""
     try:
-        user_data = request.json.get('user')
+        # Проверка подписи
+        if not verify_telegram_data(request.form):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        
+        # Извлечение данных пользователя
+        user_data = json.loads(request.form.get('user', '{}'))
         if not user_data:
             return jsonify({'error': 'Данные пользователя не переданы'}), 400
 
@@ -108,7 +150,11 @@ def get_user():
 def daily_checkin():
     """Обрабатывает ежедневный чекин"""
     try:
-        user_id = request.json.get('user_id')
+        # Проверка подписи
+        if not verify_telegram_data(request.form):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        
+        user_id = request.form.get('user_id')
         if not user_id:
             return jsonify({'error': 'user_id обязателен'}), 400
 
