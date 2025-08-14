@@ -268,10 +268,10 @@ def get_achievements():
         row = sheet.row_values(row_num)
         user = parse_user_data(row)
         
-        // Определяем текущий уровень достижений
+        # Определяем текущий уровень достижений
         let achievements = [];
         
-        // Золото (120 дней)
+        # Золото (120 дней)
         if (user['consecutive_days'] >= 120) {
             achievements.push({
                 tier: 3,
@@ -281,7 +281,7 @@ def get_achievements():
                 unlocked: true
             });
         }
-        // Серебро (30 дней)
+        # Серебро (30 дней)
         else if (user['consecutive_days'] >= 30) {
             achievements.push({
                 tier: 2,
@@ -291,7 +291,7 @@ def get_achievements():
                 unlocked: true
             });
         }
-        // Бронза (7 дней)
+        # Бронза (7 дней)
         else if (user['consecutive_days'] >= 7) {
             achievements.push({
                 tier: 1,
@@ -301,7 +301,7 @@ def get_achievements():
                 unlocked: true
             });
         }
-        // Если нет достижений, добавляем заглушку
+        # Если нет достижений, добавляем заглушку
         else {
             achievements.push({
                 tier: 1,
