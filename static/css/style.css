@@ -32,16 +32,19 @@ body {
 }
 .nav {
     position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(2, 6, 23, 0.9); /* ближе к --darker */
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 12px;
+    width: min(560px, calc(100% - 24px));
+    background: rgba(2, 6, 23, 0.92);
     backdrop-filter: blur(10px);
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    padding: 10px 20px env(safe-area-inset-bottom);
+    border-radius: 16px;
+    padding: 8px 12px;
     display: flex;
     justify-content: space-around;
     z-index: 1000;
+    box-shadow: 0 12px 24px rgba(0,0,0,0.35);
+    border: 1px solid rgba(255,255,255,0.08);
 }
 
 .nav-item {
@@ -50,11 +53,11 @@ body {
     align-items: center;
     color: var(--gray);
     font-size: 12px;
-    padding: 8px 14px;
+    padding: 6px 12px;
     border-radius: 12px;
     transition: var(--transition);
     cursor: pointer;
-    min-width: 80px;
+    min-width: 68px;
 }
 
 .nav-item:hover, .nav-item.active {
@@ -307,14 +310,14 @@ body {
 .achievements-container {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 15px;
+    gap: 12px;
     padding-bottom: 10px;
 }
 
 .achievement-card {
     background: var(--card-bg);
     border-radius: var(--border-radius);
-    padding: 12px;
+    padding: 10px;
     text-align: center;
     width: 100%;
     backdrop-filter: blur(10px);
@@ -322,6 +325,7 @@ body {
     transition: var(--transition);
     cursor: pointer;
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    box-sizing: border-box;
 }
 
 .achievement-card.locked {
@@ -330,8 +334,8 @@ body {
 }
 
 .achievement-card img {
-    width: 60px;
-    height: 60px;
+    width: 52px;
+    height: 52px;
     object-fit: contain;
     margin-bottom: 8px;
 }
@@ -342,14 +346,14 @@ body {
 }
 
 .badge-name {
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 600;
     margin-top: 4px;
     color: var(--light);
 }
 
 .badge-requirements {
-    font-size: 12px;
+    font-size: 11px;
     color: var(--gray);
     margin-top: 2px;
 }
@@ -358,9 +362,9 @@ body {
 .achv-progress-container {
     background: rgba(255, 255, 255, 0.12);
     border-radius: 10px;
-    height: 8px;
+    height: 6px;
     overflow: hidden;
-    margin-top: 8px;
+    margin-top: 6px;
 }
 
 .achv-progress {
@@ -414,33 +418,44 @@ body {
 .subtabs {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 10px;
-    margin: 10px 0 14px;
+    gap: 0;
+    margin: 8px 0 12px;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    overflow: hidden;
+    background: rgba(255,255,255,0.04);
 }
 
 .subtab-item {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(255, 255, 255, 0.06);
+    background: transparent;
     color: var(--gray);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 10px;
-    padding: 10px 12px;
+    padding: 10px 8px;
     font-size: 14px;
     cursor: pointer;
     transition: var(--transition);
 }
 
+/* разделители для сетки 2x2 */
+.subtabs .subtab-item:nth-child(1),
+.subtabs .subtab-item:nth-child(2) {
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.subtabs .subtab-item:nth-child(1),
+.subtabs .subtab-item:nth-child(3) {
+    border-right: 1px solid rgba(255,255,255,0.08);
+}
+
 .subtab-item:hover {
-    background: rgba(255, 255, 255, 0.1);
     color: var(--light);
+    background: rgba(255,255,255,0.06);
 }
 
 .subtab-item.active {
-    background: linear-gradient(90deg, var(--primary), var(--primary-dark));
+    background: linear-gradient(90deg, var(--primary), var(--secondary));
     color: #fff;
-    border-color: rgba(255,255,255,0.15);
 }
 
 .ufo-content {
