@@ -27,6 +27,7 @@
             <div class="league-title">Лига Обнинска</div>
             <img class="league-logo" src="/static/img/logo.png" alt="Логотип лиги">
         </div>
+        <div id="tab-profile">
         <div class="profile-header">
             <div class="profile-avatar" id="user-avatar">
                 <img src="" alt="Аватар">
@@ -87,7 +88,39 @@
                 </div>
             </div>
         </div>
+        </div>
+
+        <!-- Вкладка НЛО -->
+        <div id="tab-ufo" style="display:none;">
+            <div class="section-title" style="margin-top: 8px;">
+                <span>НЛО</span>
+            </div>
+            <div class="subtabs" id="ufo-subtabs">
+                <div class="subtab-item active" data-subtab="table">Таблица</div>
+                <div class="subtab-item" data-subtab="stats">Статистика</div>
+                <div class="subtab-item" data-subtab="schedule">Расписание</div>
+                <div class="subtab-item" data-subtab="results">Результаты</div>
+            </div>
+            <div class="ufo-content">
+                <div id="ufo-table" class="ufo-pane">Здесь будет Таблица.</div>
+                <div id="ufo-stats" class="ufo-pane" style="display:none;">Здесь будет Статистика.</div>
+                <div id="ufo-schedule" class="ufo-pane" style="display:none;">Здесь будет Расписание.</div>
+                <div id="ufo-results" class="ufo-pane" style="display:none;">Здесь будут Результаты.</div>
+            </div>
+        </div>
     </div>
+
+    <!-- Нижняя навигация -->
+    <nav class="nav">
+        <div class="nav-item active" data-tab="profile">
+            <div class="nav-icon">👤</div>
+            <div class="nav-label">Профиль</div>
+        </div>
+        <div class="nav-item" data-tab="ufo">
+            <div class="nav-icon">👽</div>
+            <div class="nav-label">НЛО</div>
+        </div>
+    </nav>
 
     <script src="/static/js/splash.js"></script>
     <script src="/static/js/profile.js"></script>

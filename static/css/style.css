@@ -20,7 +20,7 @@ body {
     background: linear-gradient(135deg, var(--dark), var(--darker));
     color: var(--light);
     min-height: 100vh;
-    padding: 20px;
+    padding: 20px 20px 84px; /* нижний паддинг под навигацию */
     line-height: 1.6;
     margin: 0;
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -30,6 +30,43 @@ body {
     max-width: 600px;
     margin: 0 auto;
 }
+.nav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(2, 6, 23, 0.9); /* ближе к --darker */
+    backdrop-filter: blur(10px);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 10px 20px env(safe-area-inset-bottom);
+    display: flex;
+    justify-content: space-around;
+    z-index: 1000;
+}
+
+.nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    color: var(--gray);
+    font-size: 12px;
+    padding: 8px 14px;
+    border-radius: 12px;
+    transition: var(--transition);
+    cursor: pointer;
+    min-width: 80px;
+}
+
+.nav-item:hover, .nav-item.active {
+    color: var(--light);
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.nav-icon {
+    font-size: 20px;
+    margin-bottom: 4px;
+}
+
 
 /* --- ВЕРХНЯЯ ПАНЕЛЬ --- */
 .top-bar {
@@ -268,9 +305,9 @@ body {
 }
 
 .achievements-container {
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
     gap: 15px;
-    overflow-x: auto;
     padding-bottom: 10px;
 }
 
@@ -279,7 +316,7 @@ body {
     border-radius: var(--border-radius);
     padding: 12px;
     text-align: center;
-    min-width: 150px;
+    width: 100%;
     backdrop-filter: blur(10px);
     border: 1px solid rgba(255, 255, 255, 0.1);
     transition: var(--transition);
@@ -371,4 +408,44 @@ body {
     .stat-value {
         font-size: 20px;
     }
+}
+
+/* --- Подвкладки НЛО --- */
+.subtabs {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin: 10px 0 14px;
+}
+
+.subtab-item {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--gray);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.subtab-item:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--light);
+}
+
+.subtab-item.active {
+    background: linear-gradient(90deg, var(--primary), var(--primary-dark));
+    color: #fff;
+    border-color: rgba(255,255,255,0.15);
+}
+
+.ufo-content {
+    background: var(--card-bg);
+    border-radius: var(--border-radius);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 16px;
 }

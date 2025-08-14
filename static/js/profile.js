@@ -240,6 +240,44 @@ document.addEventListener('DOMContentLoaded', () => {
     function setupEventListeners() {
         if (elements.checkinBtn) elements.checkinBtn.addEventListener('click', handleCheckin);
         if (elements.editName) { elements.editName.style.cursor='pointer'; elements.editName.addEventListener('click', handleNameChange); }
+        // переключение вкладок
+        const navItems = document.querySelectorAll('.nav-item');
+        navItems.forEach(item => {
+            item.addEventListener('click', () => {
+                const tab = item.getAttribute('data-tab');
+                document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+                item.classList.add('active');
+                const prof = document.getElementById('tab-profile');
+                const ufo = document.getElementById('tab-ufo');
+                if (tab === 'profile') {
+                    if (prof) prof.style.display = '';
+                    if (ufo) ufo.style.display = 'none';
+                } else if (tab === 'ufo') {
+                    if (prof) prof.style.display = 'none';
+                    if (ufo) ufo.style.display = '';
+                }
+                // прокрутка к верху при смене вкладки
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            });
+        });
+
+        // подвкладки НЛО
+        const subtabItems = document.querySelectorAll('#ufo-subtabs .subtab-item');
+        const subtabMap = {
+            table: document.getElementById('ufo-table'),
+            stats: document.getElementById('ufo-stats'),
+            schedule: document.getElementById('ufo-schedule'),
+            results: document.getElementById('ufo-results'),
+        };
+        subtabItems.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const key = btn.getAttribute('data-subtab');
+                subtabItems.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                Object.values(subtabMap).forEach(el => { if (el) el.style.display = 'none'; });
+                if (subtabMap[key]) subtabMap[key].style.display = '';
+            });
+        });
     }
 
     // старт
