@@ -106,10 +106,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (elements.userName) elements.userName.textContent = user.display_name || 'User';
         // После установки имени пробуем диспатчить готовность
         tryDispatchReady();
-        if (elements.credits) elements.credits.textContent = (user.credits || 0).toLocaleString();
-        if (elements.level) elements.level.textContent = user.level || 1;
+    if (elements.credits) elements.credits.textContent = (user.credits || 0).toLocaleString();
+    if (elements.level) elements.level.textContent = user.level || 1;
 
         const lvl = user.level || 1;
+    if (elements.currentLevel) elements.currentLevel.textContent = lvl;
         const xpForNextLevel = lvl * 100;
         const currentXp = (user.xp || 0) % xpForNextLevel;
         if (elements.xp) elements.xp.textContent = `${currentXp}/${xpForNextLevel}`;
@@ -121,21 +122,25 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderCheckinSection(user) {
         if (!elements.checkinDays) return;
         elements.checkinDays.innerHTML = '';
-    const cycleDay = ((user.consecutive_days % 7) + 1);
+        const today = new Date().toISOString().split('T')[0];
+        const lastCheckin = (user.last_checkin_date || '').split('T')[0];
+        const checkedToday = lastCheckin === today;
+        const mod = (user.consecutive_days || 0) % 7;
+        const completedCount = checkedToday ? (mod === 0 ? 7 : mod) : mod;
+        const activeDay = checkedToday ? null : (mod + 1);
+
         if (elements.currentStreak) elements.currentStreak.textContent = user.consecutive_days || 0;
 
-        for (let i=1; i<=7; i++) {
+        for (let i = 1; i <= 7; i++) {
             const dayEl = document.createElement('div');
             dayEl.className = 'checkin-day';
             dayEl.textContent = i;
-            if (i < cycleDay) dayEl.classList.add('completed');
-            else if (i === cycleDay) dayEl.classList.add('active');
+            if (i <= completedCount) dayEl.classList.add('completed');
+            else if (activeDay && i === activeDay) dayEl.classList.add('active');
             elements.checkinDays.appendChild(dayEl);
         }
 
-        const today = new Date().toISOString().split('T')[0];
-        const lastCheckin = (user.last_checkin_date || '').split('T')[0];
-        if (lastCheckin === today) {
+        if (checkedToday) {
             if (elements.checkinBtn) elements.checkinBtn.disabled = true;
             if (elements.checkinStatus) elements.checkinStatus.textContent = '✅ Награда получена сегодня';
         } else {
@@ -147,26 +152,44 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderAchievements(achievements) {
         if (elements.achievementPlaceholder) elements.achievementPlaceholder.remove();
         if (!elements.badgesContainer) return;
-        elements.badgesContainer.innerHTML = ''; // очищаем
+        elements.badgesContainer.innerHTML = '';
         if (!achievements || achievements.length === 0) return;
-        const a = achievements[0];
-        const card = document.createElement('div');
-        card.className = `achievement-card ${a.unlocked ? '' : 'locked'}`;
-        const icon = document.createElement('img');
-        if (a.icon === 'bronze') {
-            icon.src = '/static/img/achievements/bronze.png';
-        } else if (a.icon === 'silver') {
-            icon.src = '/static/img/achievements/silver.png';
-        } else if (a.icon === 'gold') {
-            icon.src = '/static/img/achievements/gold.png';
-        } else {
-            icon.src = '/static/img/achievements/placeholder.png';
-        }
-        icon.alt = a.name || 'badge';
-        const name = document.createElement('div'); name.className='badge-name'; name.textContent = a.name;
-        const req = document.createElement('div'); req.className='badge-requirements'; req.textContent = `${a.days} дней подряд`;
-        card.append(icon, name, req);
-        elements.badgesContainer.appendChild(card);
+
+        const iconSrc = (icon) => {
+            if (icon === 'bronze') return '/static/img/achievements/bronze.png';
+            if (icon === 'silver') return '/static/img/achievements/silver.png';
+            if (icon === 'gold') return '/static/img/achievements/gold.png';
+            return '/static/img/achievements/placeholder.png';
+        };
+
+        achievements.forEach(a => {
+            const card = document.createElement('div');
+            card.className = `achievement-card ${a.unlocked ? '' : 'locked'}`;
+            const icon = document.createElement('img');
+            icon.src = iconSrc(a.icon);
+            icon.alt = a.name || 'badge';
+            const name = document.createElement('div'); name.className='badge-name'; name.textContent = a.name;
+            const req = document.createElement('div'); req.className='badge-requirements';
+            if (a.group === 'streak') {
+                req.textContent = `${a.unlocked ? 'Открыто' : 'Прогресс'}: ${a.value}/${a.target} дней подряд`;
+            } else if (a.group === 'credits') {
+                req.textContent = `${a.unlocked ? 'Открыто' : 'Прогресс'}: ${(a.value||0).toLocaleString()}/${(a.target||0).toLocaleString()} кредитов`;
+            } else if (a.group === 'level') {
+                req.textContent = `${a.unlocked ? 'Открыто' : 'Прогресс'}: ${a.value}/${a.target} уровень`;
+            } else {
+                req.textContent = '';
+            }
+            const progressWrap = document.createElement('div');
+            progressWrap.className = 'achv-progress-container';
+            const progressBar = document.createElement('div');
+            progressBar.className = 'achv-progress';
+            const pct = Math.max(0, Math.min(100, Math.floor((Math.min(a.value||0, a.target||1) / (a.target||1)) * 100)));
+            progressBar.style.width = `${pct}%`;
+            progressWrap.appendChild(progressBar);
+
+            card.append(icon, name, req, progressWrap);
+            elements.badgesContainer.appendChild(card);
+        });
     }
 
     function handleCheckin() {
@@ -175,9 +198,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (elements.checkinStatus) elements.checkinStatus.textContent = 'Обработка...';
         if (!tg || !tg.initDataUnsafe?.user) { showError('Невозможно выполнить чекин без Telegram WebApp'); elements.checkinBtn.disabled=false; return; }
 
-        const formData = new FormData();
-        formData.append('initData', tg.initData || '');
-        formData.append('user_id', tg.initDataUnsafe.user.id);
+    const formData = new FormData();
+    formData.append('initData', tg.initData || '');
 
         fetch('/api/checkin', { method:'POST', body: formData })
             .then(res => {

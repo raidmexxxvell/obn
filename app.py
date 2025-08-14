@@ -40,6 +40,62 @@ def get_user_sheet():
     sheet = client.open_by_key(sheet_id)
     return sheet.worksheet("users")
 
+def get_achievements_sheet():
+    """Возвращает лист достижений, создаёт при отсутствии."""
+    client = get_google_client()
+    sheet_id = os.environ.get('SHEET_ID')
+    if not sheet_id:
+        raise ValueError("SHEET_ID не установлен в переменных окружения")
+    doc = client.open_by_key(sheet_id)
+    try:
+        ws = doc.worksheet("achievements")
+    except gspread.exceptions.WorksheetNotFound:
+        ws = doc.add_worksheet(title="achievements", rows=1000, cols=8)
+        # user_id | credits_tier | credits_unlocked_at | level_tier | level_unlocked_at | streak_tier | streak_unlocked_at
+        ws.update('A1:G1', [[
+            'user_id', 'credits_tier', 'credits_unlocked_at', 'level_tier', 'level_unlocked_at', 'streak_tier', 'streak_unlocked_at'
+        ]])
+    return ws
+
+def get_user_achievements_row(user_id):
+    """Читает или инициализирует строку достижений пользователя."""
+    ws = get_achievements_sheet()
+    try:
+        cell = ws.find(str(user_id), in_column=1)
+        if cell:
+            row_vals = ws.row_values(cell.row)
+            # Гарантируем длину
+            row_vals = list(row_vals) + [''] * (7 - len(row_vals))
+            return cell.row, {
+                'credits_tier': int(row_vals[1] or 0),
+                'credits_unlocked_at': row_vals[2] or '',
+                'level_tier': int(row_vals[3] or 0),
+                'level_unlocked_at': row_vals[4] or '',
+                'streak_tier': int(row_vals[5] or 0),
+                'streak_unlocked_at': row_vals[6] or ''
+            }
+    except gspread.exceptions.APIError as e:
+        app.logger.error(f"Ошибка API при чтении достижений: {e}")
+    # Создаём новую строку
+    ws.append_row([str(user_id), '0', '', '0', '', '0', ''])
+    # Найдём только что добавленную (последняя строка)
+    last_row = len(ws.get_all_values())
+    return last_row, {
+        'credits_tier': 0,
+        'credits_unlocked_at': '',
+        'level_tier': 0,
+        'level_unlocked_at': '',
+        'streak_tier': 0,
+        'streak_unlocked_at': ''
+    }
+
+def compute_tier(value: int, thresholds) -> int:
+    """Возвращает tier по убывающим порогам. thresholds: [(threshold, tier), ...]"""
+    for thr, tier in thresholds:
+        if value >= thr:
+            return tier
+    return 0
+
 # Вспомогательные функции
 def find_user_row(user_id):
     """Ищет строку пользователя по user_id"""
@@ -298,47 +354,52 @@ def get_achievements():
         sheet = get_user_sheet()
         row = sheet.row_values(row_num)
         user = parse_user_data(row)
-        
-        # Определяем текущий уровень достижений
+        # Пороговые значения и названия
+        streak_thresholds = [(120, 3), (30, 2), (7, 1)]
+        credits_thresholds = [(500000, 3), (50000, 2), (10000, 1)]
+        level_thresholds = [(100, 3), (50, 2), (25, 1)]
+
+        # Вычисляем текущие тиры
+        streak_tier = compute_tier(user['consecutive_days'], streak_thresholds)
+        credits_tier = compute_tier(user['credits'], credits_thresholds)
+        level_tier = compute_tier(user['level'], level_thresholds)
+
+        # Обновляем прогресс в отдельной таблице (фиксируем время первого получения каждого тира)
+        ach_row, ach = get_user_achievements_row(user_id)
+        updates = []
+        now_iso = datetime.now(timezone.utc).isoformat()
+        if credits_tier > ach['credits_tier']:
+            updates.append({'range': f'B{ach_row}', 'values': [[str(credits_tier)]]})
+            updates.append({'range': f'C{ach_row}', 'values': [[now_iso]]})
+        if level_tier > ach['level_tier']:
+            updates.append({'range': f'D{ach_row}', 'values': [[str(level_tier)]]})
+            updates.append({'range': f'E{ach_row}', 'values': [[now_iso]]})
+        if streak_tier > ach['streak_tier']:
+            updates.append({'range': f'F{ach_row}', 'values': [[str(streak_tier)]]})
+            updates.append({'range': f'G{ach_row}', 'values': [[now_iso]]})
+        if updates:
+            get_achievements_sheet().batch_update(updates)
+
+        # Собираем карточки достижений
         achievements = []
-        
-        # Золото (120 дней)
-        if user['consecutive_days'] >= 120:
-            achievements.append({
-                'tier': 3,
-                'name': 'Золото',
-                'days': 120,
-                'icon': 'gold',
-                'unlocked': True
-            })
-        # Серебро (30 дней)
-        elif user['consecutive_days'] >= 30:
-            achievements.append({
-                'tier': 2,
-                'name': 'Серебро',
-                'days': 30,
-                'icon': 'silver',
-                'unlocked': True
-            })
-        # Бронза (7 дней)
-        elif user['consecutive_days'] >= 7:
-            achievements.append({
-                'tier': 1,
-                'name': 'Бронза',
-                'days': 7,
-                'icon': 'bronze',
-                'unlocked': True
-            })
-        # Если нет достижений, добавляем заглушку
+
+        # Серия дней (как было)
+        if streak_tier:
+            achievements.append({ 'group': 'streak', 'tier': streak_tier, 'name': {1:'Бронза',2:'Серебро',3:'Золото'}[streak_tier], 'value': user['consecutive_days'], 'target': {1:7,2:30,3:120}[streak_tier], 'icon': {1:'bronze',2:'silver',3:'gold'}[streak_tier], 'unlocked': True })
         else:
-            achievements.append({
-                'tier': 1,
-                'name': 'Бронза',
-                'days': 7,
-                'icon': 'bronze',
-                'unlocked': False
-            })
-        
+            achievements.append({ 'group': 'streak', 'tier': 1, 'name': 'Бронза', 'value': user['consecutive_days'], 'target': 7, 'icon': 'bronze', 'unlocked': False })
+
+        # Кредиты: 10k/50k/500k
+        if credits_tier:
+            achievements.append({ 'group': 'credits', 'tier': credits_tier, 'name': {1:'Бедолага',2:'Мажор',3:'Олигарх'}[credits_tier], 'value': user['credits'], 'target': {1:10000,2:50000,3:500000}[credits_tier], 'icon': {1:'bronze',2:'silver',3:'gold'}[credits_tier], 'unlocked': True })
+        else:
+            achievements.append({ 'group': 'credits', 'tier': 1, 'name': 'Бедолага', 'value': user['credits'], 'target': 10000, 'icon': 'bronze', 'unlocked': False })
+
+        # Уровень: 25/50/100
+        if level_tier:
+            achievements.append({ 'group': 'level', 'tier': level_tier, 'name': {1:'Новобранец',2:'Ветеран',3:'Легенда'}[level_tier], 'value': user['level'], 'target': {1:25,2:50,3:100}[level_tier], 'icon': {1:'bronze',2:'silver',3:'gold'}[level_tier], 'unlocked': True })
+        else:
+            achievements.append({ 'group': 'level', 'tier': 1, 'name': 'Новобранец', 'value': user['level'], 'target': 25, 'icon': 'bronze', 'unlocked': False })
 
         return jsonify({'achievements': achievements})
 
