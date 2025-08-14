@@ -1,0 +1,75 @@
+{% extends "layout_base.html" %}
+{% block content %}
+<div class="page nlo-page">
+    <h2>НЛО 8×8</h2>
+    
+    <div class="nlo-tabs">
+        <button class="nlo-tab active" data-tab="matches">Матчи</button>
+        <button class="nlo-tab" data-tab="streams">Трансляции</button>
+    </div>
+    
+    <div class="nlo-content">
+        <div class="nlo-tab-content active" data-tab-content="matches">
+            <div class="matches-section">
+                <h3>Ближайшие матчи</h3>
+                
+                {% for round in rounds %}
+                <div class="round-section">
+                    <h4>Тур {{ round.number }}</h4>
+                    <div class="matches-list">
+                        {% for match in round.matches %}
+                        <div class="match-card">
+                            <div class="match-header">
+                                <div class="match-date">
+                                    {{ match.datetime.strftime('%d.%m.%Y') if match.datetime else 'Дата не указана' }}
+                                </div>
+                                <div class="match-time">
+                                    {{ match.datetime.strftime('%H:%M') if match.datetime else 'Время не указано' }}
+                                </div>
+                            </div>
+                            
+                            <div class="teams">
+                                <div class="team team1">
+                                    <img src="{{ url_for('static', filename='images/team-logos/' ~ match.team1|lower|replace(' ', '')|replace('.', '')|replace('\'', '')|replace('\"', '')|replace(',', '')|replace('/', '')|replace('!', '')|replace('@', '')|replace('#', '')|replace('$', '')|replace('%', '')|replace('^', '')|replace('&', '')|replace('*', '')|replace('(', '')|replace(')', '') ~ '.png') }}" 
+     onerror="this.src='{{ url_for('static', filename='images/team-logos/default.png') }}'" 
+     alt="{{ match.team1 }}">
+                                    <span>{{ match.team1 }}</span>
+                                </div>
+                                <div class="vs">-</div>
+                                <div class="team team2">
+                                    <img src="{{ url_for('static', filename='images/team-logos/' ~ match.team2|lower|replace(' ', '')|replace('.', '')|replace('\'', '')|replace('\"', '')|replace(',', '')|replace('/', '')|replace('!', '')|replace('@', '')|replace('#', '')|replace('$', '')|replace('%', '')|replace('^', '')|replace('&', '')|replace('*', '')|replace('(', '')|replace(')', '') ~ '.png') }}" 
+     onerror="this.src='{{ url_for('static', filename='images/team-logos/default.png') }}'" 
+     alt="{{ match.team2 }}">
+                                    <span>{{ match.team2 }}</span>
+                                </div>
+                            </div>
+                            
+                            <div class="match-status">
+                                {% if match.status == 'scheduled' %}
+                                <span class="status scheduled">Запланирован</span>
+                                {% elif match.status == 'live' %}
+                                <span class="status live">Идет матч</span>
+                                {% else %}
+                                <span class="status finished">Завершен</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            
+            <div class="nlo-tab-content" data-tab-content="streams">
+                <h3>Трансляции</h3>
+                <div class="streams-list">
+                    <!-- Трансляции будут загружаться через JS -->
+                    <div id="streams-container">
+                        <p class="no-streams">Сейчас нет активных трансляций</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

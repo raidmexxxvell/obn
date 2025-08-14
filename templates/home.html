@@ -1,0 +1,53 @@
+{% extends "layout_base.html" %}
+{% block content %}
+<div class="page home-page">
+    <div class="hero">
+        <h2>Добро пожаловать в Городскую Футбольную Лигу</h2>
+        <p>Следите за матчами, делайте прогнозы и получайте призы</p>
+    </div>
+
+    <div class="matches-section">
+        <h3>Ближайшие матчи</h3>
+        
+        {% for round in rounds %}
+        <div class="round-section">
+            <h4>Тур {{ round.number }}</h4>
+            <div class="matches-list">
+                {% for match in round.matches %}
+                <div class="match-card">
+                    <div class="match-header">
+    <div class="match-date-time">
+        {{ match.datetime.strftime('%d.%m.%Y %H:%M') if match.datetime else 'Дата и время не указаны' }}
+    </div>
+</div>
+                    
+                            <div class="teams">
+                        <div class="team team1">
+                            <img src="{{ url_for('static', filename='images/team-logos/' ~ match.team1|lower|replace(' ', '')|replace('.', '')|replace('\'', '')|replace('\"', '')|replace(',', '')|replace('/', '')|replace('!', '')|replace('@', '')|replace('#', '')|replace('$', '')|replace('%', '')|replace('^', '')|replace('&', '')|replace('*', '')|replace('(', '')|replace(')', '') ~ '.png') }}" 
+     onerror="this.src='{{ url_for('static', filename='images/team-logos/default.png') }}'" 
+     alt="{{ match.team1 }}">
+                            <span>{{ match.team1 }}</span>
+                        </div>
+                        <div class="vs">{{ match.score1 }} : {{ match.score2 }}</div>
+                        <div class="team team2">
+                            <img src="{{ url_for('static', filename='images/team-logos/' ~ match.team2|lower|replace(' ', '')|replace('.', '')|replace('\'', '')|replace('\"', '')|replace(',', '')|replace('/', '')|replace('!', '')|replace('@', '')|replace('#', '')|replace('$', '')|replace('%', '')|replace('^', '')|replace('&', '')|replace('*', '')|replace('(', '')|replace(')', '') ~ '.png') }}" 
+     onerror="this.src='{{ url_for('static', filename='images/team-logos/default.png') }}'" 
+     alt="{{ match.team2 }}">
+                            <span>{{ match.team2 }}</span>
+                        </div>
+                    </div>
+                    
+                    <div class="match-actions">
+                        <a href="/miniapp/match/{{ match.id }}" class="btn match-detail-btn">Детали</a>
+                        <button class="subscribe-btn" data-match-id="{{ match.id }}">
+                            <i class="icon-bell"></i>
+                        </button>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

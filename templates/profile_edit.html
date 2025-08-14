@@ -1,0 +1,30 @@
+{% extends "layout_base.html" %}
+{% block content %}
+<div class="page profile-edit-page">
+    <h2>Редактировать профиль</h2>
+    
+    <div class="profile-form">
+        <div class="form-group">
+            <label for="full_name">ФИО</label>
+            <input type="text" id="full_name" class="form-input" value="{{ user.full_name or '' }}">
+        </div>
+        
+        <div class="form-group">
+            <label for="birth_date">Дата рождения</label>
+            <input type="date" id="birth_date" class="form-input" value="{{ user.birth_date if user.birth_date else '' }}">
+        </div>
+        
+        <div class="form-group">
+            <label for="favorite_club">Любимый клуб</label>
+            <select id="favorite_club" class="form-select">
+                <option value="">Не выбрано</option>
+                {% for club in clubs %}
+                <option value="{{ club }}" {% if user.favorite_club == club %}selected{% endif %}>{{ club }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        
+        <button id="save-profile-btn" class="btn">Сохранить изменения</button>
+    </div>
+</div>
+{% endblock %}

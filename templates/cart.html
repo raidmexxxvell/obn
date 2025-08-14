@@ -1,0 +1,56 @@
+{% extends "layout_base.html" %}
+{% block content %}
+<div class="page cart-page">
+    <h2>Корзина</h2>
+    
+    <div id="cart-items">
+        {% if cart_items|length == 0 %}
+        <p class="empty-cart">Ваша корзина пуста</p>
+        {% else %}
+        <div class="cart-items-list">
+            {% for item in cart_items %}
+            <div class="cart-item" data-item-id="{{ item.id }}">
+                <div class="cart-item-image">
+                    <img src="{{ url_for('static', filename='images/shop/' + item.image) }}" alt="{{ item.name }}">
+                </div>
+                <div class="cart-item-info">
+                    <h3>{{ item.name }}</h3>
+                    <p class="item-price">{{ item.price }} кредитов</p>
+                    <div class="item-quantity">
+                        <button class="quantity-btn minus">-</button>
+                        <span class="quantity-value">{{ item.quantity }}</span>
+                        <button class="quantity-btn plus">+</button>
+                    </div>
+                </div>
+                <div class="item-total">
+                    {{ item.total }} кредитов
+                </div>
+                <button class="remove-item-btn">×</button>
+            </div>
+            {% endfor %}
+        </div>
+        
+        <div class="cart-summary">
+            <div class="summary-row">
+                <span>Итого:</span>
+                <span class="total-amount">{{ total }} кредитов</span>
+            </div>
+            <div class="summary-row">
+                <span>Ваш баланс:</span>
+                <span class="user-balance">{{ user.coins }} кредитов</span>
+            </div>
+            <div class="summary-row total">
+                <span>К оплате:</span>
+                <span class="total-amount">{{ total }} кредитов</span>
+            </div>
+            
+            {% if user.coins >= total %}
+            <button id="checkout-btn" class="btn checkout-btn">Оформить заказ</button>
+            {% else %}
+            <button class="btn checkout-btn disabled">Недостаточно кредитов</button>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

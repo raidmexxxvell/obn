@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>?????????? ????</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="{{ url_for('static', filename='js/script.js') }}" defer></script>
+</head>
+<body>
+    <header>
+        <div class="logo">?????????? ????</div>
+    </header>
+    
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+    
+    <nav class="bottom-nav">
+        <a href="/" class="nav-item {% if request.path == '/' %}active{% endif %}">
+            <span>???????</span>
+        </a>
+        <a href="/nfo" class="nav-item {% if request.path == '/nfo' %}active{% endif %}">
+            <span>??? 8?8</span>
+        </a>
+        <a href="/bets" class="nav-item {% if request.path == '/bets' %}active{% endif %}">
+            <span>??????</span>
+        </a>
+        <a href="/profile" class="nav-item {% if request.path == '/profile' %}active{% endif %}">
+            <span>???????</span>
+        </a>
+        <a href="/support" class="nav-item {% if request.path == '/support' %}active{% endif %}">
+            <span>?????????</span>
+        </a>
+    </nav>
+</body>
+</html>
