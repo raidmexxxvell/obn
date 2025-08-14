@@ -1,19 +1,17 @@
-/* static/css/splash.css */
 
-/* Полноэкранная заставка */
 #splash {
-  position: fixed !important;
-  inset: 0 !important;
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: center !important;
-  justify-content: center !important;
-  gap: 16px !important;
-  background: #ffffff !important;
-  color: #222 !important;
-  z-index: 10000 !important;
-  transition: opacity 0.45s ease !important;
-  opacity: 1 !important;
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: #ffffff;
+  color: #222;
+  z-index: 9999;
+  transition: opacity 0.45s ease;
+  opacity: 1;
 }
 
 /* Логотип */
@@ -61,3 +59,4 @@
   .splash-logo-img { width: 90px !important; }
   .loading-bar { width: 80% !important; }
 }
+
