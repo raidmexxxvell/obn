@@ -175,7 +175,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const card = document.createElement('div');
         card.className = `achievement-card ${a.unlocked ? '' : 'locked'}`;
         const icon = document.createElement('img');
-        icon.src = a.icon ? `data:image/svg+xml;base64,PHN2...` : '';
+        if (a.icon === 'bronze') {
+            icon.src = '/static/img/achievements/bronze.png';
+        } else if (a.icon === 'silver') {
+            icon.src = '/static/img/achievements/silver.png';
+        } else if (a.icon === 'gold') {
+            icon.src = '/static/img/achievements/gold.png';
+        } else {
+            icon.src = a.icon ? `data:image/svg+xml;base64,PHN2...` : '';
+        }
         icon.alt = a.name || 'badge';
         const name = document.createElement('div'); name.className='badge-name'; name.textContent = a.name;
         const req = document.createElement('div'); req.className='badge-requirements'; req.textContent = `${a.days} дней подряд`;
