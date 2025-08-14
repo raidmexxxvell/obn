@@ -1,4 +1,6 @@
+/* static/css/splash.css */
 
+/* Полноэкранная заставка */
 #splash {
   position: fixed;
   inset: 0;
@@ -16,47 +18,46 @@
 
 /* Логотип */
 .splash-logo-img {
-  width: 120px !important;
-  height: auto !important;
-  max-width: 40% !important;
-  object-fit: contain !important;
+  width: 120px;
+  height: auto;
+  max-width: 40%;
+  object-fit: contain;
 }
 
 /* Текст заставки */
 .splash-text {
-  font-size: 1.4rem !important;
-  font-weight: 700 !important;
-  letter-spacing: 0.02em !important;
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 /* Подпись "Идет загрузка..." */
 .splash-loading-label {
-  font-size: 0.9rem !important;
-  color: #666 !important;
+  font-size: 0.9rem;
+  color: #666;
 }
 
 /* Индикатор загрузки */
 .loading-bar {
-  width: 60% !important;
-  max-width: 420px !important;
-  height: 8px !important;
-  background: rgba(0,0,0,0.06) !important;
-  border-radius: 999px !important;
-  overflow: hidden !important;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.5) !important;
+  width: 60%;
+  max-width: 420px;
+  height: 8px;
+  background: rgba(0,0,0,0.06);
+  border-radius: 999px;
+  overflow: hidden;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.5);
 }
 
 .loading-progress {
-  height: 100% !important;
-  width: 0% !important;
-  background: linear-gradient(90deg, #4CAF50, #2E8B57) !important;
-  border-radius: 999px !important;
-  transition: width 0.15s linear !important;
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #4CAF50, #2E8B57);
+  border-radius: 999px;
+  transition: width 0.15s linear;
 }
 
 /* Небольшая адаптивность */
 @media (max-width: 480px) {
-  .splash-logo-img { width: 90px !important; }
-  .loading-bar { width: 80% !important; }
+  .splash-logo-img { width: 90px; }
+  .loading-bar { width: 80%; }
 }
-
