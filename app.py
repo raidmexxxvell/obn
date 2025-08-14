@@ -12,6 +12,13 @@ from google.oauth2.service_account import Credentials
 
 app = Flask(__name__)
 
+# Простой кеш для таблицы лиги (обновление раз в час)
+LEAGUE_TABLE_CACHE = {
+    'ts': 0,       # unix timestamp последнего обновления
+    'data': None   # кэшированные данные таблицы
+}
+LEAGUE_TABLE_TTL = 60 * 60  # 1 час
+
 # Настройка Google Sheets
 def get_google_client():
     """Создает клиент для работы с Google Sheets API"""
@@ -56,6 +63,15 @@ def get_achievements_sheet():
             'user_id', 'credits_tier', 'credits_unlocked_at', 'level_tier', 'level_unlocked_at', 'streak_tier', 'streak_unlocked_at'
         ]])
     return ws
+
+def get_table_sheet():
+    """Возвращает лист таблицы лиги 'ТАБЛИЦА'."""
+    client = get_google_client()
+    sheet_id = os.environ.get('SHEET_ID')
+    if not sheet_id:
+        raise ValueError("SHEET_ID не установлен в переменных окружения")
+    doc = client.open_by_key(sheet_id)
+    return doc.worksheet("ТАБЛИЦА")
 
 def get_user_achievements_row(user_id):
     """Читает или инициализирует строку достижений пользователя."""
@@ -411,6 +427,35 @@ def get_achievements():
 def health():
     """Healthcheck для Render.com"""
     return jsonify(status="healthy"), 200
+
+@app.route('/api/league-table', methods=['GET'])
+def api_league_table():
+    """Возвращает таблицу лиги (A1:H10) с кешем на 1 час."""
+    try:
+        now = int(time.time())
+        if LEAGUE_TABLE_CACHE['data'] and (now - LEAGUE_TABLE_CACHE['ts'] < LEAGUE_TABLE_TTL):
+            return jsonify(LEAGUE_TABLE_CACHE['data'])
+
+        ws = get_table_sheet()
+        values = ws.get('A1:H10') or []
+        # Гарантируем 10 строк и 8 столбцов (заполним пустыми строками/ячейками при необходимости)
+        normalized = []
+        for i in range(10):
+            row = values[i] if i < len(values) else []
+            row = list(row) + [''] * (8 - len(row))
+            normalized.append(row[:8])
+
+        payload = {
+            'range': 'A1:H10',
+            'updated_at': datetime.now(timezone.utc).isoformat(),
+            'values': normalized
+        }
+        LEAGUE_TABLE_CACHE['data'] = payload
+        LEAGUE_TABLE_CACHE['ts'] = now
+        return jsonify(payload)
+    except Exception as e:
+        app.logger.error(f"Ошибка загрузки таблицы лиги: {str(e)}")
+        return jsonify({'error': 'Не удалось загрузить таблицу'}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

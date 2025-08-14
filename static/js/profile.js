@@ -275,8 +275,40 @@ document.addEventListener('DOMContentLoaded', () => {
                 subtabItems.forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 Object.values(subtabMap).forEach(el => { if (el) el.style.display = 'none'; });
-                if (subtabMap[key]) subtabMap[key].style.display = '';
+                if (subtabMap[key]) {
+                    subtabMap[key].style.display = '';
+                    if (key === 'table') {
+                        loadLeagueTable();
+                    }
+                }
             });
+        });
+    }
+
+    function loadLeagueTable() {
+        const table = document.getElementById('league-table');
+        const updated = document.getElementById('league-table-updated');
+        if (!table) return;
+        fetch('/api/league-table').then(r => r.json()).then(data => {
+            const tbody = table.querySelector('tbody');
+            tbody.innerHTML = '';
+            const rows = data.values || [];
+            for (let i = 0; i < 10; i++) {
+                const r = rows[i] || [];
+                const tr = document.createElement('tr');
+                for (let j = 0; j < 8; j++) {
+                    const td = document.createElement('td');
+                    td.textContent = (r[j] ?? '').toString();
+                    tr.appendChild(td);
+                }
+                tbody.appendChild(tr);
+            }
+            if (updated && data.updated_at) {
+                const d = new Date(data.updated_at);
+                updated.textContent = `Обновлено: ${d.toLocaleString()}`;
+            }
+        }).catch(err => {
+            console.error('league table load error', err);
         });
     }
 

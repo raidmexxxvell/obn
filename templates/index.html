@@ -99,7 +99,28 @@
                 <div class="subtab-item" data-subtab="results">Результаты</div>
             </div>
             <div class="ufo-content">
-                <div id="ufo-table" class="ufo-pane">Здесь будет Таблица.</div>
+                <div id="ufo-table" class="ufo-pane">
+                    <div class="league-table-wrap">
+                        <table class="league-table" id="league-table">
+                            <thead>
+                                <tr>
+                                    <th>№</th>
+                                    <th>Команда</th>
+                                    <th>Игр</th>
+                                    <th>В</th>
+                                    <th>Н</th>
+                                    <th>П</th>
+                                    <th>Разница</th>
+                                    <th>Очки</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- 10 строк будут заполнены через JS -->
+                            </tbody>
+                        </table>
+                        <div class="table-updated" id="league-table-updated"></div>
+                    </div>
+                </div>
                 <div id="ufo-stats" class="ufo-pane" style="display:none;">Здесь будет Статистика.</div>
                 <div id="ufo-schedule" class="ufo-pane" style="display:none;">Здесь будет Расписание.</div>
                 <div id="ufo-results" class="ufo-pane" style="display:none;">Здесь будут Результаты.</div>

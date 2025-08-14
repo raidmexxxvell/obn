@@ -469,3 +469,71 @@ body {
     border: 1px solid rgba(255, 255, 255, 0.1);
     padding: 16px;
 }
+
+/* Таблица лиги */
+.league-table-wrap {
+    overflow-x: auto;
+}
+
+.league-table {
+    width: 100%;
+    border-collapse: collapse;
+    color: var(--light);
+    font-size: 14px;
+    background: rgba(15, 23, 42, 0.35);
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.league-table thead th {
+    text-align: left;
+    padding: 10px 8px;
+    background: rgba(255,255,255,0.06);
+    color: var(--light);
+    font-weight: 600;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+
+.league-table tbody td {
+    padding: 10px 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.league-table tbody tr:nth-child(even) {
+    background: rgba(255,255,255,0.03);
+}
+
+.league-table tbody tr:hover {
+    background: rgba(255,255,255,0.06);
+}
+
+.league-table tbody td:first-child,
+.league-table thead th:first-child {
+    width: 44px;
+    text-align: center;
+    color: var(--gray);
+}
+
+.league-table tbody td:nth-child(2) {
+    font-weight: 600;
+}
+
+.table-updated {
+    margin-top: 8px;
+    color: var(--gray);
+    font-size: 12px;
+}
+
+/* Подсветка ТОП-3: золото, серебро, бронза */
+.league-table tbody tr:nth-child(1) {
+    background: linear-gradient(90deg, rgba(255, 215, 0, 0.20), rgba(255, 215, 0, 0.10));
+    border-left: 4px solid #FFD700;
+}
+.league-table tbody tr:nth-child(2) {
+    background: linear-gradient(90deg, rgba(192, 192, 192, 0.18), rgba(192, 192, 192, 0.08));
+    border-left: 4px solid #C0C0C0;
+}
+.league-table tbody tr:nth-child(3) {
+    background: linear-gradient(90deg, rgba(205, 127, 50, 0.18), rgba(205, 127, 50, 0.08));
+    border-left: 4px solid #CD7F32;
+}
