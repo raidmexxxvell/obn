@@ -87,7 +87,12 @@
 
     function mkOptions(tour, m, locked) {
       const box = document.createElement('div'); box.className = 'options-box';
-      const mkBtn = (key, label) => { const b = document.createElement('button'); b.className='bet-btn'; b.textContent = label; b.disabled = !!locked; b.addEventListener('click', ()=> openStakeModal(tour, m, key)); return b; };
+      const odds = m.odds || {};
+      const mkBtn = (key, label) => {
+        const b = document.createElement('button'); b.className='bet-btn';
+        const k = odds[key] != null ? ` (${Number(odds[key]).toFixed(2)})` : '';
+        b.textContent = label + k; b.disabled = !!locked; b.addEventListener('click', ()=> openStakeModal(tour, m, key)); return b;
+      };
       box.append(mkBtn('home','П1'), mkBtn('draw','Х'), mkBtn('away','П2'));
       return box;
     }

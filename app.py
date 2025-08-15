@@ -1,96 +1,59 @@
-# app.py
+"""Flask backend for Liga Obninska app with betting, Google Sheets and SQLAlchemy."""
 import os
 import json
 import time
-import hmac
 import hashlib
-from datetime import datetime, timedelta, timezone, date
-from flask import Flask, render_template, request, jsonify
-import importlib
+import hmac
+from datetime import datetime, date, timezone
 from urllib.parse import parse_qs
+
+from flask import Flask, request, jsonify, render_template
+
 import gspread
 from google.oauth2.service_account import Credentials
-from sqlalchemy import create_engine, Column, Integer, String, Date, DateTime, Text, UniqueConstraint
-from sqlalchemy.orm import declarative_base, sessionmaker, Session
 
-app = Flask(__name__)
-try:
-    _fc = importlib.import_module('flask_compress')
-    _fc.Compress(app)
-    app.config.setdefault('COMPRESS_LEVEL', 6)
-    app.config.setdefault('COMPRESS_MIMETYPES', ['application/json', 'text/css', 'application/javascript'])
-    print('[INFO] Compression enabled')
-except Exception as _e:
-    print('[INFO] Compression not active:', _e)
+from sqlalchemy import (
+    create_engine, Column, Integer, String, Text, DateTime, Date
+)
+from sqlalchemy.orm import sessionmaker, declarative_base, Session
 
-@app.after_request
-def _secure_headers(resp):
-    resp.headers.setdefault('X-Content-Type-Options', 'nosniff')
-    resp.headers.setdefault('X-Frame-Options', 'DENY')
-    resp.headers.setdefault('Referrer-Policy', 'no-referrer')
-    resp.headers.setdefault('Permissions-Policy', 'geolocation=(), microphone=(), camera=()')
-    return resp
+# Flask app
+app = Flask(__name__, static_folder='static', template_folder='templates')
 
-# Простой кеш для таблицы лиги (обновление раз в час)
-LEAGUE_TABLE_CACHE = {
-    'ts': 0,       # unix timestamp последнего обновления
-    'data': None   # кэшированные данные таблицы
-}
-LEAGUE_TABLE_TTL = 60 * 60  # 1 час
-
-# Кеш для таблицы статистики (A1:G11)
-STATS_TABLE_CACHE = {
-    'ts': 0,
-    'data': None
-}
-STATS_TABLE_TTL = 60 * 60  # 1 час
-
-# Кеш для расписания (ближайшие 3 тура)
-SCHEDULE_CACHE = {
-    'ts': 0,
-    'data': None
-}
-SCHEDULE_TTL = 60 * 60  # 1 час
-
-# Кеш для составов (по паре команд) — чтобы не дергать Sheets при пиковых запросах
-MATCH_DETAILS_CACHE = {}
-MATCH_DETAILS_TTL = 10 * 60  # 10 минут
-
-# ---------------- PostgreSQL / SQLAlchemy -----------------
-DATABASE_URL = os.environ.get('DATABASE_URL') or os.environ.get('DATABASE_URL_RENDER')
-if not DATABASE_URL:
-    # позволяем локально запускаться без БД, но в лог
-    print('[WARN] DATABASE_URL не задан. БД не будет использована.')
-
-def _normalize_db_url(url: str) -> str:
-    if not url:
-        return ''
-    # Используем драйвер psycopg (v3), совместимый с Python 3.13
-    # Render часто даёт postgres:// — SQLAlchemy предпочитает postgresql+psycopg://
-    if url.startswith('postgres://'):
-        url = 'postgresql+psycopg://' + url[len('postgres://'):]
-    elif url.startswith('postgresql://') and '+psycopg' not in url and '+pg8000' not in url:
-        url = 'postgresql+psycopg://' + url[len('postgresql://'):]
-    # Требуем sslmode=require если не указан
-    if 'sslmode=' not in url:
-        sep = '&' if '?' in url else '?'
-        url = f"{url}{sep}sslmode=require"
-    return url
-
-engine = None
-SessionLocal = None
+# Database
+DATABASE_URL = os.environ.get('DATABASE_URL', '').strip()
+engine = create_engine(DATABASE_URL) if DATABASE_URL else None
+SessionLocal = sessionmaker(bind=engine) if engine else None
 Base = declarative_base()
 
-if DATABASE_URL:
-    engine = create_engine(_normalize_db_url(DATABASE_URL), pool_pre_ping=True)
-    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+# Caches and TTLs
+LEAGUE_TABLE_CACHE = {'data': None, 'ts': 0}
+LEAGUE_TABLE_TTL = 60 * 60
 
+SCHEDULE_CACHE = {'data': None, 'ts': 0}
+SCHEDULE_TTL = 15 * 60
+
+STATS_TABLE_CACHE = {'data': None, 'ts': 0}
+STATS_TABLE_TTL = 60 * 60
+
+MATCH_DETAILS_CACHE = {}
+MATCH_DETAILS_TTL = 60 * 60
+
+# Betting config
+BET_MIN_STAKE = int(os.environ.get('BET_MIN_STAKE', '10'))
+BET_MAX_STAKE = int(os.environ.get('BET_MAX_STAKE', '10000'))
+BET_DAILY_MAX_STAKE = int(os.environ.get('BET_DAILY_MAX_STAKE', '50000'))
+BET_MARGIN = float(os.environ.get('BET_MARGIN', '0.06'))  # 6% маржа по умолчанию
+_LAST_SETTLE_TS = 0
+
+
+# Core models used across the app
 class User(Base):
     __tablename__ = 'users'
-    user_id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, primary_key=True)
     display_name = Column(String(255))
     tg_username = Column(String(255))
-    credits = Column(Integer, default=1000)
+    credits = Column(Integer, default=0)
     xp = Column(Integer, default=0)
     level = Column(Integer, default=1)
     consecutive_days = Column(Integer, default=0)
@@ -99,30 +62,150 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
+
 class LeagueTableRow(Base):
     __tablename__ = 'league_table'
     row_index = Column(Integer, primary_key=True)
-    c1 = Column(Text)
-    c2 = Column(Text)
-    c3 = Column(Text)
-    c4 = Column(Text)
-    c5 = Column(Text)
-    c6 = Column(Text)
-    c7 = Column(Text)
-    c8 = Column(Text)
-    updated_at = Column(DateTime(timezone=True))
+    c1 = Column(String(255), default='')
+    c2 = Column(String(255), default='')
+    c3 = Column(String(255), default='')
+    c4 = Column(String(255), default='')
+    c5 = Column(String(255), default='')
+    c6 = Column(String(255), default='')
+    c7 = Column(String(255), default='')
+    c8 = Column(String(255), default='')
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
 
 class StatsTableRow(Base):
     __tablename__ = 'stats_table'
     row_index = Column(Integer, primary_key=True)
-    c1 = Column(Text)
-    c2 = Column(Text)
-    c3 = Column(Text)
-    c4 = Column(Text)
-    c5 = Column(Text)
-    c6 = Column(Text)
-    c7 = Column(Text)
-    updated_at = Column(DateTime(timezone=True))
+    c1 = Column(String(255), default='')
+    c2 = Column(String(255), default='')
+    c3 = Column(String(255), default='')
+    c4 = Column(String(255), default='')
+    c5 = Column(String(255), default='')
+    c6 = Column(String(255), default='')
+    c7 = Column(String(255), default='')
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+@app.route('/api/betting/place', methods=['POST'])
+def api_betting_place():
+    """Размещает ставку 1X2. Тело: initData, tour, home, away, selection in ['home','draw','away'], stake(int)."""
+    parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+    if not parsed or not parsed.get('user'):
+        return jsonify({'error': 'Недействительные данные'}), 401
+    user_id = int(parsed['user'].get('id'))
+    if SessionLocal is None:
+        return jsonify({'error': 'БД недоступна'}), 500
+    sel = (request.form.get('selection') or '').strip().lower()
+    if sel not in ('home','draw','away'):
+        return jsonify({'error': 'Неверная ставка'}), 400
+    try:
+        stake = int(request.form.get('stake') or '0')
+    except Exception:
+        stake = 0
+    if stake < BET_MIN_STAKE:
+        return jsonify({'error': f'Минимальная ставка {BET_MIN_STAKE}'}), 400
+    if stake > BET_MAX_STAKE:
+        return jsonify({'error': f'Максимальная ставка {BET_MAX_STAKE}'}), 400
+    tour = request.form.get('tour')
+    try:
+        tour = int(tour) if tour is not None and str(tour).strip() != '' else None
+    except Exception:
+        tour = None
+    home = (request.form.get('home') or '').strip()
+    away = (request.form.get('away') or '').strip()
+    if not home or not away:
+        return jsonify({'error': 'Не указан матч'}), 400
+
+    # Проверка: матч существует в будущих турах и ещё не начался
+    tours = _load_all_tours_from_sheet()
+    match_dt = None
+    found = False
+    for t in tours:
+        if tour is not None and t.get('tour') != tour:
+            continue
+        for m in t.get('matches', []):
+            if (m.get('home') == home and m.get('away') == away) or (m.get('home') == home and not away):
+                found = True
+                try:
+                    if m.get('datetime'):
+                        match_dt = datetime.fromisoformat(m['datetime'])
+                    elif m.get('date'):
+                        d = datetime.fromisoformat(m['date']).date()
+                        match_dt = datetime.combine(d, datetime.min.time())
+                except Exception:
+                    match_dt = None
+                break
+        if found:
+            break
+    if not found:
+        return jsonify({'error': 'Матч не найден'}), 404
+    if match_dt and match_dt <= datetime.now():
+        return jsonify({'error': 'Ставки на начавшийся матч недоступны'}), 400
+
+    db: Session = get_db()
+    try:
+        db_user = db.get(User, user_id)
+        if not db_user:
+            return jsonify({'error': 'Пользователь не найден'}), 404
+        # проверка суточного лимита
+        start_day = datetime.now(timezone.utc).date()
+        start_dt = datetime.combine(start_day, datetime.min.time()).replace(tzinfo=timezone.utc)
+        end_dt = datetime.combine(start_day, datetime.max.time()).replace(tzinfo=timezone.utc)
+        today_sum = db.query(Bet).filter(Bet.user_id==user_id, Bet.placed_at>=start_dt, Bet.placed_at<=end_dt).with_entities(func.coalesce(func.sum(Bet.stake), 0)).scalar() if engine else 0
+        if (today_sum or 0) + stake > BET_DAILY_MAX_STAKE:
+            return jsonify({'error': f'Суточный лимит ставок {BET_DAILY_MAX_STAKE}'}), 400
+        if (db_user.credits or 0) < stake:
+            return jsonify({'error': 'Недостаточно кредитов'}), 400
+        # коэффициенты на момент ставки
+        odds_map = _compute_match_odds(home, away)
+        k = odds_map.get(sel) or 2.00
+        # списываем кредиты
+        db_user.credits = int(db_user.credits or 0) - stake
+        db_user.updated_at = datetime.now(timezone.utc)
+        bet = Bet(
+            user_id=user_id,
+            tour=tour,
+            home=home,
+            away=away,
+            match_datetime=match_dt,
+            market='1x2',
+            selection=sel,
+            odds=f"{k:.2f}",
+            stake=stake,
+            status='open',
+            payout=0,
+            updated_at=datetime.now(timezone.utc)
+        )
+        db.add(bet)
+        db.commit()
+        db.refresh(db_user)
+        db.refresh(bet)
+        try:
+            mirror_user_to_sheets(db_user)
+        except Exception as e:
+            app.logger.warning(f"Mirror after bet failed: {e}")
+        return jsonify({
+            'status': 'success',
+            'balance': int(db_user.credits or 0),
+            'bet': {
+                'id': bet.id,
+                'tour': bet.tour,
+                'home': bet.home,
+                'away': bet.away,
+                'datetime': (bet.match_datetime.isoformat() if bet.match_datetime else ''),
+                'market': bet.market,
+                'selection': bet.selection,
+                'odds': bet.odds,
+                'stake': bet.stake,
+                'status': bet.status
+            }
+        })
+    finally:
+        db.close()
 
 class Referral(Base):
     __tablename__ = 'referrals'
@@ -247,6 +330,72 @@ def get_table_sheet():
         raise ValueError("SHEET_ID не установлен в переменных окружения")
     doc = _get_doc(sheet_id)
     return doc.worksheet("ТАБЛИЦА")
+
+def _load_league_ranks() -> dict:
+    """Возвращает словарь {нормализованное_имя_команды: позиция} из листа 'ТАБЛИЦА'.
+    Позиция начинается с 1 для первой команды ниже шапки.
+    """
+    try:
+        ws = get_table_sheet()
+        values = ws.get('A1:H10') or []
+        # строка 0 — заголовки; строки 1.. — данные
+        ranks = {}
+        def norm(s: str) -> str:
+            s = (s or '').strip().lower().replace('\u00A0',' ').replace('ё','е')
+            return ''.join(ch for ch in s if ch.isalnum())
+        for i in range(1, len(values)):
+            row = values[i]
+            if not row or len(row) < 2:
+                continue
+            name = (row[1] or '').strip()
+            if not name:
+                continue
+            ranks[norm(name)] = len(ranks) + 1
+        return ranks
+    except Exception as e:
+        app.logger.warning(f"Не удалось загрузить ранги лиги: {e}")
+        return {}
+
+def _compute_match_odds(home: str, away: str) -> dict:
+    """Возвращает коэффициенты 1X2 по простейшей модели: преимущество хозяев + разница позиций.
+    Формат: {'home': 2.15, 'draw': 3.10, 'away': 2.75}.
+    """
+    def clamp(x, a, b):
+        return max(a, min(b, x))
+    def to_norm(s: str) -> str:
+        s = (s or '').strip().lower().replace('\u00A0',' ').replace('ё','е')
+        return ''.join(ch for ch in s if ch.isalnum())
+    ranks = _load_league_ranks()
+    r_home = ranks.get(to_norm(home))
+    r_away = ranks.get(to_norm(away))
+    # базовые вероятности
+    p_home = 0.45
+    p_draw = 0.26
+    p_away = 0.29
+    # если есть позиции — скорректируем
+    if r_home and r_away:
+        delta = r_away - r_home  # >0 если хозяева выше в таблице
+        p_home += clamp(delta * 0.02, -0.15, 0.15)
+        p_draw = clamp(0.26 - abs(delta) * 0.01, 0.16, 0.30)
+        # нормализуем
+        p_home = clamp(p_home, 0.10, 0.80)
+        p_away = max(0.05, 1.0 - p_home - p_draw)
+    else:
+        # нет данных — оставляем базовые
+        pass
+    # применяем маржу и считаем кэфы
+    overround = 1.0 + BET_MARGIN
+    # распределим маржу пропорционально вероятностям
+    denom = p_home + p_draw + p_away
+    ph = p_home / denom; px = p_draw / denom; pa = p_away / denom
+    ph *= overround; px *= overround; pa *= overround
+    def to_odds(p):
+        try:
+            o = 1.0 / p
+            return round(max(1.10, o), 2)
+        except Exception:
+            return 1.10
+    return { 'home': to_odds(ph), 'draw': to_odds(px), 'away': to_odds(pa) }
 
 def get_referrals_sheet():
     """Возвращает лист 'referrals', создаёт при отсутствии."""
@@ -1325,6 +1474,16 @@ def api_betting_tours():
     """Возвращает туры для ставок: начиная с текущего дня и ещё два следующих тура.
     Для матчей в прошлом блокируем ставки (поле lock: true)."""
     try:
+        # авто-расчёт открытых ставок (раз в 5 минут)
+        global _LAST_SETTLE_TS
+        now_ts = int(time.time())
+        if now_ts - _LAST_SETTLE_TS > 300:
+            try:
+                _settle_open_bets()
+            except Exception as e:
+                app.logger.warning(f"Авторасчёт ставок: {e}")
+            _LAST_SETTLE_TS = now_ts
+
         all_tours = _load_all_tours_from_sheet()
         today = datetime.now().date()
 
@@ -1350,7 +1509,7 @@ def api_betting_tours():
             except Exception:
                 return (datetime(2100,1,1), t.get('tour') or 10**9)
         tours.sort(key=sort_key)
-        tours = tours[:3]
+        tours = tours[:1]  # только ближайший тур
 
         # отметим для каждого матча, можно ли ставить (до начала)
         now = datetime.now()
@@ -1365,6 +1524,8 @@ def api_betting_tours():
                         d = datetime.fromisoformat(m['date']).date()
                         lock = datetime.combine(d, datetime.max.time()) <= now
                     m['lock'] = bool(lock)
+                    # посчитаем коэффициенты для отображения
+                    m['odds'] = _compute_match_odds(m.get('home',''), m.get('away',''))
                 except Exception:
                     m['lock'] = True
 
@@ -1373,120 +1534,7 @@ def api_betting_tours():
         app.logger.error(f"Ошибка betting tours: {e}")
         return jsonify({'error': 'Не удалось загрузить туры для ставок'}), 500
 
-@app.route('/api/betting/place', methods=['POST'])
-def api_betting_place():
-    """Размещает ставку 1X2. Тело: initData, tour, home, away, selection in ['home','draw','away'], stake(int).
-    Простейшая проверка: матч не начался; у пользователя достаточно кредитов; ставка сохраняется.
-    Возвращает обновлённый баланс и ставку."""
-    try:
-        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
-        if not parsed or not parsed.get('user'):
-            return jsonify({'error': 'Недействительные данные'}), 401
-        user_id = int(parsed['user'].get('id'))
-        if SessionLocal is None:
-            return jsonify({'error': 'БД недоступна'}), 500
-        sel = (request.form.get('selection') or '').strip().lower()
-        if sel not in ('home','draw','away'):
-            return jsonify({'error': 'Неверная ставка'}), 400
-        try:
-            stake = int(request.form.get('stake') or '0')
-        except Exception:
-            stake = 0
-        if stake <= 0:
-            return jsonify({'error': 'Сумма ставки должна быть > 0'}), 400
-        tour = request.form.get('tour')
-        try:
-            tour = int(tour) if tour is not None and str(tour).strip() != '' else None
-        except Exception:
-            tour = None
-        home = (request.form.get('home') or '').strip()
-        away = (request.form.get('away') or '').strip()
-        if not home or not away:
-            return jsonify({'error': 'Не указан матч'}), 400
-
-        # Проверка: матч существует в будущих турах и ещё не начался
-        tours = _load_all_tours_from_sheet()
-        match_dt = None
-        found = False
-        for t in tours:
-            if tour is not None and t.get('tour') != tour:
-                continue
-            for m in t.get('matches', []):
-                if (m.get('home') == home and m.get('away') == away) or (m.get('home') == home and not away):
-                    # простое сравнение; можно расширить нормализацию
-                    found = True
-                    try:
-                        if m.get('datetime'):
-                            match_dt = datetime.fromisoformat(m['datetime'])
-                        elif m.get('date'):
-                            d = datetime.fromisoformat(m['date']).date()
-                            # если нет времени — полдень
-                            match_dt = datetime.combine(d, datetime.min.time())
-                    except Exception:
-                        match_dt = None
-                    break
-            if found:
-                break
-        if not found:
-            return jsonify({'error': 'Матч не найден'}), 404
-        if match_dt and match_dt <= datetime.now():
-            return jsonify({'error': 'Ставки на начавшийся матч недоступны'}), 400
-
-        db: Session = get_db()
-        try:
-            db_user = db.get(User, user_id)
-            if not db_user:
-                return jsonify({'error': 'Пользователь не найден'}), 404
-            if (db_user.credits or 0) < stake:
-                return jsonify({'error': 'Недостаточно кредитов'}), 400
-            # списываем кредиты
-            db_user.credits = int(db_user.credits or 0) - stake
-            db_user.updated_at = datetime.now(timezone.utc)
-            # простая фиктивная котировка: все исходы 2.00
-            bet = Bet(
-                user_id=user_id,
-                tour=tour,
-                home=home,
-                away=away,
-                match_datetime=match_dt,
-                market='1x2',
-                selection=sel,
-                odds='2.00',
-                stake=stake,
-                status='open',
-                payout=0,
-                updated_at=datetime.now(timezone.utc)
-            )
-            db.add(bet)
-            db.commit()
-            db.refresh(db_user)
-            db.refresh(bet)
-            # зеркалим пользователя в Sheets best-effort
-            try:
-                mirror_user_to_sheets(db_user)
-            except Exception as e:
-                app.logger.warning(f"Mirror after bet failed: {e}")
-            return jsonify({
-                'status': 'success',
-                'balance': int(db_user.credits or 0),
-                'bet': {
-                    'id': bet.id,
-                    'tour': bet.tour,
-                    'home': bet.home,
-                    'away': bet.away,
-                    'datetime': (bet.match_datetime.isoformat() if bet.match_datetime else ''),
-                    'market': bet.market,
-                    'selection': bet.selection,
-                    'odds': bet.odds,
-                    'stake': bet.stake,
-                    'status': bet.status
-                }
-            })
-        finally:
-            db.close()
-    except Exception as e:
-        app.logger.error(f"Ошибка размещения ставки: {e}")
-        return jsonify({'error': 'Не удалось разместить ставку'}), 500
+ 
 
 @app.route('/api/betting/my-bets', methods=['POST'])
 def api_betting_my_bets():
@@ -1518,11 +1566,84 @@ def api_betting_my_bets():
                     'placed_at': (b.placed_at.isoformat() if b.placed_at else '')
                 })
             return jsonify({ 'bets': data })
+        except Exception as _e:
+            app.logger.error(f"DB error (place bet): {_e}")
+            raise
         finally:
             db.close()
     except Exception as e:
         app.logger.error(f"Ошибка списка ставок: {e}")
         return jsonify({'error': 'Не удалось загрузить ставки'}), 500
+
+# ---------- Авторасчёт исходов ставок ----------
+from sqlalchemy import func
+
+def _parse_score(val: str):
+    try:
+        return int(str(val).strip())
+    except Exception:
+        return None
+
+def _winner_from_scores(sh: str, sa: str):
+    h = _parse_score(sh)
+    a = _parse_score(sa)
+    if h is None or a is None:
+        return None
+    if h > a:
+        return 'home'
+    if h < a:
+        return 'away'
+    return 'draw'
+
+def _get_match_result(home: str, away: str):
+    """Ищет матч в расписании и возвращает ('home'|'draw'|'away') если есть счёт, иначе None."""
+    tours = _load_all_tours_from_sheet()
+    for t in tours:
+        for m in t.get('matches', []):
+            if (m.get('home') == home and m.get('away') == away):
+                res = _winner_from_scores(m.get('score_home',''), m.get('score_away',''))
+                return res
+    return None
+
+def _settle_open_bets():
+    if SessionLocal is None:
+        return
+    db: Session = get_db()
+    try:
+        now = datetime.now()
+        open_bets = db.query(Bet).filter(Bet.status=='open').all()
+        changed = 0
+        for b in open_bets:
+            # матч должен быть уже начат/сыгран
+            if b.match_datetime and b.match_datetime > now:
+                continue
+            res = _get_match_result(b.home, b.away)
+            if not res:
+                continue
+            # определяем исход
+            if res == b.selection:
+                # выигрыш
+                try:
+                    odd = float(b.odds or '2.0')
+                except Exception:
+                    odd = 2.0
+                payout = int(round(b.stake * odd))
+                b.status = 'won'
+                b.payout = payout
+                # начислить кредиты
+                u = db.get(User, b.user_id)
+                if u:
+                    u.credits = int(u.credits or 0) + payout
+                    u.updated_at = datetime.now(timezone.utc)
+            else:
+                b.status = 'lost'
+                b.payout = 0
+            b.updated_at = datetime.now(timezone.utc)
+            changed += 1
+        if changed:
+            db.commit()
+    finally:
+        db.close()
 
 @app.route('/api/results', methods=['GET'])
 def api_results():
