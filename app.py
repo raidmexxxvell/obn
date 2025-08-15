@@ -176,6 +176,54 @@ def get_table_sheet():
     doc = client.open_by_key(sheet_id)
     return doc.worksheet("ТАБЛИЦА")
 
+def get_referrals_sheet():
+    """Возвращает лист 'referrals', создаёт при отсутствии."""
+    client = get_google_client()
+    sheet_id = os.environ.get('SHEET_ID')
+    if not sheet_id:
+        raise ValueError("SHEET_ID не установлен в переменных окружения")
+    doc = client.open_by_key(sheet_id)
+    try:
+        ws = doc.worksheet("referrals")
+    except gspread.exceptions.WorksheetNotFound:
+        ws = doc.add_worksheet(title="referrals", rows=1000, cols=6)
+        ws.update('A1:F1', [[
+            'user_id', 'referral_code', 'referrer_id', 'invited_count', 'created_at', 'updated_at'
+        ]])
+    return ws
+
+def mirror_referral_to_sheets(user_id: int, referral_code: str, referrer_id: int|None, invited_count: int, created_at_iso: str|None = None):
+    """Создаёт/обновляет строку в листе referrals."""
+    try:
+        ws = get_referrals_sheet()
+    except Exception as e:
+        app.logger.warning(f"Не удалось получить лист referrals: {e}")
+        return
+    try:
+        cell = ws.find(str(user_id), in_column=1)
+    except Exception:
+        cell = None
+    updated_at = datetime.now(timezone.utc).isoformat()
+    created_at = created_at_iso or updated_at
+    if not cell:
+        try:
+            ws.append_row([
+                str(user_id), referral_code or '', str(referrer_id or ''), str(invited_count or 0), created_at, updated_at
+            ])
+        except Exception as e:
+            app.logger.warning(f"Не удалось добавить referral в лист: {e}")
+    else:
+        row = cell.row
+        try:
+            ws.batch_update([
+                {'range': f'B{row}', 'values': [[referral_code or '']]},
+                {'range': f'C{row}', 'values': [[str(referrer_id or '')]]},
+                {'range': f'D{row}', 'values': [[str(invited_count or 0)]]},
+                {'range': f'F{row}', 'values': [[updated_at]]},
+            ])
+        except Exception as e:
+            app.logger.warning(f"Не удалось обновить referral в листе: {e}")
+
 def get_stats_sheet():
     """Возвращает лист статистики 'СТАТИСТИКА'."""
     client = get_google_client()
@@ -515,8 +563,13 @@ def api_referral():
             invited_count = db.query(Referral).filter(Referral.referrer_id == user_id).count()
         finally:
             db.close()
-        bot_username = os.environ.get('BOT_USERNAME', '')
-        link = f"https://t.me/{bot_username}?start={ref.referral_code}" if bot_username else ref.referral_code
+        bot_username = os.environ.get('BOT_USERNAME', '').lstrip('@')
+        link = f"https://t.me/{bot_username}?start={ref.referral_code}" if bot_username else f"(Укажите BOT_USERNAME в env) Код: {ref.referral_code}"
+        # Зеркалим в Google Sheets (лист referrals)
+        try:
+            mirror_referral_to_sheets(user_id, ref.referral_code, ref.referrer_id, invited_count, (ref.created_at or datetime.now(timezone.utc)).isoformat())
+        except Exception as e:
+            app.logger.warning(f"Mirror referral to sheets failed: {e}")
         return jsonify({
             'code': ref.referral_code,
             'referral_link': link,

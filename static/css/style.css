@@ -264,14 +264,14 @@ body {
 }
 
 .checkin-day.completed {
-    /* золотисто-синий градиент */
-    background: linear-gradient(135deg, rgba(255, 215, 0, 0.98), rgba(30, 64, 175, 0.95));
+    /* совпадает с градиентом активной подвкладки */
+    background: linear-gradient(90deg, var(--primary), var(--secondary));
     border-color: rgba(255,255,255,0.22);
     color: rgba(255, 255, 255, 0.95);
 }
 
 .checkin-day.active {
-    background: linear-gradient(180deg, rgba(29,78,216,0.96), rgba(29,78,216,0.78));
+    background: linear-gradient(90deg, var(--primary), var(--secondary));
     border-color: rgba(255,255,255,0.22);
     color: #fff;
 }

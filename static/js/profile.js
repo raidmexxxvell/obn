@@ -449,24 +449,19 @@ document.addEventListener('DOMContentLoaded', () => {
         const table = document.getElementById('achv-catalog-table');
         const updated = document.getElementById('achv-catalog-updated');
         if (!table) return;
-        fetch('/api/achievements-catalog').then(r => r.json()).then(data => {
+    fetch('/api/achievements-catalog').then(r => r.json()).then(data => {
             const tbody = table.querySelector('tbody');
             tbody.innerHTML = '';
             const catalog = data.catalog || [];
             // строим таблицу: шапка из трёх колонок уровней
             catalog.forEach(group => {
                 const header = document.createElement('tr');
-                const empty = document.createElement('td'); empty.textContent = '';
+        const first = document.createElement('td'); first.textContent = group.title;
                 const t1 = document.createElement('td'); t1.textContent = `${group.tiers[0].name} ${group.tiers[0].target}`;
                 const t2 = document.createElement('td'); t2.textContent = `${group.tiers[1].name} ${group.tiers[1].target}`;
                 const t3 = document.createElement('td'); t3.textContent = `${group.tiers[2].name} ${group.tiers[2].target}`;
-                header.append(empty, t1, t2, t3);
+        header.append(first, t1, t2, t3);
                 tbody.appendChild(header);
-
-                const nameRow = document.createElement('tr');
-                const nameCell = document.createElement('td'); nameCell.textContent = group.title;
-                nameRow.append(nameCell, document.createElement('td'), document.createElement('td'), document.createElement('td'));
-                tbody.appendChild(nameRow);
 
                 const descRow = document.createElement('tr');
                 const descTitle = document.createElement('td'); descTitle.textContent = 'Описание';
