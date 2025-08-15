@@ -5,6 +5,24 @@ document.addEventListener('DOMContentLoaded', () => {
     const loadingProgress = document.getElementById('loading-progress');
     const appContent = document.getElementById('app-content');
 
+    // Запрет масштабирования/зумов внутри приложения
+    try {
+        // Ctrl + колесо мыши
+        window.addEventListener('wheel', (e) => { if (e.ctrlKey) { e.preventDefault(); } }, { passive: false });
+        // Жесты (iOS/Android)
+        window.addEventListener('gesturestart', (e) => e.preventDefault());
+        window.addEventListener('gesturechange', (e) => e.preventDefault());
+        window.addEventListener('gestureend', (e) => e.preventDefault());
+        // Двойной тап/клик
+        let lastTouch = 0;
+        window.addEventListener('touchend', (e) => {
+            const now = Date.now();
+            if (now - lastTouch < 300) { e.preventDefault(); }
+            lastTouch = now;
+        }, { passive: false });
+        window.addEventListener('dblclick', (e) => e.preventDefault(), { passive: false });
+    } catch(_) {}
+
     // безопасные вызовы Telegram API
     try { tg?.expand?.(); } catch (e) { console.warn('tg.expand failed', e); }
     try { tg?.ready?.(); } catch (e) { console.warn('tg.ready failed', e); }
@@ -62,8 +80,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     window.dispatchEvent(new CustomEvent('app:data-ready'));
                     // параллельно загружаем таблицу (фон), чтобы закрыть splash без навигации
                     loadLeagueTable();
-            // тёплый прогрев рефералки (не блокирует ничего)
+            // тёплый прогрев рефералки (не блокирует ничего) + первичное отображение
             try { prefetchReferral(); } catch(_) {}
+            try { loadReferralInfo(); } catch(_) {}
                 })
                 .catch(err => console.error('Init error', err));
         }, 400); // минимальное время показа
@@ -310,7 +329,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // помечаем элементы для троттлинга кликов
         if (elements.checkinBtn) elements.checkinBtn.setAttribute('data-throttle', '2000');
         if (elements.editName) elements.editName.setAttribute('data-throttle', '1500');
-        // переключение вкладок
+    // переключение вкладок нижнего меню
         const navItems = document.querySelectorAll('.nav-item');
         navItems.forEach(item => {
             item.setAttribute('data-throttle', '600');
@@ -318,17 +337,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 const tab = item.getAttribute('data-tab');
                 document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
                 item.classList.add('active');
-                const prof = document.getElementById('tab-profile');
-                const ufo = document.getElementById('tab-ufo');
-                if (tab === 'profile') {
-                    if (prof) prof.style.display = '';
-                    if (ufo) ufo.style.display = 'none';
-                } else if (tab === 'ufo') {
-                    if (prof) prof.style.display = 'none';
-                    if (ufo) ufo.style.display = '';
-                    // сразу загружаем таблицу при входе на вкладку НЛО
-                    loadLeagueTable();
-                }
+        const prof = document.getElementById('tab-profile');
+        const ufo = document.getElementById('tab-ufo');
+        const preds = document.getElementById('tab-predictions');
+        const lead = document.getElementById('tab-leaderboard');
+        [prof, ufo, preds, lead].forEach(el => { if (el) el.style.display = 'none'; });
+        if (tab === 'profile' && prof) prof.style.display = '';
+        if (tab === 'ufo' && ufo) { ufo.style.display = ''; loadLeagueTable(); }
+        if (tab === 'predictions' && preds) preds.style.display = '';
+        if (tab === 'leaderboard' && lead) lead.style.display = '';
                 // прокрутка к верху при смене вкладки
                 window.scrollTo({ top: 0, behavior: 'smooth' });
             });
@@ -364,12 +381,12 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
 
-        // подвкладки Профиля (Достижения/Список/Реферал)
+    // подвкладки Профиля (Достижения/Список/Реферал)
         const pTabs = document.querySelectorAll('#profile-subtabs .subtab-item');
         const pMap = {
             badges: document.getElementById('profile-pane-badges'),
-            catalog: document.getElementById('profile-pane-catalog'),
-            ref: document.getElementById('profile-pane-ref'),
+        catalog: document.getElementById('profile-pane-catalog'),
+        ref: document.getElementById('profile-pane-ref'),
         };
         pTabs.forEach(btn => {
             btn.setAttribute('data-throttle', '600');
@@ -380,14 +397,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 Object.values(pMap).forEach(el => { if (el) el.style.display = 'none'; });
                 if (pMap[key]) {
                     pMap[key].style.display = '';
-                    if (key === 'catalog') loadAchievementsCatalog();
-                    if (key === 'ref') loadReferralInfo();
+            if (key === 'catalog') loadAchievementsCatalog();
+            if (key === 'ref') loadReferralInfo();
                 }
             });
         });
 
-    const copyBtn = document.getElementById('copy-ref');
-    if (copyBtn) {
+        const copyBtn = document.getElementById('copy-ref');
+        if (copyBtn) {
             copyBtn.setAttribute('data-throttle', '1200');
             copyBtn.addEventListener('click', async () => {
                 const el = document.getElementById('referral-link');
@@ -943,12 +960,16 @@ document.addEventListener('DOMContentLoaded', () => {
     function loadReferralInfo() {
         const linkEl = document.getElementById('referral-link');
         const countEl = document.getElementById('ref-count');
+        const linkEl2 = document.getElementById('referral-link-2');
+        const countEl2 = document.getElementById('ref-count-2');
         if (!linkEl || !countEl) return;
         if (!tg || !tg.initDataUnsafe?.user) return;
         // Мгновенный рендер из кэша, если есть
         if (_referralCache) {
             linkEl.textContent = _referralCache.referral_link || _referralCache.code || '—';
             countEl.textContent = (_referralCache.invited_count ?? 0).toString();
+            if (linkEl2) linkEl2.textContent = linkEl.textContent;
+            if (countEl2) countEl2.textContent = countEl.textContent;
         }
         // Актуализируем в фоне
         const formData = new FormData();
@@ -959,6 +980,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 _referralCache = data;
                 linkEl.textContent = data.referral_link || data.code || '—';
                 countEl.textContent = (data.invited_count ?? 0).toString();
+                if (linkEl2) linkEl2.textContent = linkEl.textContent;
+                if (countEl2) countEl2.textContent = countEl.textContent;
             })
             .catch(err => console.error('referral load error', err));
     }

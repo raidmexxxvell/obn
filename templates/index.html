@@ -184,11 +184,39 @@
             <div class="nav-icon">👤</div>
             <div class="nav-label">Профиль</div>
         </div>
+        <div class="nav-item" data-tab="predictions">
+            <div class="nav-icon">📈</div>
+            <div class="nav-label">Прогнозы</div>
+        </div>
+        <div class="nav-item" data-tab="leaderboard">
+            <div class="nav-icon">🏆</div>
+            <div class="nav-label">Лидерборд</div>
+        </div>
         <div class="nav-item" data-tab="ufo">
             <div class="nav-icon">👽</div>
             <div class="nav-label">НЛО</div>
         </div>
     </nav>
+
+    <!-- Экраны-заглушки для новых вкладок -->
+    <div id="tab-predictions" style="display:none;">
+        <div class="top-bar">
+            <div class="league-title">Лига Обнинска</div>
+            <img class="league-logo" src="/static/img/logo.png" alt="Логотип лиги">
+        </div>
+        <div class="league-table-wrap">
+            <div style="padding:12px; color: var(--gray);">Раздел «Прогнозы» в разработке.</div>
+        </div>
+    </div>
+    <div id="tab-leaderboard" style="display:none;">
+        <div class="top-bar">
+            <div class="league-title">Лига Обнинска</div>
+            <img class="league-logo" src="/static/img/logo.png" alt="Логотип лиги">
+        </div>
+        <div class="league-table-wrap">
+            <div style="padding:12px; color: var(--gray);">Раздел «Лидерборд» в разработке.</div>
+        </div>
+    </div>
 
     <script src="/static/js/splash.js"></script>
     <script src="/static/js/profile.js"></script>
