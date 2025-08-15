@@ -252,7 +252,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!newName || !newName.trim() || newName === elements.userName.textContent) return;
         const original = elements.userName.textContent;
         elements.userName.textContent = 'Сохранение...';
-        if (!tg || !tg.initDataUnsafe?.user) { showError('Невозможно обновить имя без Telegram WebApp'); elements.userName.textContent = original; return; }
+        if (!tg || !tg.initDataUnsafe?.user) { elements.userName.textContent = original; return; }
 
     const formData = new FormData();
     formData.append('initData', tg.initData || '');
@@ -260,8 +260,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         fetch('/api/update-name', { method:'POST', body: formData })
         .then(res => { if (res.status === 401) throw new Error('Unauthorized'); return res.json(); })
-        .then(data => { if (elements.userName) elements.userName.textContent = data.display_name; showSuccessMessage('Имя успешно изменено!'); })
-        .catch(err => { console.error('update name err', err); if (elements.userName) elements.userName.textContent = original; showError('Не удалось изменить имя.'); });
+        .then(data => { if (elements.userName) elements.userName.textContent = data.display_name; })
+        .catch(err => {
+            console.error('update name err', err);
+            if (elements.userName) elements.userName.textContent = original;
+            try { tg?.showAlert?.('Не удалось изменить имя'); } catch (_) { try { alert('Не удалось изменить имя'); } catch(_){} }
+        });
     }
 
     function showError(msg) { if (elements.checkinStatus) { elements.checkinStatus.textContent = msg; elements.checkinStatus.style.color = 'var(--danger)'; setTimeout(()=>{ elements.checkinStatus.textContent=''; elements.checkinStatus.style.color=''; },3000);} else console.warn(msg); }
