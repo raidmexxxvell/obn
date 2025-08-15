@@ -21,7 +21,21 @@ from sqlalchemy.orm import sessionmaker, declarative_base, Session
 app = Flask(__name__, static_folder='static', template_folder='templates')
 
 # Database
-DATABASE_URL = os.environ.get('DATABASE_URL', '').strip()
+import re
+
+def _normalize_db_url(url: str) -> str:
+    if not url:
+        return url
+    # Render/Heroku style postgres:// -> postgresql://
+    if url.startswith('postgres://'):
+        url = 'postgresql://' + url[len('postgres://'):]
+    # If driver not specified, force psycopg (psycopg3)
+    if url.startswith('postgresql://') and '+psycopg' not in url and '+psycopg2' not in url:
+        url = 'postgresql+psycopg://' + url[len('postgresql://'):]
+    return url
+
+DATABASE_URL_RAW = os.environ.get('DATABASE_URL', '').strip()
+DATABASE_URL = _normalize_db_url(DATABASE_URL_RAW)
 engine = create_engine(DATABASE_URL) if DATABASE_URL else None
 SessionLocal = sessionmaker(bind=engine) if engine else None
 Base = declarative_base()
