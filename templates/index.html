@@ -192,6 +192,10 @@
             <div class="nav-icon">🏆</div>
             <div class="nav-label">Лидерборд</div>
         </div>
+        <div class="nav-item" data-tab="shop">
+            <div class="nav-icon">🛒</div>
+            <div class="nav-label">Магазин</div>
+        </div>
         <div class="nav-item" data-tab="ufo">
             <div class="nav-icon">👽</div>
             <div class="nav-label">НЛО</div>
@@ -214,8 +218,94 @@
         </div>
     </div>
     <div id="tab-leaderboard" style="display:none;">
-        <div class="league-table-wrap">
-            <div style="padding:12px; color: var(--gray);">Раздел «Лидерборд» в разработке.</div>
+        <div class="leaderboard-wrap">
+            <div class="subtabs" id="leader-subtabs">
+                <div class="subtab-item active" data-ltab="predictors">Топ прогнозистов</div>
+                <div class="subtab-item" data-ltab="rich">Топ богачей</div>
+                <div class="subtab-item" data-ltab="server">Лидеры сервера</div>
+                <div class="subtab-item" data-ltab="prizes">Призы</div>
+            </div>
+            <div id="leader-week-badge" class="leader-week-badge" style="text-align:center; color: var(--gray); font-size: 12px; margin: 4px 0 0;">Неделя: —</div>
+            <div id="leader-pane-predictors" class="leader-pane">
+                <div class="league-table-wrap">
+                    <table class="league-table" id="lb-predictors">
+                        <thead>
+                            <tr><th>#</th><th>Имя</th><th>Ставок</th><th>Выигрышей</th><th>Win%</th></tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                    <div class="table-updated" id="lb-predictors-updated"></div>
+                </div>
+            </div>
+            <div id="leader-pane-rich" class="leader-pane" style="display:none;">
+                <div class="league-table-wrap">
+                    <table class="league-table" id="lb-rich">
+                        <thead>
+                            <tr><th>#</th><th>Имя</th><th>Прирост</th></tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                    <div class="table-updated" id="lb-rich-updated"></div>
+                </div>
+            </div>
+            <div id="leader-pane-server" class="leader-pane" style="display:none;">
+                <div class="league-table-wrap">
+                    <table class="league-table" id="lb-server">
+                        <thead>
+                            <tr><th>#</th><th>Имя</th><th>Уровень</th><th>XP</th><th>Серия</th><th>Скор</th></tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                    <div class="table-updated" id="lb-server-updated"></div>
+                </div>
+            </div>
+            <div id="leader-pane-prizes" class="leader-pane" style="display:none;">
+                <div class="prizes-wrap" id="lb-prizes">
+                    <!-- Здесь будут пьедесталы трех категорий -->
+                </div>
+                <div class="table-updated" id="lb-prizes-updated"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Вкладка Магазин -->
+    <div id="tab-shop" style="display:none;">
+        <div class="predictions-wrap">
+            <div class="subtabs" id="shop-subtabs">
+                <div class="subtab-item active" data-stab="store">Магазин</div>
+                <div class="subtab-item" data-stab="cart">Корзина</div>
+            </div>
+            <div id="shop-pane-store" class="pred-pane">
+                <div class="store-grid">
+                    <div class="store-item">
+                        <div class="store-img"></div>
+                        <div class="store-name">Стикерпак</div>
+                        <div class="store-price">500 кредитов</div>
+                        <button class="details-btn" disabled>В корзину</button>
+                    </div>
+                    <div class="store-item">
+                        <div class="store-img"></div>
+                        <div class="store-name">Футболка</div>
+                        <div class="store-price">5 000 кредитов</div>
+                        <button class="details-btn" disabled>В корзину</button>
+                    </div>
+                    <div class="store-item">
+                        <div class="store-img"></div>
+                        <div class="store-name">Бейдж PRO</div>
+                        <div class="store-price">2 500 кредитов</div>
+                        <button class="details-btn" disabled>В корзину</button>
+                    </div>
+                    <div class="store-item">
+                        <div class="store-img"></div>
+                        <div class="store-name">VIP-роль</div>
+                        <div class="store-price">10 000 кредитов</div>
+                        <button class="details-btn" disabled>В корзину</button>
+                    </div>
+                </div>
+            </div>
+            <div id="shop-pane-cart" class="pred-pane" style="display:none;">
+                <div style="padding:12px; color: var(--gray);">Корзина пуста.</div>
+            </div>
         </div>
     </div>
 

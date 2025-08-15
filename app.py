@@ -5,6 +5,7 @@ import time
 import hashlib
 import hmac
 from datetime import datetime, date, timezone
+from datetime import timedelta
 from urllib.parse import parse_qs
 
 from flask import Flask, request, jsonify, render_template
@@ -13,7 +14,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 from sqlalchemy import (
-    create_engine, Column, Integer, String, Text, DateTime, Date
+    create_engine, Column, Integer, String, Text, DateTime, Date, func, case, and_
 )
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 
@@ -52,6 +53,29 @@ STATS_TABLE_TTL = 30  # сек
 
 MATCH_DETAILS_CACHE = {}
 MATCH_DETAILS_TTL = 30  # сек
+
+# Leaderboards caches (обновляются раз в час)
+LEADER_PRED_CACHE = {'data': None, 'ts': 0, 'etag': ''}
+LEADER_RICH_CACHE = {'data': None, 'ts': 0, 'etag': ''}
+LEADER_SERVER_CACHE = {'data': None, 'ts': 0, 'etag': ''}
+LEADER_PRIZES_CACHE = {'data': None, 'ts': 0, 'etag': ''}
+LEADER_TTL = 60 * 60  # 1 час
+
+def _week_period_start_msk_to_utc(now_utc: datetime|None = None) -> datetime:
+    """Возвращает UTC-время начала текущего лидерборд-периода: понедельник 03:00 по МСК (UTC+3).
+    Если сейчас до этого момента в понедельник, берём предыдущий понедельник 03:00 МСК.
+    """
+    if now_utc is None:
+        now_utc = datetime.now(timezone.utc)
+    # Переводим в псевдо-МСК: UTC+3 (Москва без переходов)
+    now_msk = now_utc + timedelta(hours=3)
+    # Найти понедельник этой недели
+    # Monday = 0; Sunday = 6
+    week_monday_msk = (now_msk - timedelta(days=now_msk.weekday())).replace(hour=3, minute=0, second=0, microsecond=0)
+    if now_msk < week_monday_msk:
+        week_monday_msk = week_monday_msk - timedelta(days=7)
+    # Вернуть в UTC
+    return week_monday_msk - timedelta(hours=3)
 
 # Betting config
 BET_MIN_STAKE = int(os.environ.get('BET_MIN_STAKE', '10'))
@@ -291,6 +315,43 @@ class MatchSpecials(Base):
     penalty_yes = Column(Integer, default=None)   # 1=yes, 0=no, None=не задано
     redcard_yes = Column(Integer, default=None)   # 1=yes, 0=no, None=не задано
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+class UserPhoto(Base):
+    __tablename__ = 'user_photos'
+    user_id = Column(Integer, primary_key=True)
+    photo_url = Column(Text, nullable=True)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+class WeeklyCreditBaseline(Base):
+    __tablename__ = 'weekly_credit_baselines'
+    user_id = Column(Integer, primary_key=True)
+    period_start = Column(DateTime(timezone=True), primary_key=True)
+    credits_base = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+def ensure_weekly_baselines(db: Session, period_start: datetime):
+    """Создаёт снимок credits для всех пользователей в начале недели (если ещё не создан).
+    Также добавляет недостающие снимки для новых пользователей, появившихся в середине недели.
+    """
+    # Если для периода нет ни одной записи — создаём снимки для всех пользователей
+    existing_count = db.query(WeeklyCreditBaseline).filter(WeeklyCreditBaseline.period_start == period_start).count()
+    if existing_count == 0:
+        users = db.query(User.user_id, User.credits).all()
+        now = datetime.now(timezone.utc)
+        for u in users:
+            db.add(WeeklyCreditBaseline(user_id=int(u.user_id), period_start=period_start, credits_base=int(u.credits or 0), created_at=now))
+        db.commit()
+    else:
+        # Добавим для тех, кого нет (новые пользователи)
+        user_ids = [uid for (uid,) in db.query(User.user_id).all()]
+        if user_ids:
+            existing_ids = set(uid for (uid,) in db.query(WeeklyCreditBaseline.user_id).filter(WeeklyCreditBaseline.period_start == period_start).all())
+            missing = [uid for uid in user_ids if uid not in existing_ids]
+            if missing:
+                now = datetime.now(timezone.utc)
+                for uid, credits in db.query(User.user_id, User.credits).filter(User.user_id.in_(missing)).all():
+                    db.add(WeeklyCreditBaseline(user_id=int(uid), period_start=period_start, credits_base=int(credits or 0), created_at=now))
+                db.commit()
 
 if engine is not None:
     try:
@@ -734,6 +795,259 @@ def serialize_user(db_user: 'User'):
         'created_at': (db_user.created_at or datetime.now(timezone.utc)).isoformat(),
         'updated_at': (db_user.updated_at or datetime.now(timezone.utc)).isoformat(),
     }
+
+# ---------------------- LEADERBOARDS API ----------------------
+def _etag_for_payload(payload: dict) -> str:
+    try:
+        raw = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode('utf-8')
+        return hashlib.sha1(raw).hexdigest()
+    except Exception:
+        return str(int(time.time()))
+
+def _cache_fresh(cache_obj: dict, ttl: int) -> bool:
+    return bool(cache_obj.get('data') is not None and (time.time() - (cache_obj.get('ts') or 0) < ttl))
+
+@app.route('/api/leaderboard/top-predictors')
+def api_leader_top_predictors():
+    """Топ-10 прогнозистов: имя, всего ставок, выигрышных, % выигрышных. Кэш 1 час."""
+    global LEADER_PRED_CACHE
+    if _cache_fresh(LEADER_PRED_CACHE, LEADER_TTL):
+        client_etag = request.headers.get('If-None-Match')
+        if client_etag and client_etag == LEADER_PRED_CACHE.get('etag'):
+            return ('', 304)
+        return jsonify({
+            'items': LEADER_PRED_CACHE['data'],
+            'updated_at': datetime.fromtimestamp(LEADER_PRED_CACHE['ts']).isoformat(),
+            'version': LEADER_PRED_CACHE.get('etag')
+        })
+    if SessionLocal is None:
+        return jsonify({'items': [], 'updated_at': None}), 200
+    db: Session = get_db()
+    try:
+        # Посчитаем по таблице ставок
+        # won: status='won'
+        won_case = case((Bet.status == 'won', 1), else_=0)
+        period_start = _week_period_start_msk_to_utc()
+        q = (
+            db.query(
+                User.user_id.label('user_id'),
+                (User.display_name).label('display_name'),
+                (User.tg_username).label('tg_username'),
+                func.count(Bet.id).label('bets_total'),
+                func.sum(won_case).label('bets_won')
+            )
+            .join(Bet, Bet.user_id == User.user_id)
+            .filter(Bet.placed_at >= period_start)
+            .group_by(User.user_id, User.display_name, User.tg_username)
+            .having(func.count(Bet.id) > 0)
+        )
+        rows = []
+        for r in q:
+            total = int(r.bets_total or 0)
+            won = int(r.bets_won or 0)
+            pct = round((won / total) * 100, 1) if total > 0 else 0.0
+            rows.append({
+                'user_id': int(r.user_id),
+                'display_name': r.display_name or 'User',
+                'tg_username': r.tg_username or '',
+                'bets_total': total,
+                'bets_won': won,
+                'winrate': pct
+            })
+        # Сортировка: по % выигрышных, затем по количеству ставок, затем по имени
+        rows.sort(key=lambda x: (-x['winrate'], -x['bets_total'], x['display_name']))
+        rows = rows[:10]
+        payload = {'items': rows}
+        etag = _etag_for_payload(payload)
+        LEADER_PRED_CACHE = { 'data': rows, 'ts': time.time(), 'etag': etag }
+        client_etag = request.headers.get('If-None-Match')
+        if client_etag and client_etag == etag:
+            return ('', 304)
+        resp = jsonify({ 'items': rows, 'updated_at': datetime.now(timezone.utc).isoformat(), 'version': etag })
+        resp.headers['ETag'] = etag
+        resp.headers['Cache-Control'] = 'public, max-age=3600, stale-while-revalidate=600'
+        return resp
+    finally:
+        db.close()
+
+@app.route('/api/leaderboard/top-rich')
+def api_leader_top_rich():
+    """Топ-10 по приросту кредитов за текущую неделю (с понедельника 03:00 МСК)."""
+    global LEADER_RICH_CACHE
+    if _cache_fresh(LEADER_RICH_CACHE, LEADER_TTL):
+        client_etag = request.headers.get('If-None-Match')
+        if client_etag and client_etag == LEADER_RICH_CACHE.get('etag'):
+            return ('', 304)
+        return jsonify({
+            'items': LEADER_RICH_CACHE['data'],
+            'updated_at': datetime.fromtimestamp(LEADER_RICH_CACHE['ts']).isoformat(),
+            'version': LEADER_RICH_CACHE.get('etag')
+        })
+    if SessionLocal is None:
+        return jsonify({'items': [], 'updated_at': None}), 200
+    db: Session = get_db()
+    try:
+        period_start = _week_period_start_msk_to_utc()
+        ensure_weekly_baselines(db, period_start)
+        # прирост = current_credits - baseline
+        users = db.query(User).all()
+        # получим baseline'ы пачкой
+        bases = { (int(r.user_id)): int(r.credits_base or 0) for r in db.query(WeeklyCreditBaseline).filter(WeeklyCreditBaseline.period_start == period_start).all() }
+        rows = []
+        for u in users:
+            base = bases.get(int(u.user_id), int(u.credits or 0))
+            gain = int(u.credits or 0) - base
+            rows.append({
+                'user_id': int(u.user_id),
+                'display_name': u.display_name or 'User',
+                'tg_username': u.tg_username or '',
+                'gain': int(gain)
+            })
+        # сортировка по gain убыв.
+        rows.sort(key=lambda x: (-x['gain'], x['display_name']))
+        rows = rows[:10]
+        payload = {'items': rows}
+        etag = _etag_for_payload(payload)
+        LEADER_RICH_CACHE = { 'data': rows, 'ts': time.time(), 'etag': etag }
+        client_etag = request.headers.get('If-None-Match')
+        if client_etag and client_etag == etag:
+            return ('', 304)
+        resp = jsonify({ 'items': rows, 'updated_at': datetime.now(timezone.utc).isoformat(), 'version': etag })
+        resp.headers['ETag'] = etag
+        resp.headers['Cache-Control'] = 'public, max-age=3600, stale-while-revalidate=600'
+        return resp
+    finally:
+        db.close()
+
+@app.route('/api/leaderboard/server-leaders')
+def api_leader_server_leaders():
+    """Лидеры сервера: пример метрики — суммарный XP + streak (или уровень).
+    Можно настроить по-другому: например, активность (кол-во чек-инов за месяц) или приглашённые.
+    Возвращаем топ-10 по score = xp + level*100 + consecutive_days*5.
+    """
+    global LEADER_SERVER_CACHE
+    if _cache_fresh(LEADER_SERVER_CACHE, LEADER_TTL):
+        client_etag = request.headers.get('If-None-Match')
+        if client_etag and client_etag == LEADER_SERVER_CACHE.get('etag'):
+            return ('', 304)
+        return jsonify({
+            'items': LEADER_SERVER_CACHE['data'],
+            'updated_at': datetime.fromtimestamp(LEADER_SERVER_CACHE['ts']).isoformat(),
+            'version': LEADER_SERVER_CACHE.get('etag')
+        })
+    if SessionLocal is None:
+        return jsonify({'items': [], 'updated_at': None}), 200
+    db: Session = get_db()
+    try:
+        users = db.query(User).all()
+        rows = []
+        for u in users:
+            score = int(u.xp or 0) + int(u.level or 0) * 100 + int(u.consecutive_days or 0) * 5
+            rows.append({
+                'user_id': int(u.user_id),
+                'display_name': u.display_name or 'User',
+                'tg_username': u.tg_username or '',
+                'xp': int(u.xp or 0),
+                'level': int(u.level or 1),
+                'streak': int(u.consecutive_days or 0),
+                'score': score
+            })
+        rows.sort(key=lambda x: (-x['score'], -x['level'], -x['xp']))
+        rows = rows[:10]
+        payload = {'items': rows}
+        etag = _etag_for_payload(payload)
+        LEADER_SERVER_CACHE = { 'data': rows, 'ts': time.time(), 'etag': etag }
+        client_etag = request.headers.get('If-None-Match')
+        if client_etag and client_etag == etag:
+            return ('', 304)
+        resp = jsonify({ 'items': rows, 'updated_at': datetime.now(timezone.utc).isoformat(), 'version': etag })
+        resp.headers['ETag'] = etag
+        resp.headers['Cache-Control'] = 'public, max-age=3600, stale-while-revalidate=600'
+        return resp
+    finally:
+        db.close()
+
+@app.route('/api/leaderboard/prizes')
+def api_leader_prizes():
+    """Возвращает пьедесталы по трем категориям: прогнозисты, богачи, лидеры сервера (по 3 места).
+    Включаем только display_name и user_id (фото на фронте через Telegram).
+    """
+    global LEADER_PRIZES_CACHE
+    if _cache_fresh(LEADER_PRIZES_CACHE, LEADER_TTL):
+        client_etag = request.headers.get('If-None-Match')
+        if client_etag and client_etag == LEADER_PRIZES_CACHE.get('etag'):
+            return ('', 304)
+        return jsonify({
+            'data': LEADER_PRIZES_CACHE['data'],
+            'updated_at': datetime.fromtimestamp(LEADER_PRIZES_CACHE['ts']).isoformat(),
+            'version': LEADER_PRIZES_CACHE.get('etag')
+        })
+    # Собираем топы, как в отдельных эндпоинтах
+    preds = []
+    rich = []
+    serv = []
+    if SessionLocal is None:
+        payload = {'predictors': preds, 'rich': rich, 'server': serv}
+        return jsonify({'data': payload, 'updated_at': None})
+    db: Session = get_db()
+    try:
+        # predictors (только за период недели)
+        period_start = _week_period_start_msk_to_utc()
+        won_case = case((Bet.status == 'won', 1), else_=0)
+        q1 = (
+            db.query(
+                User.user_id.label('user_id'),
+                User.display_name.label('display_name'),
+                User.tg_username.label('tg_username'),
+                func.count(Bet.id).label('bets_total'),
+                func.sum(won_case).label('bets_won')
+            )
+            .join(Bet, Bet.user_id == User.user_id)
+            .filter(Bet.placed_at >= period_start)
+            .group_by(User.user_id, User.display_name, User.tg_username)
+            .having(func.count(Bet.id) > 0)
+        )
+        tmp = []
+        for r in q1:
+            total = int(r.bets_total or 0); won = int(r.bets_won or 0)
+            pct = round((won / total) * 100, 1) if total > 0 else 0.0
+            tmp.append({'user_id': int(r.user_id), 'display_name': r.display_name or 'User', 'tg_username': (r.tg_username or ''), 'winrate': pct, 'total': total})
+        tmp.sort(key=lambda x: (-x['winrate'], -x['total'], x['display_name']))
+        preds = tmp[:3]
+
+        # rich — недельный прирост кредитов с понедельника 03:00 МСК
+        period_start = _week_period_start_msk_to_utc()
+        ensure_weekly_baselines(db, period_start)
+        bases = { int(r.user_id): int(r.credits_base or 0) for r in db.query(WeeklyCreditBaseline).filter(WeeklyCreditBaseline.period_start == period_start).all() }
+        tmp_rich = []
+        for u in db.query(User).all():
+            base = bases.get(int(u.user_id), int(u.credits or 0))
+            gain = int(u.credits or 0) - base
+            tmp_rich.append({ 'user_id': int(u.user_id), 'display_name': u.display_name or 'User', 'tg_username': (u.tg_username or ''), 'value': int(gain) })
+        tmp_rich.sort(key=lambda x: (-x['value'], x['display_name']))
+        rich = tmp_rich[:3]
+
+        # server
+        users = db.query(User).all()
+        tmp2 = []
+        for u in users:
+            score = int(u.xp or 0) + int(u.level or 0) * 100 + int(u.consecutive_days or 0) * 5
+            tmp2.append({ 'user_id': int(u.user_id), 'display_name': u.display_name or 'User', 'tg_username': (u.tg_username or ''), 'score': score })
+        tmp2.sort(key=lambda x: -x['score'])
+        serv = tmp2[:3]
+    finally:
+        db.close()
+
+    payload = {'predictors': preds, 'rich': rich, 'server': serv}
+    etag = _etag_for_payload(payload)
+    LEADER_PRIZES_CACHE = { 'data': payload, 'ts': time.time(), 'etag': etag }
+    client_etag = request.headers.get('If-None-Match')
+    if client_etag and client_etag == etag:
+        return ('', 304)
+    resp = jsonify({ 'data': payload, 'updated_at': datetime.now(timezone.utc).isoformat(), 'version': etag })
+    resp.headers['ETag'] = etag
+    resp.headers['Cache-Control'] = 'public, max-age=3600, stale-while-revalidate=600'
+    return resp
 def parse_and_verify_telegram_init_data(init_data: str, max_age_seconds: int = 24*60*60):
     """Парсит и проверяет initData из Telegram WebApp.
     Возвращает dict с полями 'user', 'auth_date', 'raw' при успехе, иначе None.
@@ -913,6 +1227,28 @@ def get_user():
         finally:
             db.close()
 
+        # Сохраним аватар (photo_url) пользователя, если пришёл из Telegram
+        try:
+            if parsed.get('user') and parsed['user'].get('photo_url') and SessionLocal is not None:
+                db2: Session = get_db()
+                try:
+                    uid = int(user_data['id'])
+                    url = parsed['user'].get('photo_url')
+                    row = db2.get(UserPhoto, uid)
+                    now = datetime.now(timezone.utc)
+                    if row:
+                        if url and row.photo_url != url:
+                            row.photo_url = url
+                            row.updated_at = now
+                            db2.commit()
+                    else:
+                        db2.add(UserPhoto(user_id=uid, photo_url=url, updated_at=now))
+                        db2.commit()
+                finally:
+                    db2.close()
+        except Exception as e:
+            app.logger.warning(f"Mirror user photo failed: {e}")
+
         # Зеркалим в Google Sheets (best-effort)
         try:
             mirror_user_to_sheets(db_user)
@@ -924,6 +1260,33 @@ def get_user():
     except Exception as e:
         app.logger.error(f"Ошибка получения пользователя: {str(e)}")
         return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
+
+@app.route('/api/user/avatars')
+def api_user_avatars():
+    """Возвращает словарь { user_id: photo_url } для запрошенных ID (через ids=1,2,3).
+    Пустые/None не включаем. Кэш браузера допустим на 1 час.
+    """
+    ids_param = request.args.get('ids', '').strip()
+    if not ids_param or SessionLocal is None:
+        return jsonify({'avatars': {}})
+    try:
+        ids = [int(x) for x in ids_param.split(',') if x.strip().isdigit()]
+    except Exception:
+        ids = []
+    if not ids:
+        return jsonify({'avatars': {}})
+    db: Session = get_db()
+    try:
+        rows = db.query(UserPhoto).filter(UserPhoto.user_id.in_(ids)).all()
+        out = {}
+        for r in rows:
+            if r.photo_url:
+                out[str(int(r.user_id))] = r.photo_url
+        resp = jsonify({'avatars': out})
+        resp.headers['Cache-Control'] = 'public, max-age=3600'
+        return resp
+    finally:
+        db.close()
 
 @app.route('/api/referral', methods=['POST'])
 def api_referral():

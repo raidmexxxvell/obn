@@ -122,20 +122,6 @@ document.addEventListener('DOMContentLoaded', () => {
             .catch(err => { console.error('fetchUserData', err); showError('Не удалось загрузить данные'); throw err; });
     }
 
-    function fetchAchievements() {
-        if (!tg || !tg.initDataUnsafe?.user) {
-            renderAchievements([{ tier:1, name:'Бронза', days:7, icon:'bronze', unlocked:false }]);
-            return Promise.resolve();
-        }
-    const formData = new FormData();
-    formData.append('initData', tg.initData || '');
-
-        return fetch('/api/achievements', { method: 'POST', body: formData })
-            .then(res => res.json())
-            .then(data => renderAchievements(data.achievements || []))
-            .catch(err => { console.error('fetchAchievements', err); renderAchievements([{ tier:1, name:'Бронза', days:7, icon:'bronze', unlocked:false }]); });
-    }
-
     function renderUserProfile(user) {
         if (!user) return;
         let avatarLoaded = false;
@@ -155,17 +141,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (elements.userName) elements.userName.textContent = user.display_name || 'User';
         // После установки имени пробуем диспатчить готовность
         tryDispatchReady();
-    if (elements.credits) elements.credits.textContent = (user.credits || 0).toLocaleString();
-    if (elements.level) elements.level.textContent = user.level || 1;
+        if (elements.credits) elements.credits.textContent = (user.credits || 0).toLocaleString();
+        if (elements.level) elements.level.textContent = user.level || 1;
 
         const lvl = user.level || 1;
-    if (elements.currentLevel) elements.currentLevel.textContent = lvl;
+        if (elements.currentLevel) elements.currentLevel.textContent = lvl;
         const xpForNextLevel = lvl * 100;
         const currentXp = (user.xp || 0) % xpForNextLevel;
         if (elements.xp) elements.xp.textContent = `${currentXp}/${xpForNextLevel}`;
         if (elements.currentXp) elements.currentXp.textContent = currentXp;
         if (elements.xpNeeded) elements.xpNeeded.textContent = xpForNextLevel;
-    if (elements.xpProgress) elements.xpProgress.style.width = `${Math.min(Math.max((xpForNextLevel ? (currentXp / xpForNextLevel) * 100 : 0),0),100)}%`;
+        if (elements.xpProgress) elements.xpProgress.style.width = `${Math.min(Math.max((xpForNextLevel ? (currentXp / xpForNextLevel) * 100 : 0),0),100)}%`;
     }
 
     function renderCheckinSection(user) {
@@ -337,15 +323,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 const tab = item.getAttribute('data-tab');
                 document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
                 item.classList.add('active');
-        const prof = document.getElementById('tab-profile');
+    const prof = document.getElementById('tab-profile');
         const ufo = document.getElementById('tab-ufo');
         const preds = document.getElementById('tab-predictions');
         const lead = document.getElementById('tab-leaderboard');
-        [prof, ufo, preds, lead].forEach(el => { if (el) el.style.display = 'none'; });
-        if (tab === 'profile' && prof) prof.style.display = '';
-        if (tab === 'ufo' && ufo) { ufo.style.display = ''; loadLeagueTable(); }
-        if (tab === 'predictions' && preds) preds.style.display = '';
-        if (tab === 'leaderboard' && lead) lead.style.display = '';
+    const shop = document.getElementById('tab-shop');
+    [prof, ufo, preds, lead, shop].forEach(el => { if (el) el.style.display = 'none'; });
+    if (tab === 'profile' && prof) prof.style.display = '';
+    if (tab === 'ufo' && ufo) { ufo.style.display = ''; loadLeagueTable(); }
+    if (tab === 'predictions' && preds) preds.style.display = '';
+    if (tab === 'leaderboard' && lead) { lead.style.display = ''; ensureLeaderboardInit(); }
+    if (tab === 'shop' && shop) { shop.style.display = ''; }
                 // прокрутка к верху при смене вкладки
                 window.scrollTo({ top: 0, behavior: 'smooth' });
             });
@@ -414,6 +402,22 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
     }
+
+    // Подвкладки Магазина
+    document.addEventListener('DOMContentLoaded', () => {
+        const tabs = document.querySelectorAll('#shop-subtabs .subtab-item');
+        const panes = { store: document.getElementById('shop-pane-store'), cart: document.getElementById('shop-pane-cart') };
+        tabs.forEach(btn => {
+            btn.setAttribute('data-throttle', '600');
+            btn.addEventListener('click', () => {
+                const key = btn.getAttribute('data-stab');
+                tabs.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                Object.values(panes).forEach(p => { if (p) p.style.display = 'none'; });
+                if (panes[key]) panes[key].style.display = '';
+            });
+        });
+    });
 
     let _leagueLoading = false;
     function loadLeagueTable() {
@@ -518,6 +522,218 @@ document.addEventListener('DOMContentLoaded', () => {
     }).catch(err => {
             console.error('stats table load error', err);
     }).finally(() => { _statsLoading = false; });
+    }
+
+    // --------- ЛИДЕРБОРД ---------
+    let _leaderInited = false;
+    function ensureLeaderboardInit() {
+        if (_leaderInited) return;
+        _leaderInited = true;
+        // подвкладки
+        const tabs = document.querySelectorAll('#leader-subtabs .subtab-item');
+        const panes = {
+            predictors: document.getElementById('leader-pane-predictors'),
+            rich: document.getElementById('leader-pane-rich'),
+            server: document.getElementById('leader-pane-server'),
+            prizes: document.getElementById('leader-pane-prizes'),
+        };
+        // бейдж недели: вычислим старт периода (понедельник 03:00 МСК) и конец
+        try {
+            const badge = document.getElementById('leader-week-badge');
+            if (badge) {
+                const now = new Date();
+                // переводим now в МСК (UTC+3) без учёта DST (как на сервере)
+                const mskNow = new Date(now.getTime() + 3*60*60*1000);
+                const wd = mskNow.getUTCDay(); // 0-вс,1-пн,.. 6-сб для UTC-времени, но на mskNow смещение уже учтено
+                // найдём понедельник этой недели в МСК
+                const diffDays = (wd === 0 ? 6 : (wd - 1)); // сколько дней от пн
+                const monday = new Date(Date.UTC(mskNow.getUTCFullYear(), mskNow.getUTCMonth(), mskNow.getUTCDate(), 3, 0, 0));
+                monday.setUTCDate(monday.getUTCDate() - diffDays);
+                // если текущее mskNow ещё до понедельника 03:00 — берём предыдущую неделю
+                const mondayCut = new Date(Date.UTC(mskNow.getUTCFullYear(), mskNow.getUTCMonth(), mskNow.getUTCDate(), 3, 0, 0));
+                if (mskNow < mondayCut) {
+                    monday.setUTCDate(monday.getUTCDate() - 7);
+                }
+                const periodStartUtc = new Date(monday.getTime() - 3*60*60*1000); // вернёмся в UTC для читаемости
+                const periodEndUtc = new Date(periodStartUtc.getTime() + 7*24*60*60*1000);
+                const fmt = (d) => `${d.getDate().toString().padStart(2,'0')}.${(d.getMonth()+1).toString().padStart(2,'0')}`;
+                // ISO номер недели считаем по МСК-дате начала периода
+                const mskStart = new Date(periodStartUtc.getTime() + 3*60*60*1000);
+                const getISOWeek = (date) => {
+                    // преобразуем к четвергу той же недели для вычисления номера
+                    const tmp = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+                    const day = tmp.getUTCDay() || 7; // 1..7
+                    tmp.setUTCDate(tmp.getUTCDate() + 4 - day);
+                    const yearStart = new Date(Date.UTC(tmp.getUTCFullYear(), 0, 1));
+                    const weekNo = Math.ceil((((tmp - yearStart) / 86400000) + 1) / 7);
+                    return weekNo;
+                };
+                const weekNo = getISOWeek(mskStart);
+                badge.textContent = `Неделя №${weekNo}: ${fmt(periodStartUtc)} — ${fmt(new Date(periodEndUtc.getTime()-1))}`;
+            }
+        } catch(_) {}
+        tabs.forEach(btn => {
+            btn.setAttribute('data-throttle', '600');
+            btn.addEventListener('click', () => {
+                const key = btn.getAttribute('data-ltab');
+                tabs.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                Object.values(panes).forEach(p => { if (p) p.style.display = 'none'; });
+                if (panes[key]) panes[key].style.display = '';
+                if (key === 'predictors') loadLBPredictors();
+                else if (key === 'rich') loadLBRich();
+                else if (key === 'server') loadLBServer();
+                else if (key === 'prizes') loadLBPrizes();
+            });
+        });
+        // первичная загрузка
+        loadLBPredictors();
+    }
+
+    function etagFetch(url, cacheKey) {
+        const cached = (() => { try { return JSON.parse(localStorage.getItem(cacheKey) || 'null'); } catch(_) { return null; } })();
+        const ifNone = cached?.version ? { 'If-None-Match': cached.version } : {};
+        return fetch(url, { headers: ifNone })
+            .then(async r => {
+                if (r.status === 304 && cached) return cached; // валидный кэш
+                const data = await r.json();
+                const version = data.version || r.headers.get('ETag') || null;
+                const store = { data, version, ts: Date.now() };
+                try { localStorage.setItem(cacheKey, JSON.stringify(store)); } catch(_) {}
+                return store;
+            })
+            .catch(err => { if (cached) return cached; throw err; });
+    }
+
+    function loadLBPredictors() {
+        const table = document.querySelector('#lb-predictors tbody');
+        const updated = document.getElementById('lb-predictors-updated');
+        if (!table) return;
+        etagFetch('/api/leaderboard/top-predictors', 'lb:predictors')
+            .then(store => {
+                const items = store?.data?.items || [];
+                table.innerHTML = '';
+                items.forEach((it, idx) => {
+                    const tr = document.createElement('tr');
+                    if (idx === 0) tr.classList.add('rank-1');
+                    if (idx === 1) tr.classList.add('rank-2');
+                    if (idx === 2) tr.classList.add('rank-3');
+                    tr.innerHTML = `<td>${idx+1}</td><td>${escapeHtml(it.display_name)}</td><td>${it.bets_total}</td><td>${it.bets_won}</td><td>${it.winrate}%</td>`;
+                    table.appendChild(tr);
+                });
+                if (updated && store?.data?.updated_at) {
+                    try { updated.textContent = `Обновлено: ${new Date(store.data.updated_at).toLocaleString()}`; } catch(_) {}
+                }
+            })
+            .catch(err => console.error('lb predictors err', err));
+    }
+
+    function loadLBRich() {
+        const table = document.querySelector('#lb-rich tbody');
+        const updated = document.getElementById('lb-rich-updated');
+        if (!table) return;
+        etagFetch('/api/leaderboard/top-rich', 'lb:rich')
+            .then(store => {
+                const items = store?.data?.items || [];
+                table.innerHTML = '';
+                items.forEach((it, idx) => {
+                    const tr = document.createElement('tr');
+                    if (idx === 0) tr.classList.add('rank-1');
+                    if (idx === 1) tr.classList.add('rank-2');
+                    if (idx === 2) tr.classList.add('rank-3');
+                    tr.innerHTML = `<td>${idx+1}</td><td>${escapeHtml(it.display_name)}</td><td>${Number(it.gain||0).toLocaleString()}</td>`;
+                    table.appendChild(tr);
+                });
+                if (updated && store?.data?.updated_at) {
+                    try { updated.textContent = `Обновлено: ${new Date(store.data.updated_at).toLocaleString()}`; } catch(_) {}
+                }
+            })
+            .catch(err => console.error('lb rich err', err));
+    }
+
+    function loadLBServer() {
+        const table = document.querySelector('#lb-server tbody');
+        const updated = document.getElementById('lb-server-updated');
+        if (!table) return;
+        etagFetch('/api/leaderboard/server-leaders', 'lb:server')
+            .then(store => {
+                const items = store?.data?.items || [];
+                table.innerHTML = '';
+                items.forEach((it, idx) => {
+                    const tr = document.createElement('tr');
+                    if (idx === 0) tr.classList.add('rank-1');
+                    if (idx === 1) tr.classList.add('rank-2');
+                    if (idx === 2) tr.classList.add('rank-3');
+                    tr.innerHTML = `<td>${idx+1}</td><td>${escapeHtml(it.display_name)}</td><td>${it.level}</td><td>${it.xp}</td><td>${it.streak}</td><td>${it.score}</td>`;
+                    table.appendChild(tr);
+                });
+                if (updated && store?.data?.updated_at) {
+                    try { updated.textContent = `Обновлено: ${new Date(store.data.updated_at).toLocaleString()}`; } catch(_) {}
+                }
+            })
+            .catch(err => console.error('lb server err', err));
+    }
+
+    function loadLBPrizes() {
+        const host = document.getElementById('lb-prizes');
+        const updated = document.getElementById('lb-prizes-updated');
+        if (!host) return;
+        etagFetch('/api/leaderboard/prizes', 'lb:prizes')
+            .then(store => {
+                const data = store?.data?.data || {};
+                host.innerHTML = '';
+                const blocks = [
+                    { key: 'predictors', title: 'Топ прогнозистов' },
+                    { key: 'rich', title: 'Топ богачей' },
+                    { key: 'server', title: 'Лидеры сервера' },
+                ];
+                // загрузим аватарки победителей одним запросом
+                const allIds = new Set();
+                blocks.forEach(b => { (data[b.key]||[]).forEach(it => { if (it?.user_id) allIds.add(it.user_id); }); });
+                const idsParam = Array.from(allIds).join(',');
+                const render = (avatars) => {
+                    blocks.forEach(b => {
+                    const section = document.createElement('div'); section.className = 'prize-block';
+                    const h = document.createElement('h3'); h.textContent = b.title; section.appendChild(h);
+                    const podium = document.createElement('div'); podium.className = 'podium';
+                    const items = data[b.key] || [];
+                    // порядок пьедестала: 2-е, 1-е, 3-е для симметрии
+                    const order = [1, 0, 2];
+                    order.forEach(i => {
+                        const it = items[i];
+                        const pl = document.createElement('div'); pl.className = 'podium-place';
+                        if (i === 0) pl.classList.add('gold');
+                        if (i === 1) pl.classList.add('silver');
+                        if (i === 2) pl.classList.add('bronze');
+                        const avatar = document.createElement('div'); avatar.className = 'podium-avatar';
+                        const img = document.createElement('img'); img.alt = it?.display_name || '';
+                        // Аватар с бэкенда, если есть; иначе заглушка
+                        const key = it?.user_id ? String(it.user_id) : null;
+                        const photo = (key && avatars && avatars[key]) ? avatars[key] : '/static/img/achievements/placeholder.png';
+                        img.src = photo;
+                        avatar.appendChild(img);
+                        const name = document.createElement('div'); name.className = 'podium-name'; name.textContent = it ? it.display_name : '—';
+                        pl.append(avatar, name);
+                        podium.appendChild(pl);
+                    });
+                    section.appendChild(podium);
+                    host.appendChild(section);
+                    });
+                };
+                if (idsParam) {
+                    fetch(`/api/user/avatars?ids=${encodeURIComponent(idsParam)}`).then(r=>r.json()).then(d => { render(d.avatars||{}); }).catch(()=>{ render({}); });
+                } else {
+                    render({});
+                }
+                if (updated && store?.data?.updated_at) {
+                    try { updated.textContent = `Обновлено: ${new Date(store.data.updated_at).toLocaleString()}`; } catch(_) {}
+                }
+            })
+            .catch(err => console.error('lb prizes err', err));
+    }
+
+    function escapeHtml(s) {
+        return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
     }
 
     // --------- РАСПИСАНИЕ ---------
