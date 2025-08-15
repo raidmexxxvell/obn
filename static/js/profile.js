@@ -73,6 +73,63 @@ document.addEventListener('DOMContentLoaded', () => {
         editName: document.getElementById('edit-name')
     };
 
+    // Любимый клуб + счётчики фанатов команд
+    const favoriteTeamSelect = document.getElementById('favorite-team');
+    let _teamCountsCache = { byTeam: {}, teams: [], ts: 0 };
+    async function fetchTeamsAndCounts(force = false) {
+        try {
+            const now = Date.now();
+            if (!force && _teamCountsCache.ts && (now - _teamCountsCache.ts) < 5 * 60 * 1000) return _teamCountsCache;
+            const res = await fetch('/api/teams');
+            if (!res.ok) return _teamCountsCache;
+            const data = await res.json();
+            _teamCountsCache = { byTeam: data.counts || {}, teams: data.teams || [], ts: Date.now() };
+            return _teamCountsCache;
+        } catch(_) { return _teamCountsCache; }
+    }
+    function withTeamCount(name) {
+        const n = (name || '').toString();
+        try {
+            const cnt = _teamCountsCache.byTeam && _teamCountsCache.byTeam[n];
+            return cnt ? `${n} (${cnt})` : n;
+        } catch(_) { return n; }
+    }
+    function renderFavoriteSelect(currentFavorite) {
+        if (!favoriteTeamSelect) return;
+        favoriteTeamSelect.innerHTML = '';
+        const ph = document.createElement('option'); ph.value = ''; ph.textContent = '— выбрать —';
+        favoriteTeamSelect.appendChild(ph);
+        (_teamCountsCache.teams || []).forEach(t => {
+            const opt = document.createElement('option');
+            opt.value = t;
+            const cnt = _teamCountsCache.byTeam && _teamCountsCache.byTeam[t] ? ` (${_teamCountsCache.byTeam[t]})` : '';
+            opt.textContent = t + cnt;
+            if (currentFavorite && currentFavorite === t) opt.selected = true;
+            favoriteTeamSelect.appendChild(opt);
+        });
+    }
+    async function initFavoriteTeamUI(user) {
+        await fetchTeamsAndCounts();
+        renderFavoriteSelect(user && (user.favorite_team || user.favoriteTeam));
+    }
+    async function saveFavoriteTeam(value) {
+        try {
+            if (!value) {
+                const res = await fetch('/api/user/favorite-team', { method: 'DELETE' });
+                if (!res.ok) return false;
+            } else {
+                const res = await fetch('/api/user/favorite-team', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ team: value }) });
+                if (!res.ok) return false;
+            }
+            await fetchTeamsAndCounts(true);
+            renderFavoriteSelect(value);
+            return true;
+        } catch(_) { return false; }
+    }
+    if (favoriteTeamSelect) {
+        favoriteTeamSelect.addEventListener('change', (e) => { const v = e.target.value || ''; saveFavoriteTeam(v); });
+    }
+
     // Управление заставкой вынесено в static/js/splash.js
 
     // --- Антиспам защиты ---
@@ -174,7 +231,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (res.status === 401) { showError('Ошибка авторизации'); tg?.close?.(); throw new Error('Unauthorized'); }
                 return res.json();
             })
-            .then(data => { renderUserProfile(data); renderCheckinSection(data); return data; })
+            .then(async data => { renderUserProfile(data); renderCheckinSection(data); await initFavoriteTeamUI(data); return data; })
             .catch(err => { console.error('fetchUserData', err); showError('Не удалось загрузить данные'); throw err; });
     }
 
@@ -571,12 +628,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const tbody = table.querySelector('tbody');
             tbody.innerHTML = '';
             const rows = data.values || [];
-            for (let i = 0; i < 10; i++) {
+        for (let i = 0; i < 10; i++) {
                 const r = rows[i] || [];
                 const tr = document.createElement('tr');
                 for (let j = 0; j < 8; j++) {
                     const td = document.createElement('td');
-                    td.textContent = (r[j] ?? '').toString();
+            td.textContent = (r[j] ?? '').toString();
                     tr.appendChild(td);
                 }
                 tbody.appendChild(tr);
@@ -912,7 +969,7 @@ document.addEventListener('DOMContentLoaded', () => {
             };
             tryNext();
         };
-        const renderSchedule = (data) => {
+    const renderSchedule = (data) => {
             const ds = data?.tours ? data : (data?.data || {});
             const tours = ds.tours || [];
             if (!tours.length) {
@@ -980,13 +1037,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     const home = document.createElement('div'); home.className = 'team home';
                     const hImg = document.createElement('img'); hImg.className = 'logo'; hImg.alt = m.home || '';
                     loadTeamLogo(hImg, m.home || '');
-                    const hName = document.createElement('div'); hName.className = 'team-name'; hName.textContent = m.home || '';
+                    const hName = document.createElement('div'); hName.className = 'team-name'; hName.setAttribute('data-team-name', m.home || ''); hName.textContent = withTeamCount(m.home || '');
                     home.append(hImg, hName);
                     const score = document.createElement('div'); score.className = 'score'; score.textContent = 'VS';
                     const away = document.createElement('div'); away.className = 'team away';
                     const aImg = document.createElement('img'); aImg.className = 'logo'; aImg.alt = m.away || '';
                     loadTeamLogo(aImg, m.away || '');
-                    const aName = document.createElement('div'); aName.className = 'team-name'; aName.textContent = m.away || '';
+                    const aName = document.createElement('div'); aName.className = 'team-name'; aName.setAttribute('data-team-name', m.away || ''); aName.textContent = withTeamCount(m.away || '');
                     away.append(aImg, aName);
                     center.append(home, score, away);
                     card.appendChild(center);
@@ -1130,7 +1187,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return store;
             });
 
-        const renderResults = (data) => {
+    const renderResults = (data) => {
             const all = data?.results || [];
             if (!all.length) {
                 if (pane.childElementCount > 0 || pane.dataset.hasContent === '1') {
@@ -1180,7 +1237,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const home = document.createElement('div'); home.className = 'team home';
                     const hImg = document.createElement('img'); hImg.className = 'logo'; hImg.alt = m.home || '';
                     loadTeamLogo(hImg, m.home || '');
-                    const hName = document.createElement('div'); hName.className = 'team-name'; hName.textContent = m.home || '';
+                    const hName = document.createElement('div'); hName.className = 'team-name'; hName.setAttribute('data-team-name', m.home || ''); hName.textContent = withTeamCount(m.home || '');
                     home.append(hImg, hName);
                     const score = document.createElement('div'); score.className = 'score';
                     const sH = (m.score_home || '').toString().trim(); const sA = (m.score_away || '').toString().trim();
@@ -1188,7 +1245,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const away = document.createElement('div'); away.className = 'team away';
                     const aImg = document.createElement('img'); aImg.className = 'logo'; aImg.alt = m.away || '';
                     loadTeamLogo(aImg, m.away || '');
-                    const aName = document.createElement('div'); aName.className = 'team-name'; aName.textContent = m.away || '';
+                    const aName = document.createElement('div'); aName.className = 'team-name'; aName.setAttribute('data-team-name', m.away || ''); aName.textContent = withTeamCount(m.away || '');
                     away.append(aImg, aName);
 
                     // Подсветка победителя: постоянное золотое кольцо + усиление при hover
@@ -1264,7 +1321,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ---------- MATCH DETAILS SCREEN (in-app, not modal) ----------
     function openMatchScreen(match, details) {
-        const schedulePane = document.getElementById('ufo-schedule');
+    const schedulePane = document.getElementById('ufo-schedule');
         const mdPane = document.getElementById('ufo-match-details');
         if (!schedulePane || !mdPane) return;
         // показать экран деталей
@@ -1295,8 +1352,11 @@ document.addEventListener('DOMContentLoaded', () => {
             next();
         };
 
-        hName.textContent = match.home || '';
-        aName.textContent = match.away || '';
+    // Показываем названия с числом фанатов; атрибуты храним «сырые»
+    hName.setAttribute('data-team-name', match.home || '');
+    aName.setAttribute('data-team-name', match.away || '');
+    hName.textContent = withTeamCount(match.home || '');
+    aName.textContent = withTeamCount(match.away || '');
         setLogo(hLogo, match.home || '');
         setLogo(aLogo, match.away || '');
         score.textContent = '— : —';
@@ -1395,8 +1455,8 @@ document.addEventListener('DOMContentLoaded', () => {
         let placeAfter = null;
         cards.forEach(c => {
             const teamEls = c.querySelectorAll('.team-name');
-            const h = teamEls[0]?.textContent || '';
-            const a = teamEls[1]?.textContent || '';
+            const h = teamEls[0]?.getAttribute('data-team-name') || teamEls[0]?.textContent || '';
+            const a = teamEls[1]?.getAttribute('data-team-name') || teamEls[1]?.textContent || '';
             if (h === (m.home||'') && a === (m.away||'')) placeAfter = c;
         });
         if (!placeAfter) return;

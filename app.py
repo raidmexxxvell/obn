@@ -59,6 +59,46 @@ MATCH_DETAILS_TTL = 30  # сек
 RANKS_CACHE = {'data': None, 'ts': 0}
 RANKS_TTL = 600  # 10 минут
 
+# ---------------------- METRICS ----------------------
+METRICS_LOCK = threading.Lock()
+METRICS = {
+    'bg_runs_total': 0,
+    'bg_runs_errors': 0,
+    'last_sync': {},          # key -> iso time
+    'last_sync_status': {},   # key -> 'ok'|'error'
+    'last_sync_duration_ms': {},
+    'sheet_reads': 0,
+    'sheet_writes': 0,
+    'sheet_rate_limit_hits': 0,
+    'sheet_last_error': ''
+}
+
+def _metrics_inc(key: str, delta: int = 1):
+    try:
+        with METRICS_LOCK:
+            METRICS[key] = int(METRICS.get(key, 0)) + delta
+    except Exception:
+        pass
+
+def _metrics_set(map_key: str, key: str, value):
+    try:
+        with METRICS_LOCK:
+            if map_key not in METRICS or not isinstance(METRICS[map_key], dict):
+                METRICS[map_key] = {}
+            METRICS[map_key][key] = value
+    except Exception:
+        pass
+
+def _metrics_note_rate_limit(err: Exception):
+    try:
+        msg = str(err)
+        if 'RESOURCE_EXHAUSTED' in msg or 'Read requests' in msg or '429' in msg:
+            _metrics_inc('sheet_rate_limit_hits', 1)
+            with METRICS_LOCK:
+                METRICS['sheet_last_error'] = msg[:500]
+    except Exception:
+        pass
+
 # Leaderboards caches (обновляются раз в час)
 LEADER_PRED_CACHE = {'data': None, 'ts': 0, 'etag': ''}
 LEADER_RICH_CACHE = {'data': None, 'ts': 0, 'etag': ''}
@@ -341,6 +381,12 @@ class UserPhoto(Base):
     photo_url = Column(Text, nullable=True)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
+class UserPref(Base):
+    __tablename__ = 'user_prefs'
+    user_id = Column(Integer, primary_key=True)
+    favorite_team = Column(Text, nullable=True)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
 class WeeklyCreditBaseline(Base):
     __tablename__ = 'weekly_credit_baselines'
     user_id = Column(Integer, primary_key=True)
@@ -451,6 +497,7 @@ def get_achievements_sheet():
     except gspread.exceptions.WorksheetNotFound:
         ws = doc.add_worksheet(title="achievements", rows=1000, cols=10)
         # user_id | credits_tier | credits_unlocked_at | level_tier | level_unlocked_at | streak_tier | streak_unlocked_at | invited_tier | invited_unlocked_at
+        _metrics_inc('sheet_writes', 1)
         ws.update('A1:I1', [[
             'user_id', 'credits_tier', 'credits_unlocked_at', 'level_tier', 'level_unlocked_at', 'streak_tier', 'streak_unlocked_at', 'invited_tier', 'invited_unlocked_at'
         ]])
@@ -463,6 +510,7 @@ def get_achievements_sheet():
             if len(headers) >= 7:
                 if len(headers) < 9:
                     headers += ['invited_tier', 'invited_unlocked_at']
+            _metrics_inc('sheet_writes', 1)
             ws.update('A1:I1', [headers[:9]])
     except Exception as e:
         app.logger.warning(f"Не удалось проверить/обновить заголовки achievements: {e}")
@@ -697,6 +745,7 @@ def mirror_referral_to_sheets(user_id: int, referral_code: str, referrer_id: int
     created_at = created_at_iso or updated_at
     if not cell:
         try:
+            _metrics_inc('sheet_writes', 1)
             ws.append_row([
                 str(user_id), referral_code or '', str(referrer_id or ''), str(invited_count or 0), created_at, updated_at
             ])
@@ -705,6 +754,7 @@ def mirror_referral_to_sheets(user_id: int, referral_code: str, referrer_id: int
     else:
         row = cell.row
         try:
+            _metrics_inc('sheet_writes', 1)
             ws.batch_update([
                 {'range': f'B{row}', 'values': [[referral_code or '']]},
                 {'range': f'C{row}', 'values': [[str(referrer_id or '')]]},
@@ -823,11 +873,13 @@ def mirror_user_to_sheets(db_user: 'User'):
             updated_at
         ]
         try:
+            _metrics_inc('sheet_writes', 1)
             sheet.append_row(new_row)
         except Exception as e:
             app.logger.warning(f"Не удалось добавить пользователя в лист users: {e}")
     else:
         try:
+            _metrics_inc('sheet_writes', 1)
             sheet.batch_update([
                 {'range': f'B{row_num}', 'values': [[db_user.display_name or 'User']]},
                 {'range': f'C{row_num}', 'values': [[db_user.tg_username or '']]},
@@ -861,6 +913,70 @@ def serialize_user(db_user: 'User'):
         'created_at': (db_user.created_at or datetime.now(timezone.utc)).isoformat(),
         'updated_at': (db_user.updated_at or datetime.now(timezone.utc)).isoformat(),
     }
+
+def _get_teams_from_snapshot(db: Session) -> list[str]:
+    """Возвращает список команд из снапшота 'league-table' (колонка с названиями, 9 шт.)."""
+    teams = []
+    snap = _snapshot_get(db, 'league-table')
+    payload = snap and snap.get('payload')
+    values = payload and payload.get('values') or []
+    for i in range(1, min(len(values), 10)):
+        row = values[i] or []
+        name = (row[1] if len(row) > 1 else '').strip()
+        if name:
+            teams.append(name)
+    return teams
+
+@app.route('/api/teams', methods=['GET'])
+def api_teams():
+    """Возвращает список команд из таблицы НЛО и счётчики любимых клубов пользователей.
+    Формат: { teams: [..], counts: { teamName: n }, updated_at: iso }
+    """
+    if SessionLocal is None:
+        return jsonify({'teams': [], 'counts': {}, 'updated_at': None})
+    db: Session = get_db()
+    try:
+        teams = _get_teams_from_snapshot(db)
+        # counts
+        rows = db.query(UserPref.favorite_team, func.count(UserPref.user_id)).filter(UserPref.favorite_team.isnot(None)).group_by(UserPref.favorite_team).all()
+        counts = { (t or ''): int(n or 0) for (t, n) in rows if t }
+        return jsonify({'teams': teams, 'counts': counts, 'updated_at': datetime.now(timezone.utc).isoformat()})
+    finally:
+        db.close()
+
+@app.route('/api/user/favorite-team', methods=['POST'])
+def api_set_favorite_team():
+    """Сохраняет любимый клуб пользователя. Поля: initData, team (строка или пусто для очистки)."""
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = int(parsed['user'].get('id'))
+        if SessionLocal is None:
+            return jsonify({'error': 'БД недоступна'}), 500
+        raw_team = (request.form.get('team') or '').strip()
+        db: Session = get_db()
+        try:
+            # валидация по текущему списку команд
+            teams = _get_teams_from_snapshot(db)
+            team = raw_team if raw_team in teams else ('' if raw_team == '' else None)
+            if team is None:
+                return jsonify({'error': 'Некорректная команда'}), 400
+            pref = db.get(UserPref, user_id)
+            when = datetime.now(timezone.utc)
+            if not pref:
+                pref = UserPref(user_id=user_id, favorite_team=(team or None), updated_at=when)
+                db.add(pref)
+            else:
+                pref.favorite_team = (team or None)
+                pref.updated_at = when
+            db.commit()
+            return jsonify({'status': 'ok', 'favorite_team': (team or '')})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"Ошибка favorite-team: {e}")
+        return jsonify({'error': 'Не удалось сохранить'}), 500
 
 # ---------------------- LEADERBOARDS API ----------------------
 def _etag_for_payload(payload: dict) -> str:
@@ -912,7 +1028,12 @@ def _snapshot_set(db: Session, key: str, payload: dict):
 # ---------------------- BUILDERS FROM SHEETS ----------------------
 def _build_league_payload_from_sheet():
     ws = get_table_sheet()
-    values = ws.get('A1:H10') or []
+    _metrics_inc('sheet_reads', 1)
+    try:
+        values = ws.get('A1:H10') or []
+    except Exception as e:
+        _metrics_note_rate_limit(e)
+        raise
     normalized = []
     for i in range(10):
         row = values[i] if i < len(values) else []
@@ -927,7 +1048,12 @@ def _build_league_payload_from_sheet():
 
 def _build_stats_payload_from_sheet():
     ws = get_stats_sheet()
-    values = ws.get('A1:G11') or []
+    _metrics_inc('sheet_reads', 1)
+    try:
+        values = ws.get('A1:G11') or []
+    except Exception as e:
+        _metrics_note_rate_limit(e)
+        raise
     normalized = []
     for i in range(11):
         row = values[i] if i < len(values) else []
@@ -942,7 +1068,12 @@ def _build_stats_payload_from_sheet():
 
 def _build_schedule_payload_from_sheet():
     ws = get_schedule_sheet()
-    rows = ws.get_all_values() or []
+    _metrics_inc('sheet_reads', 1)
+    try:
+        rows = ws.get_all_values() or []
+    except Exception as e:
+        _metrics_note_rate_limit(e)
+        raise
 
     def parse_date(d: str):
         d = (d or '').strip()
@@ -1062,7 +1193,12 @@ def _build_schedule_payload_from_sheet():
 
 def _build_results_payload_from_sheet():
     ws = get_schedule_sheet()
-    rows = ws.get_all_values() or []
+    _metrics_inc('sheet_reads', 1)
+    try:
+        rows = ws.get_all_values() or []
+    except Exception as e:
+        _metrics_note_rate_limit(e)
+        raise
 
     def parse_date(d: str):
         d = (d or '').strip()
@@ -1164,10 +1300,15 @@ def _bg_sync_once():
         return
     db = get_db()
     try:
+        _metrics_inc('bg_runs_total', 1)
         # League table
         try:
+            t0 = time.time()
             league_payload = _build_league_payload_from_sheet()
             _snapshot_set(db, 'league-table', league_payload)
+            _metrics_set('last_sync', 'league-table', datetime.now(timezone.utc).isoformat())
+            _metrics_set('last_sync_status', 'league-table', 'ok')
+            _metrics_set('last_sync_duration_ms', 'league-table', int((time.time()-t0)*1000))
             # also persist normalized rows to relational tables (as before)
             normalized = league_payload.get('values') or []
             when = datetime.now(timezone.utc)
@@ -1188,11 +1329,17 @@ def _bg_sync_once():
             db.commit()
         except Exception as e:
             app.logger.warning(f"BG sync league failed: {e}")
+            _metrics_set('last_sync_status', 'league-table', 'error')
+            _metrics_note_rate_limit(e)
 
         # Stats table
         try:
+            t0 = time.time()
             stats_payload = _build_stats_payload_from_sheet()
             _snapshot_set(db, 'stats-table', stats_payload)
+            _metrics_set('last_sync', 'stats-table', datetime.now(timezone.utc).isoformat())
+            _metrics_set('last_sync_status', 'stats-table', 'ok')
+            _metrics_set('last_sync_duration_ms', 'stats-table', int((time.time()-t0)*1000))
             # persist relational
             normalized = stats_payload.get('values') or []
             when = datetime.now(timezone.utc)
@@ -1213,37 +1360,62 @@ def _bg_sync_once():
             db.commit()
         except Exception as e:
             app.logger.warning(f"BG sync stats failed: {e}")
+            _metrics_set('last_sync_status', 'stats-table', 'error')
+            _metrics_note_rate_limit(e)
 
         # Schedule
         try:
+            t0 = time.time()
             schedule_payload = _build_schedule_payload_from_sheet()
             _snapshot_set(db, 'schedule', schedule_payload)
+            _metrics_set('last_sync', 'schedule', datetime.now(timezone.utc).isoformat())
+            _metrics_set('last_sync_status', 'schedule', 'ok')
+            _metrics_set('last_sync_duration_ms', 'schedule', int((time.time()-t0)*1000))
         except Exception as e:
             app.logger.warning(f"BG sync schedule failed: {e}")
+            _metrics_set('last_sync_status', 'schedule', 'error')
+            _metrics_note_rate_limit(e)
 
         # Results
         try:
+            t0 = time.time()
             results_payload = _build_results_payload_from_sheet()
             _snapshot_set(db, 'results', results_payload)
+            _metrics_set('last_sync', 'results', datetime.now(timezone.utc).isoformat())
+            _metrics_set('last_sync_status', 'results', 'ok')
+            _metrics_set('last_sync_duration_ms', 'results', int((time.time()-t0)*1000))
         except Exception as e:
             app.logger.warning(f"BG sync results failed: {e}")
+            _metrics_set('last_sync_status', 'results', 'error')
+            _metrics_note_rate_limit(e)
 
         # Betting tours (enriched with odds/markets/locks for nearest tour)
         try:
+            t0 = time.time()
             tours_payload = _build_betting_tours_payload()
             _snapshot_set(db, 'betting-tours', tours_payload)
+            _metrics_set('last_sync', 'betting-tours', datetime.now(timezone.utc).isoformat())
+            _metrics_set('last_sync_status', 'betting-tours', 'ok')
+            _metrics_set('last_sync_duration_ms', 'betting-tours', int((time.time()-t0)*1000))
         except Exception as e:
             app.logger.warning(f"BG sync betting-tours failed: {e}")
+            _metrics_set('last_sync_status', 'betting-tours', 'error')
 
         # Leaderboards precompute (hourly semantics; run on each loop, responses are cached by clients)
         try:
+            t0 = time.time()
             lb_payloads = _build_leaderboards_payloads(db)
             _snapshot_set(db, 'leader-top-predictors', lb_payloads['top_predictors'])
             _snapshot_set(db, 'leader-top-rich', lb_payloads['top_rich'])
             _snapshot_set(db, 'leader-server-leaders', lb_payloads['server_leaders'])
             _snapshot_set(db, 'leader-prizes', lb_payloads['prizes'])
+            now_iso = datetime.now(timezone.utc).isoformat()
+            _metrics_set('last_sync', 'leaderboards', now_iso)
+            _metrics_set('last_sync_status', 'leaderboards', 'ok')
+            _metrics_set('last_sync_duration_ms', 'leaderboards', int((time.time()-t0)*1000))
         except Exception as e:
             app.logger.warning(f"BG sync leaderboards failed: {e}")
+            _metrics_set('last_sync_status', 'leaderboards', 'error')
     finally:
         db.close()
 
@@ -1253,6 +1425,7 @@ def _bg_sync_loop(interval_sec: int):
             _bg_sync_once()
         except Exception as e:
             app.logger.warning(f"BG sync loop error: {e}")
+            _metrics_inc('bg_runs_errors', 1)
         try:
             time.sleep(interval_sec)
         except Exception:
@@ -1914,7 +2087,18 @@ def get_user():
         except Exception as e:
             app.logger.warning(f"Mirror user to sheets failed: {e}")
 
-        return jsonify(serialize_user(db_user))
+        # Дополнительно вернём favorite_team из user_prefs
+        fav = ''
+        if SessionLocal is not None:
+            db3: Session = get_db()
+            try:
+                p = db3.get(UserPref, int(user_data['id']))
+                fav = (p.favorite_team or '') if p else ''
+            finally:
+                db3.close()
+        u = serialize_user(db_user)
+        u['favorite_team'] = fav
+        return jsonify(u)
 
     except Exception as e:
         app.logger.error(f"Ошибка получения пользователя: {str(e)}")
@@ -2304,6 +2488,27 @@ def health():
     """Healthcheck для Render.com"""
     return jsonify(status="healthy"), 200
 
+@app.route('/health/sync')
+def health_sync():
+    """Показывает статус фонового синка и квоты Sheets (метрики)."""
+    try:
+        with METRICS_LOCK:
+            data = {
+                'status': 'ok',
+                'bg_runs_total': METRICS.get('bg_runs_total', 0),
+                'bg_runs_errors': METRICS.get('bg_runs_errors', 0),
+                'last_sync': METRICS.get('last_sync', {}),
+                'last_sync_status': METRICS.get('last_sync_status', {}),
+                'last_sync_duration_ms': METRICS.get('last_sync_duration_ms', {}),
+                'sheet_reads': METRICS.get('sheet_reads', 0),
+                'sheet_writes': METRICS.get('sheet_writes', 0),
+                'sheet_rate_limit_hits': METRICS.get('sheet_rate_limit_hits', 0),
+                'sheet_last_error': METRICS.get('sheet_last_error', '')
+            }
+        return jsonify(data), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
 # Optional: Telegram webhook stub to avoid 404 noise if set to this app accidentally
 @app.route('/<path:maybe_token>', methods=['POST'])
 def telegram_webhook_stub(maybe_token: str):
@@ -2403,7 +2608,12 @@ def _load_all_tours_from_sheet():
     Формат тура: { tour:int, title:str, start_at:iso, matches:[{home,away,date,time,datetime,score_home,score_away}] }
     """
     ws = get_schedule_sheet()
-    rows = ws.get_all_values() or []
+    _metrics_inc('sheet_reads', 1)
+    try:
+        rows = ws.get_all_values() or []
+    except Exception as e:
+        _metrics_note_rate_limit(e)
+        raise
 
     def parse_date(d: str):
         d = (d or '').strip()
@@ -2830,6 +3040,7 @@ def api_match_details():
             return resp
 
         ws = get_rosters_sheet()
+        _metrics_inc('sheet_reads', 1)
         headers = ws.row_values(1) or []
         # карта нормализованных заголовков -> индекс (1-based)
         idx_map = {}
@@ -2851,6 +3062,7 @@ def api_match_details():
                         break
             if col_idx is None:
                 return {'team': team_name, 'players': []}
+            _metrics_inc('sheet_reads', 1)
             col_vals = ws.col_values(col_idx)
             # убираем заголовок
             players = [v.strip() for v in col_vals[1:] if v and v.strip()]
