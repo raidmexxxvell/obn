@@ -28,6 +28,13 @@ STATS_TABLE_CACHE = {
 }
 STATS_TABLE_TTL = 60 * 60  # 1 час
 
+# Кеш для расписания (ближайшие 3 тура)
+SCHEDULE_CACHE = {
+    'ts': 0,
+    'data': None
+}
+SCHEDULE_TTL = 60 * 60  # 1 час
+
 # ---------------- PostgreSQL / SQLAlchemy -----------------
 DATABASE_URL = os.environ.get('DATABASE_URL') or os.environ.get('DATABASE_URL_RENDER')
 if not DATABASE_URL:
@@ -244,6 +251,15 @@ def get_stats_sheet():
         raise ValueError("SHEET_ID не установлен в переменных окружения")
     doc = client.open_by_key(sheet_id)
     return doc.worksheet("СТАТИСТИКА")
+
+def get_schedule_sheet():
+    """Возвращает лист расписания 'РАСПИСАНИЕ ИГР'."""
+    client = get_google_client()
+    sheet_id = os.environ.get('SHEET_ID')
+    if not sheet_id:
+        raise ValueError("SHEET_ID не установлен в переменных окружения")
+    doc = client.open_by_key(sheet_id)
+    return doc.worksheet("РАСПИСАНИЕ ИГР")
 
 def get_user_achievements_row(user_id):
     """Читает или инициализирует строку достижений пользователя."""
@@ -965,6 +981,119 @@ def api_league_table():
     except Exception as e:
         app.logger.error(f"Ошибка загрузки таблицы лиги: {str(e)}")
         return jsonify({'error': 'Не удалось загрузить таблицу'}), 500
+
+@app.route('/api/schedule', methods=['GET'])
+def api_schedule():
+    """Возвращает ближайшие 3 тура из листа 'РАСПИСАНИЕ ИГР'.
+    Ожидается структура блоками: строка с 'N Тур', затем 3-5 строк матчей: A(home), E(away), F(дата dd.mm.yy), G(время HH:MM).
+    """
+    try:
+        now = int(time.time())
+        if SCHEDULE_CACHE['data'] and (now - SCHEDULE_CACHE['ts'] < SCHEDULE_TTL):
+            return jsonify(SCHEDULE_CACHE['data'])
+
+        ws = get_schedule_sheet()
+        rows = ws.get_all_values() or []
+
+        def parse_date(d: str):
+            d = (d or '').strip()
+            if not d:
+                return None
+            for fmt in ("%d.%m.%y", "%d.%m.%Y"):
+                try:
+                    return datetime.strptime(d, fmt).date()
+                except Exception:
+                    continue
+            return None
+
+        def parse_time(t: str):
+            t = (t or '').strip()
+            try:
+                return datetime.strptime(t, "%H:%M").time()
+            except Exception:
+                return None
+
+        tours = []  # [{ 'tour': 1, 'title': '1 Тур', 'matches': [...], 'start_at': iso }]
+        current_tour = None
+        current_title = None
+        current_matches = []
+
+        for r in rows:
+            a = (r[0] if len(r) > 0 else '').strip()
+            if a and a.lower().endswith('тур') and a.split()[0].isdigit():
+                # закрываем предыдущий тур
+                if current_tour is not None and current_matches:
+                    # вычислим старт тура как минимальная дата/время
+                    starts = [m.get('datetime') for m in current_matches if m.get('datetime')]
+                    start_at = min(starts).isoformat() if starts else ''
+                    tours.append({'tour': current_tour, 'title': current_title, 'start_at': start_at, 'matches': current_matches})
+                # начинаем новый
+                try:
+                    current_tour = int(a.split()[0])
+                except Exception:
+                    current_tour = None
+                current_title = a
+                current_matches = []
+                continue
+            # строки матчей (если в туре)
+            if current_tour is not None:
+                home = (r[0] if len(r) > 0 else '').strip()
+                away = (r[4] if len(r) > 4 else '').strip()
+                date_str = (r[5] if len(r) > 5 else '').strip()
+                time_str = (r[6] if len(r) > 6 else '').strip()
+                if not home and not away:
+                    continue
+                d = parse_date(date_str)
+                tm = parse_time(time_str)
+                dt = None
+                try:
+                    if d and tm:
+                        dt = datetime.combine(d, tm)
+                    elif d:
+                        dt = datetime.combine(d, datetime.min.time())
+                except Exception:
+                    dt = None
+                current_matches.append({
+                    'home': home,
+                    'away': away,
+                    'date': (d.isoformat() if d else ''),
+                    'time': time_str,
+                    'datetime': (dt.isoformat() if dt else '')
+                })
+
+        # закрыть последний блок
+        if current_tour is not None and current_matches:
+            starts = [m.get('datetime') for m in current_matches if m.get('datetime')]
+            start_at = min(starts) if starts else ''
+            tours.append({'tour': current_tour, 'title': current_title, 'start_at': start_at, 'matches': current_matches})
+
+        # фильтрация ближайших 3 туров
+        today = datetime.now().date()
+        def tour_is_upcoming(t):
+            # тур считается будущим, если у него есть матч с датой >= сегодня
+            for m in t.get('matches', []):
+                try:
+                    if m.get('date') and datetime.fromisoformat(m['date']).date() >= today:
+                        return True
+                except Exception:
+                    continue
+            return False
+
+        upcoming = [t for t in tours if tour_is_upcoming(t)]
+        # сортируем по номеру тура (наиболее надёжно)
+        upcoming.sort(key=lambda x: (x.get('tour') or 10**9))
+        upcoming = upcoming[:3]
+
+        payload = {
+            'updated_at': datetime.now(timezone.utc).isoformat(),
+            'tours': upcoming
+        }
+        SCHEDULE_CACHE['data'] = payload
+        SCHEDULE_CACHE['ts'] = int(time.time())
+        return jsonify(payload)
+    except Exception as e:
+        app.logger.error(f"Ошибка загрузки расписания: {str(e)}")
+        return jsonify({'error': 'Не удалось загрузить расписание'}), 500
 
 @app.route('/api/league-table/refresh', methods=['POST'])
 def api_league_table_refresh():

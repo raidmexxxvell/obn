@@ -591,3 +591,36 @@ body {
     background: linear-gradient(90deg, rgba(205, 127, 50, 0.18), rgba(205, 127, 50, 0.08));
     border-left: 4px solid #CD7F32;
 }
+
+/* --------- РАСПИСАНИЕ --------- */
+.tour-block { margin: 10px 0 16px; }
+.tour-title {
+    color: #7CFC9A; /* бледно-зелёный акцент как на скрине */
+    font-weight: 700;
+    margin: 8px 4px;
+}
+.match-card {
+    background: rgba(2, 6, 23, 0.92);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px;
+    padding: 10px;
+    margin: 8px 0;
+    box-shadow: 0 10px 20px rgba(0,0,0,0.25);
+}
+.match-header { color: var(--gray); font-size: 12px; margin-bottom: 6px; }
+.match-center { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; }
+.team { font-weight: 600; text-align: center; display:flex; flex-direction: column; align-items: center; gap: 6px; }
+.team .logo { width: 44px; height: 44px; object-fit: contain; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4)); }
+.team .team-name { max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.score { color: #8ef0d0; font-weight: 800; font-size: 18px; }
+.match-footer { margin-top: 10px; display: flex; justify-content: center; }
+.details-btn {
+    background: #7CFCCA;
+    color: #09323A;
+    border: none;
+    padding: 8px 14px;
+    border-radius: 10px;
+    font-weight: 700;
+    cursor: pointer;
+}
+.schedule-loading, .schedule-empty, .schedule-error { color: var(--gray); padding: 10px; }

@@ -325,6 +325,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         loadLeagueTable();
                     } else if (key === 'stats') {
                         loadStatsTable();
+                    } else if (key === 'schedule') {
+                        loadSchedule();
                     }
                 }
             });
@@ -467,6 +469,107 @@ document.addEventListener('DOMContentLoaded', () => {
     }).catch(err => {
             console.error('stats table load error', err);
     }).finally(() => { _statsLoading = false; });
+    }
+
+    // --------- РАСПИСАНИЕ ---------
+    let _scheduleLoading = false;
+    function loadSchedule() {
+        if (_scheduleLoading) return;
+        const pane = document.getElementById('ufo-schedule');
+        if (!pane) return;
+        _scheduleLoading = true;
+        pane.innerHTML = '<div class="schedule-loading">Загрузка расписания...</div>';
+
+        // Хелпер: загрузка логотипа команды с фолбэками по названию
+        const loadTeamLogo = (imgEl, teamName) => {
+            const base = '/static/img/team-logos/';
+            const name = (teamName || '').trim();
+            const candidates = [];
+            if (name) {
+                // 1) точное совпадение: "Название команды.png"
+                candidates.push(base + encodeURIComponent(name + '.png'));
+                // 2) нормализованное: нижний регистр, без пробелов
+                const norm = name.toLowerCase().replace(/\s+/g, '').replace(/ё/g, 'е');
+                candidates.push(base + encodeURIComponent(norm + '.png'));
+            }
+            // 3) дефолт
+            candidates.push(base + 'default.png');
+
+            let idx = 0;
+            const tryNext = () => {
+                if (idx >= candidates.length) return;
+                imgEl.onerror = () => { idx++; tryNext(); };
+                imgEl.src = candidates[idx];
+            };
+            tryNext();
+        };
+        fetch('/api/schedule').then(r => r.json()).then(data => {
+            pane.innerHTML = '';
+            const tours = data.tours || [];
+            tours.forEach(t => {
+                const tourEl = document.createElement('div');
+                tourEl.className = 'tour-block';
+                const title = document.createElement('div');
+                title.className = 'tour-title';
+                title.textContent = t.title || `Тур ${t.tour || ''}`;
+                tourEl.appendChild(title);
+
+                (t.matches || []).forEach(m => {
+                    const card = document.createElement('div');
+                    card.className = 'match-card';
+                    const header = document.createElement('div');
+                    header.className = 'match-header';
+                    const dateStr = (() => {
+                        try {
+                            if (m.date) {
+                                const d = new Date(m.date);
+                                const dd = d.toLocaleDateString();
+                                return dd;
+                            }
+                        } catch(_) {}
+                        return '';
+                    })();
+                    const timeStr = m.time || '';
+                    header.textContent = `${dateStr}${timeStr ? ' ' + timeStr : ''}`;
+                    card.appendChild(header);
+
+                    const center = document.createElement('div');
+                    center.className = 'match-center';
+                    const home = document.createElement('div'); home.className = 'team home';
+                    const hImg = document.createElement('img'); hImg.className = 'logo'; hImg.alt = m.home || '';
+                    loadTeamLogo(hImg, m.home || '');
+                    const hName = document.createElement('div'); hName.className = 'team-name'; hName.textContent = m.home || '';
+                    home.append(hImg, hName);
+                    const score = document.createElement('div'); score.className = 'score'; score.textContent = '— : —';
+                    const away = document.createElement('div'); away.className = 'team away';
+                    const aImg = document.createElement('img'); aImg.className = 'logo'; aImg.alt = m.away || '';
+                    loadTeamLogo(aImg, m.away || '');
+                    const aName = document.createElement('div'); aName.className = 'team-name'; aName.textContent = m.away || '';
+                    away.append(aImg, aName);
+                    center.append(home, score, away);
+                    card.appendChild(center);
+
+                    const footer = document.createElement('div');
+                    footer.className = 'match-footer';
+                    const btn = document.createElement('button');
+                    btn.className = 'details-btn';
+                    btn.textContent = 'Детали';
+                    btn.setAttribute('data-throttle', '800');
+                    footer.appendChild(btn);
+                    card.appendChild(footer);
+
+                    tourEl.appendChild(card);
+                });
+
+                pane.appendChild(tourEl);
+            });
+            if (!tours.length) {
+                pane.innerHTML = '<div class="schedule-empty">Нет ближайших туров</div>';
+            }
+        }).catch(err => {
+            console.error('schedule load error', err);
+            pane.innerHTML = '<div class="schedule-error">Не удалось загрузить расписание</div>';
+        }).finally(() => { _scheduleLoading = false; });
     }
 
     function loadAchievementsCatalog() {
