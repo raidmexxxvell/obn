@@ -79,6 +79,7 @@
             <div class="subtabs" id="profile-subtabs">
                 <div class="subtab-item active" data-psub="badges">Достижения</div>
                 <div class="subtab-item" data-psub="catalog">Список достижений</div>
+                <div class="subtab-item" data-psub="ref">Реферальная ссылка</div>
             </div>
             <div id="profile-pane-badges" class="profile-pane">
             <div class="achievements-container" id="badges">
@@ -98,14 +99,14 @@
                     <div class="table-updated" id="achv-catalog-updated"></div>
                 </div>
             </div>
+            <div id="profile-pane-ref" class="profile-pane" style="display:none;">
+                <div class="referral-box wide full">
+                    <div class="ref-link" id="referral-link">—</div>
+                    <button class="checkin-button" id="copy-ref">Скопировать ссылку</button>
+                    <div class="ref-stats">Приглашено: <span id="ref-count">0</span></div>
+                </div>
+            </div>
         </div>
-        </div>
-
-        <!-- Реферальная ссылка: всегда под достижениями/списком, на всю ширину -->
-        <div class="referral-box wide">
-            <div class="ref-link" id="referral-link">—</div>
-            <button class="checkin-button" id="copy-ref">Скопировать ссылку</button>
-            <div class="ref-stats">Приглашено: <span id="ref-count">0</span></div>
         </div>
 
         <!-- Вкладка НЛО -->

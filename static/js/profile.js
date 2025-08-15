@@ -185,18 +185,46 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.badgesContainer.innerHTML = '';
         if (!achievements || achievements.length === 0) return;
 
-        const iconSrc = (icon) => {
-            if (icon === 'bronze') return '/static/img/achievements/bronze.png';
-            if (icon === 'silver') return '/static/img/achievements/silver.png';
-            if (icon === 'gold') return '/static/img/achievements/gold.png';
-            return '/static/img/achievements/placeholder.png';
+        // Вычисление уникальной иконки для достижения с 4 уровнями: locked/bronze/silver/gold
+        const slugify = (s) => (s || '').toString().trim()
+            .toLowerCase()
+            .replace(/[\s_/]+/g, '-')
+            .replace(/[^a-z0-9\-]/g, '');
+        const stateFromTier = (a) => {
+            const t = (typeof a.tier === 'number') ? a.tier : null;
+            if (a.unlocked === false || t === 0) return 'locked';
+            if (t === 1) return 'bronze';
+            if (t === 2) return 'silver';
+            if (t === 3) return 'gold';
+            // фолбэк по старому полю icon
+            if (a.icon === 'bronze') return 'bronze';
+            if (a.icon === 'silver') return 'silver';
+            if (a.icon === 'gold') return 'gold';
+            return a.unlocked ? 'bronze' : 'locked';
+        };
+        const setAchievementIcon = (imgEl, a) => {
+            const key = a.key || a.code || a.group || a.iconKey || slugify(a.name || '');
+            const base = '/static/img/achievements/';
+            const state = stateFromTier(a);
+            const candidates = [];
+            // PNG первичны
+            if (key) candidates.push(`${base}${slugify(key)}-${state}.png`);
+            if (key && a.icon) candidates.push(`${base}${slugify(key)}-${slugify(a.icon)}.png`);
+            candidates.push(`${base}${state}.png`);
+            candidates.push(`${base}placeholder.png`);
+            // SVG как запасной вариант для каждого PNG-кандидата
+            const svgFallbacks = candidates.map(p => p.replace(/\.png$/i, '.svg'));
+            svgFallbacks.forEach(s => { if (!candidates.includes(s)) candidates.push(s); });
+            let i = 0;
+            const next = () => { if (i >= candidates.length) return; imgEl.onerror = () => { i++; next(); }; imgEl.src = candidates[i]; };
+            next();
         };
 
         achievements.forEach(a => {
             const card = document.createElement('div');
             card.className = `achievement-card ${a.unlocked ? '' : 'locked'}`;
             const icon = document.createElement('img');
-            icon.src = iconSrc(a.icon);
+            setAchievementIcon(icon, a);
             icon.alt = a.name || 'badge';
             const name = document.createElement('div'); name.className='badge-name'; name.textContent = a.name;
             const req = document.createElement('div'); req.className='badge-requirements';
@@ -341,6 +369,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const pMap = {
             badges: document.getElementById('profile-pane-badges'),
             catalog: document.getElementById('profile-pane-catalog'),
+            ref: document.getElementById('profile-pane-ref'),
         };
         pTabs.forEach(btn => {
             btn.setAttribute('data-throttle', '600');
@@ -352,6 +381,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (pMap[key]) {
                     pMap[key].style.display = '';
                     if (key === 'catalog') loadAchievementsCatalog();
+                    if (key === 'ref') loadReferralInfo();
                 }
             });
         });
