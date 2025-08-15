@@ -163,5 +163,35 @@
 
     <script src="/static/js/splash.js"></script>
     <script src="/static/js/profile.js"></script>
+
+    <!-- Modal: Match Details -->
+    <div id="match-modal" class="modal" style="display:none;">
+        <div class="modal-overlay"></div>
+        <div class="modal-content">
+            <button class="modal-close" id="match-modal-close">×</button>
+            <div class="match-modal-header">
+                <div class="team side home">
+                    <img class="logo" id="md-home-logo" alt="">
+                    <div class="name" id="md-home-name"></div>
+                </div>
+                <div class="center">
+                    <div class="score" id="md-score">— : —</div>
+                    <div class="datetime" id="md-datetime"></div>
+                </div>
+                <div class="team side away">
+                    <img class="logo" id="md-away-logo" alt="">
+                    <div class="name" id="md-away-name"></div>
+                </div>
+            </div>
+            <div class="subtabs modal-subtabs">
+                <div class="subtab-item active" data-mdtab="home">Команда 1</div>
+                <div class="subtab-item" data-mdtab="away">Команда 2</div>
+            </div>
+            <div class="modal-body">
+                <div id="md-pane-home" class="md-pane"></div>
+                <div id="md-pane-away" class="md-pane" style="display:none;"></div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

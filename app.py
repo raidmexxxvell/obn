@@ -261,6 +261,15 @@ def get_schedule_sheet():
     doc = client.open_by_key(sheet_id)
     return doc.worksheet("РАСПИСАНИЕ ИГР")
 
+def get_rosters_sheet():
+    """Возвращает лист составов 'СОСТАВЫ'. В первой строке заголовки с названиями команд."""
+    client = get_google_client()
+    sheet_id = os.environ.get('SHEET_ID')
+    if not sheet_id:
+        raise ValueError("SHEET_ID не установлен в переменных окружения")
+    doc = client.open_by_key(sheet_id)
+    return doc.worksheet("СОСТАВЫ")
+
 def get_user_achievements_row(user_id):
     """Читает или инициализирует строку достижений пользователя."""
     ws = get_achievements_sheet()
@@ -1127,6 +1136,66 @@ def api_schedule():
     except Exception as e:
         app.logger.error(f"Ошибка загрузки расписания: {str(e)}")
         return jsonify({'error': 'Не удалось загрузить расписание'}), 500
+
+@app.route('/api/match-details', methods=['GET'])
+def api_match_details():
+    """Возвращает составы двух команд из листа 'СОСТАВЫ' по их названиям.
+    Параметры: home, away (строки). Ищем соответствующие колонки в первой строке.
+    """
+    try:
+        home = (request.args.get('home') or '').strip()
+        away = (request.args.get('away') or '').strip()
+        if not home or not away:
+            return jsonify({'error': 'home и away обязательны'}), 400
+
+        def norm(s: str) -> str:
+            s = (s or '').lower().strip()
+            s = s.replace('\u00A0', ' ').replace('ё', 'е')
+            s = s.replace('фк', '', 1).strip() if s.startswith('фк') else s  # убираем префикс ФК
+            return ''.join(ch for ch in s if ch.isalnum())
+
+        ws = get_rosters_sheet()
+        headers = ws.row_values(1) or []
+        # карта нормализованных заголовков -> индекс (1-based)
+        idx_map = {}
+        for i, h in enumerate(headers, start=1):
+            key = norm(h)
+            if key:
+                idx_map[key] = i
+
+        def extract(team_name: str):
+            key = norm(team_name)
+            col_idx = idx_map.get(key)
+            # если не нашли — попробуем без лишних слов (например, второе слово и т.п.)
+            if col_idx is None:
+                # простая эвристика: оставим только буквенно-цифровые, без пробелов уже сделано
+                # попробуем найти подстрочной похожестью среди ключей
+                for k, i in idx_map.items():
+                    if key in k or k in key:
+                        col_idx = i
+                        break
+            if col_idx is None:
+                return {'team': team_name, 'players': []}
+            col_vals = ws.col_values(col_idx)
+            # убираем заголовок
+            players = [v.strip() for v in col_vals[1:] if v and v.strip()]
+            return {'team': headers[col_idx-1] or team_name, 'players': players}
+
+        home_data = extract(home)
+        away_data = extract(away)
+        return jsonify({
+            'teams': {
+                'home': home_data['team'],
+                'away': away_data['team']
+            },
+            'rosters': {
+                'home': home_data['players'],
+                'away': away_data['players']
+            }
+        })
+    except Exception as e:
+        app.logger.error(f"Ошибка получения составов: {str(e)}")
+        return jsonify({'error': 'Не удалось загрузить составы'}), 500
 
 @app.route('/api/league-table/refresh', methods=['POST'])
 def api_league_table_refresh():

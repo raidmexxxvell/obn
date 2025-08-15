@@ -557,6 +557,26 @@ document.addEventListener('DOMContentLoaded', () => {
                     btn.className = 'details-btn';
                     btn.textContent = 'Детали';
                     btn.setAttribute('data-throttle', '800');
+                    // При клике сначала загружаем составы, затем открываем модалку
+                    btn.addEventListener('click', () => {
+                        const original = btn.textContent;
+                        btn.disabled = true;
+                        btn.textContent = 'Загрузка контента...';
+                        const params = new URLSearchParams({ home: m.home || '', away: m.away || '' });
+                        fetch(`/api/match-details?${params.toString()}`)
+                          .then(r => r.json())
+                          .then(details => {
+                              openMatchModal({ home: m.home, away: m.away, date: m.date, time: m.time }, details);
+                          })
+                          .catch(err => {
+                              console.error('match details load error', err);
+                              try { window.Telegram?.WebApp?.showAlert?.('Не удалось загрузить данные матча'); } catch(_) {}
+                          })
+                          .finally(() => {
+                              btn.disabled = false;
+                              btn.textContent = original;
+                          });
+                    });
                     footer.appendChild(btn);
                     card.appendChild(footer);
 
@@ -572,6 +592,100 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('schedule load error', err);
             pane.innerHTML = '<div class="schedule-error">Не удалось загрузить расписание</div>';
         }).finally(() => { _scheduleLoading = false; });
+    }
+
+    // ---------- MODAL: MATCH DETAILS ----------
+    function openMatchModal(match, details) {
+        const modal = document.getElementById('match-modal');
+        if (!modal) return;
+        const closeBtn = document.getElementById('match-modal-close');
+        const overlay = modal.querySelector('.modal-overlay');
+        const hLogo = document.getElementById('md-home-logo');
+        const aLogo = document.getElementById('md-away-logo');
+        const hName = document.getElementById('md-home-name');
+        const aName = document.getElementById('md-away-name');
+        const score = document.getElementById('md-score');
+        const dt = document.getElementById('md-datetime');
+        const homePane = document.getElementById('md-pane-home');
+        const awayPane = document.getElementById('md-pane-away');
+
+        // логотипы
+        const setLogo = (imgEl, name) => {
+            const base = '/static/img/team-logos/';
+            const candidates = [];
+            if (name) {
+                candidates.push(base + encodeURIComponent(name + '.png'));
+                const norm = name.toLowerCase().replace(/\s+/g, '').replace(/ё/g, 'е');
+                candidates.push(base + encodeURIComponent(norm + '.png'));
+            }
+            candidates.push(base + 'default.png');
+            let i = 0;
+            const next = () => { if (i >= candidates.length) return; imgEl.onerror = () => { i++; next(); }; imgEl.src = candidates[i]; };
+            next();
+        };
+
+        hName.textContent = match.home || '';
+        aName.textContent = match.away || '';
+        setLogo(hLogo, match.home || '');
+        setLogo(aLogo, match.away || '');
+        score.textContent = '— : —';
+        try {
+            if (match.date || match.time) {
+                const d = match.date ? new Date(match.date) : null;
+                const ds = d ? d.toLocaleDateString() : '';
+                dt.textContent = `${ds}${match.time ? ' ' + match.time : ''}`;
+            } else { dt.textContent = ''; }
+        } catch(_) { dt.textContent = match.time || ''; }
+
+        // вкладки модалки
+        modal.querySelectorAll('.modal-subtabs .subtab-item').forEach((el) => el.classList.remove('active'));
+        modal.querySelector('.modal-subtabs .subtab-item[data-mdtab="home"]').classList.add('active');
+        homePane.style.display = '';
+        awayPane.style.display = 'none';
+
+        // заполнение составов из details (если переданы)
+        const renderRoster = (pane, players) => {
+            pane.innerHTML = '';
+            const ul = document.createElement('ul');
+            ul.className = 'roster-list';
+            if (!players || players.length === 0) {
+                const li = document.createElement('li');
+                li.className = 'empty';
+                li.textContent = 'Нет данных';
+                ul.appendChild(li);
+            } else {
+                players.forEach(p => { const li = document.createElement('li'); li.textContent = p; ul.appendChild(li); });
+            }
+            pane.appendChild(ul);
+        };
+        if (details && details.rosters) {
+            renderRoster(homePane, details.rosters.home);
+            renderRoster(awayPane, details.rosters.away);
+        } else {
+            homePane.textContent = 'Нет данных';
+            awayPane.textContent = 'Нет данных';
+        }
+
+        // открытие/закрытие
+        modal.style.display = '';
+        const close = () => {
+            modal.style.display = 'none';
+            // очистка содержимого, чтобы при следующем матче было свежее состояние
+            homePane.innerHTML = '';
+            awayPane.innerHTML = '';
+        };
+        closeBtn.onclick = close;
+        overlay.onclick = close;
+        // переключение вкладок в модалке
+        modal.querySelectorAll('.modal-subtabs .subtab-item').forEach((btn) => {
+            btn.onclick = () => {
+                modal.querySelectorAll('.modal-subtabs .subtab-item').forEach((x)=>x.classList.remove('active'));
+                btn.classList.add('active');
+                const key = btn.getAttribute('data-mdtab');
+                if (key === 'home') { homePane.style.display = ''; awayPane.style.display = 'none'; }
+                else { homePane.style.display = 'none'; awayPane.style.display = ''; }
+            };
+        });
     }
 
     function loadAchievementsCatalog() {
