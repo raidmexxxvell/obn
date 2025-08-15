@@ -9,7 +9,7 @@ from flask import Flask, render_template, request, jsonify
 from urllib.parse import parse_qs
 import gspread
 from google.oauth2.service_account import Credentials
-from sqlalchemy import create_engine, Column, Integer, String, Date, DateTime, Text
+from sqlalchemy import create_engine, Column, Integer, String, Date, DateTime, Text, UniqueConstraint
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 
 app = Flask(__name__)
@@ -96,6 +96,14 @@ class StatsTableRow(Base):
     c7 = Column(Text)
     updated_at = Column(DateTime(timezone=True))
 
+class Referral(Base):
+    __tablename__ = 'referrals'
+    # user_id совпадает с Telegram user_id и с users.user_id
+    user_id = Column(Integer, primary_key=True)
+    referral_code = Column(String(32), unique=True, index=True, nullable=False)
+    referrer_id = Column(Integer, nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
 if engine is not None:
     try:
         Base.metadata.create_all(engine)
@@ -107,6 +115,12 @@ def get_db() -> Session:
     if SessionLocal is None:
         raise RuntimeError('База данных не сконфигурирована (DATABASE_URL не задан).')
     return SessionLocal()
+
+def _generate_ref_code(uid: int) -> str:
+    """Детерминированно генерирует короткий реф-код по user_id и BOT_TOKEN в качестве соли."""
+    salt = os.environ.get('BOT_TOKEN', 's')
+    digest = hashlib.sha256(f"{uid}:{salt}".encode()).hexdigest()
+    return digest[:8]
 
 # Настройка Google Sheets
 def get_google_client():
@@ -382,7 +396,7 @@ def get_user():
             }
             return jsonify(resp)
 
-        # Основной путь: через БД
+    # Основной путь: через БД
         db: Session = get_db()
         try:
             db_user = db.get(User, int(user_data['id']))
@@ -429,9 +443,38 @@ def get_user():
                     updated_at=now,
                 )
                 db.add(db_user)
+                # Реферальная привязка на первичном входе
+                start_param = None
+                try:
+                    raw = parsed.get('raw') or {}
+                    if 'start_param' in raw:
+                        start_param = raw['start_param'][0]
+                except Exception:
+                    start_param = None
+                try:
+                    # создаём запись в referrals с уникальным кодом
+                    code = _generate_ref_code(int(user_data['id']))
+                    referrer_id = None
+                    if start_param and start_param != code:
+                        # найдём пригласившего по коду
+                        existing = db.query(Referral).filter(Referral.referral_code == start_param).first()
+                        if existing and existing.user_id != int(user_data['id']):
+                            referrer_id = existing.user_id
+                    db_ref = Referral(user_id=int(user_data['id']), referral_code=code, referrer_id=referrer_id)
+                    db.add(db_ref)
+                except Exception as e:
+                    app.logger.warning(f"Create referral row failed: {e}")
             else:
                 # just update updated_at
                 db_user.updated_at = now
+                # Убедимся, что у пользователя есть запись в referrals
+                try:
+                    db_ref = db.get(Referral, int(user_data['id']))
+                    if not db_ref:
+                        code = _generate_ref_code(int(user_data['id']))
+                        db.add(Referral(user_id=int(user_data['id']), referral_code=code))
+                except Exception as e:
+                    app.logger.warning(f"Ensure referral row failed: {e}")
             db.commit()
             db.refresh(db_user)
         finally:
@@ -447,6 +490,81 @@ def get_user():
 
     except Exception as e:
         app.logger.error(f"Ошибка получения пользователя: {str(e)}")
+        return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
+
+@app.route('/api/referral', methods=['POST'])
+def api_referral():
+    """Возвращает реферальную ссылку и статистику приглашений пользователя."""
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = int(parsed['user'].get('id'))
+        if SessionLocal is None:
+            return jsonify({'error': 'БД недоступна'}), 500
+        db: Session = get_db()
+        try:
+            ref = db.get(Referral, user_id)
+            if not ref:
+                code = _generate_ref_code(user_id)
+                ref = Referral(user_id=user_id, referral_code=code)
+                db.add(ref)
+                db.commit()
+                db.refresh(ref)
+            # посчитаем приглашённых
+            invited_count = db.query(Referral).filter(Referral.referrer_id == user_id).count()
+        finally:
+            db.close()
+        bot_username = os.environ.get('BOT_USERNAME', '')
+        link = f"https://t.me/{bot_username}?start={ref.referral_code}" if bot_username else ref.referral_code
+        return jsonify({
+            'code': ref.referral_code,
+            'referral_link': link,
+            'invited_count': invited_count
+        })
+    except Exception as e:
+        app.logger.error(f"Ошибка referral: {str(e)}")
+        return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
+
+@app.route('/api/achievements-catalog', methods=['GET'])
+def api_achievements_catalog():
+    """Возвращает каталог достижений для табличного отображения (группы, пороги и описания)."""
+    try:
+        catalog = [
+            {
+                'group': 'streak',
+                'title': 'Серия дней',
+                'tiers': [
+                    {'tier':1, 'name':'Бронза', 'target':7},
+                    {'tier':2, 'name':'Серебро', 'target':30},
+                    {'tier':3, 'name':'Золото', 'target':120}
+                ],
+                'description': 'ОПИСАНИЕ что нужно сделать для достижения'
+            },
+            {
+                'group': 'credits',
+                'title': 'Кредиты',
+                'tiers': [
+                    {'tier':1, 'name':'Бедолага', 'target':10000},
+                    {'tier':2, 'name':'Мажор', 'target':50000},
+                    {'tier':3, 'name':'Олигарх', 'target':500000}
+                ],
+                'description': 'ОПИСАНИЕ что нужно сделать: накопить кредитов на общую сумму 10/50/500 тысяч'
+            },
+            {
+                'group': 'level',
+                'title': 'Уровень',
+                'tiers': [
+                    {'tier':1, 'name':'Новобранец', 'target':25},
+                    {'tier':2, 'name':'Ветеран', 'target':50},
+                    {'tier':3, 'name':'Легенда', 'target':100}
+                ],
+                'description': 'ОПИСАНИЕ: достигайте уровней за счёт опыта'
+            }
+        ]
+        return jsonify({'catalog': catalog})
+    except Exception as e:
+        app.logger.error(f"Ошибка achievements-catalog: {str(e)}")
         return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
 
 @app.route('/api/update-name', methods=['POST'])

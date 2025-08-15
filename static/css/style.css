@@ -479,6 +479,24 @@ body {
     padding: 0;
 }
 
+/* Подвкладки профиля переиспользуют .subtabs стили */
+.profile-pane { padding-top: 8px; }
+.referral-box {
+    background: var(--card-bg);
+    border-radius: 12px;
+    padding: 12px;
+    border: 1px solid rgba(255,255,255,0.08);
+}
+.ref-link {
+    word-break: break-all;
+    background: rgba(255,255,255,0.06);
+    border: 1px dashed rgba(255,255,255,0.12);
+    border-radius: 8px;
+    padding: 8px;
+    margin-bottom: 10px;
+}
+.ref-stats { color: var(--gray); font-size: 14px; margin-top: 8px; }
+
 /* Таблица лиги */
 .league-table-wrap {
     overflow-x: auto;

@@ -327,6 +327,39 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
         });
+
+        // подвкладки Профиля (Достижения/Список/Реферал)
+        const pTabs = document.querySelectorAll('#profile-subtabs .subtab-item');
+        const pMap = {
+            badges: document.getElementById('profile-pane-badges'),
+            catalog: document.getElementById('profile-pane-catalog'),
+            referral: document.getElementById('profile-pane-referral'),
+        };
+        pTabs.forEach(btn => {
+            btn.setAttribute('data-throttle', '600');
+            btn.addEventListener('click', () => {
+                const key = btn.getAttribute('data-psub');
+                pTabs.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                Object.values(pMap).forEach(el => { if (el) el.style.display = 'none'; });
+                if (pMap[key]) {
+                    pMap[key].style.display = '';
+                    if (key === 'catalog') loadAchievementsCatalog();
+                    if (key === 'referral') loadReferralInfo();
+                }
+            });
+        });
+
+        const copyBtn = document.getElementById('copy-ref');
+        if (copyBtn) {
+            copyBtn.setAttribute('data-throttle', '1200');
+            copyBtn.addEventListener('click', async () => {
+                const el = document.getElementById('referral-link');
+                const txt = el?.textContent?.trim();
+                if (!txt) return;
+                try { await navigator.clipboard.writeText(txt); tg?.showAlert?.('Ссылка скопирована'); } catch(_) {}
+            });
+        }
     }
 
     let _leagueLoading = false;
@@ -410,6 +443,55 @@ document.addEventListener('DOMContentLoaded', () => {
     }).catch(err => {
             console.error('stats table load error', err);
     }).finally(() => { _statsLoading = false; });
+    }
+
+    function loadAchievementsCatalog() {
+        const table = document.getElementById('achv-catalog-table');
+        const updated = document.getElementById('achv-catalog-updated');
+        if (!table) return;
+        fetch('/api/achievements-catalog').then(r => r.json()).then(data => {
+            const tbody = table.querySelector('tbody');
+            tbody.innerHTML = '';
+            const catalog = data.catalog || [];
+            // строим таблицу: шапка из трёх колонок уровней
+            catalog.forEach(group => {
+                const header = document.createElement('tr');
+                const empty = document.createElement('td'); empty.textContent = '';
+                const t1 = document.createElement('td'); t1.textContent = `${group.tiers[0].name} ${group.tiers[0].target}`;
+                const t2 = document.createElement('td'); t2.textContent = `${group.tiers[1].name} ${group.tiers[1].target}`;
+                const t3 = document.createElement('td'); t3.textContent = `${group.tiers[2].name} ${group.tiers[2].target}`;
+                header.append(empty, t1, t2, t3);
+                tbody.appendChild(header);
+
+                const nameRow = document.createElement('tr');
+                const nameCell = document.createElement('td'); nameCell.textContent = group.title;
+                nameRow.append(nameCell, document.createElement('td'), document.createElement('td'), document.createElement('td'));
+                tbody.appendChild(nameRow);
+
+                const descRow = document.createElement('tr');
+                const descTitle = document.createElement('td'); descTitle.textContent = 'Описание';
+                const desc = document.createElement('td'); desc.colSpan = 3; desc.textContent = group.description;
+                descRow.append(descTitle, desc);
+                tbody.appendChild(descRow);
+            });
+            if (updated) updated.textContent = '';
+        }).catch(err => console.error('achv catalog load error', err));
+    }
+
+    function loadReferralInfo() {
+        const linkEl = document.getElementById('referral-link');
+        const countEl = document.getElementById('ref-count');
+        if (!linkEl || !countEl) return;
+        if (!tg || !tg.initDataUnsafe?.user) return;
+        const formData = new FormData();
+        formData.append('initData', tg.initData || '');
+        fetch('/api/referral', { method: 'POST', body: formData })
+            .then(r => r.json())
+            .then(data => {
+                linkEl.textContent = data.referral_link || data.code || '—';
+                countEl.textContent = (data.invited_count ?? 0).toString();
+            })
+            .catch(err => console.error('referral load error', err));
     }
 
     let _achLoaded = false;

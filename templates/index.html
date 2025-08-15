@@ -79,12 +79,34 @@
             <div class="section-title">
                 <span>Достижения</span>
             </div>
+            <div class="subtabs" id="profile-subtabs">
+                <div class="subtab-item active" data-psub="badges">Достижения</div>
+                <div class="subtab-item" data-psub="catalog">Список достижений</div>
+                <div class="subtab-item" data-psub="referral">Реферальная ссылка</div>
+            </div>
+            <div id="profile-pane-badges" class="profile-pane">
             <div class="achievements-container" id="badges">
                 <!-- Достижение будет загружено через API -->
                 <div class="achievement-card locked" id="achievement-placeholder">
                     <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiM4ODg4ODgiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIiBjbGFzcz0iZmVhdGhlciBmZWF0aGVyLXRyb2Z5Ij48Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSIxMCIvPjxwb2x5bGluZSBwb2ludHM9IjEyIDYgMTYgMTQgMTIgMTAgOCAxNCAxMiA2Ii8+PC9zdmc+" alt="Достижение">
                     <div class="badge-name">Бронза</div>
                     <div class="badge-requirements">7 дней подряд</div>
+                </div>
+            </div>
+            </div>
+            <div id="profile-pane-catalog" class="profile-pane" style="display:none;">
+                <div class="league-table-wrap">
+                    <table class="league-table" id="achv-catalog-table">
+                        <tbody></tbody>
+                    </table>
+                    <div class="table-updated" id="achv-catalog-updated"></div>
+                </div>
+            </div>
+            <div id="profile-pane-referral" class="profile-pane" style="display:none;">
+                <div class="referral-box">
+                    <div class="ref-link" id="referral-link">—</div>
+                    <button class="checkin-button" id="copy-ref">Скопировать ссылку</button>
+                    <div class="ref-stats">Приглашено: <span id="ref-count">0</span></div>
                 </div>
             </div>
         </div>
