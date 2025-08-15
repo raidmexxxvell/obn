@@ -56,12 +56,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // загружаем данные (в dev режиме вернём заглушку)
         setTimeout(() => {
-            Promise.allSettled([ fetchUserData(), fetchAchievements() ])
+        Promise.allSettled([ fetchUserData(), fetchAchievements() ])
                 .then(() => {
                     // триггерим готовность пользовательских данных независимо от исхода
                     window.dispatchEvent(new CustomEvent('app:data-ready'));
                     // параллельно загружаем таблицу (фон), чтобы закрыть splash без навигации
                     loadLeagueTable();
+            // тёплый прогрев рефералки (не блокирует ничего)
+            try { prefetchReferral(); } catch(_) {}
                 })
                 .catch(err => console.error('Init error', err));
         }, 400); // минимальное время показа
@@ -600,16 +602,36 @@ document.addEventListener('DOMContentLoaded', () => {
         }).catch(err => console.error('achv catalog load error', err));
     }
 
+    // Кэш для реферала
+    let _referralCache = null;
+    function prefetchReferral() {
+        if (!tg || !tg.initDataUnsafe?.user) return;
+        if (_referralCache) return; // уже есть
+        const formData = new FormData();
+        formData.append('initData', tg.initData || '');
+        fetch('/api/referral', { method: 'POST', body: formData })
+            .then(r => r.json())
+            .then(data => { _referralCache = data; })
+            .catch(() => {});
+    }
+
     function loadReferralInfo() {
         const linkEl = document.getElementById('referral-link');
         const countEl = document.getElementById('ref-count');
         if (!linkEl || !countEl) return;
         if (!tg || !tg.initDataUnsafe?.user) return;
+        // Мгновенный рендер из кэша, если есть
+        if (_referralCache) {
+            linkEl.textContent = _referralCache.referral_link || _referralCache.code || '—';
+            countEl.textContent = (_referralCache.invited_count ?? 0).toString();
+        }
+        // Актуализируем в фоне
         const formData = new FormData();
         formData.append('initData', tg.initData || '');
         fetch('/api/referral', { method: 'POST', body: formData })
             .then(r => r.json())
             .then(data => {
+                _referralCache = data;
                 linkEl.textContent = data.referral_link || data.code || '—';
                 countEl.textContent = (data.invited_count ?? 0).toString();
             })

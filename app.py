@@ -1013,29 +1013,46 @@ def api_schedule():
             except Exception:
                 return None
 
-        tours = []  # [{ 'tour': 1, 'title': '1 Тур', 'matches': [...], 'start_at': iso }]
+        tours = []
         current_tour = None
         current_title = None
         current_matches = []
 
         for r in rows:
             a = (r[0] if len(r) > 0 else '').strip()
-            if a and a.lower().endswith('тур') and a.split()[0].isdigit():
-                # закрываем предыдущий тур
+            # заголовок вида "1 Тур" (число + слово Тур)
+            header_num = None
+            if a:
+                parts = a.replace('\u00A0', ' ').strip().split()
+                if len(parts) >= 2 and parts[0].isdigit() and parts[1].lower().startswith('тур'):
+                    header_num = int(parts[0])
+            if header_num is not None:
                 if current_tour is not None and current_matches:
-                    # вычислим старт тура как минимальная дата/время
-                    starts = [m.get('datetime') for m in current_matches if m.get('datetime')]
-                    start_at = min(starts).isoformat() if starts else ''
+                    # закрываем предыдущий: вычислим старт тура как минимальная дата/время
+                    start_dts = []
+                    for m in current_matches:
+                        ds = m.get('datetime')
+                        if ds:
+                            try:
+                                start_dts.append(datetime.fromisoformat(ds))
+                            except Exception:
+                                pass
+                        elif m.get('date'):
+                            try:
+                                dd = datetime.fromisoformat(m['date']).date()
+                                tt = parse_time(m.get('time','00:00') or '00:00') or datetime.min.time()
+                                start_dts.append(datetime.combine(dd, tt))
+                            except Exception:
+                                pass
+                    start_at = start_dts and min(start_dts).isoformat() or ''
                     tours.append({'tour': current_tour, 'title': current_title, 'start_at': start_at, 'matches': current_matches})
-                # начинаем новый
-                try:
-                    current_tour = int(a.split()[0])
-                except Exception:
-                    current_tour = None
+                # начинаем новый блок тура
+                current_tour = header_num
                 current_title = a
                 current_matches = []
                 continue
-            # строки матчей (если в туре)
+
+            # строки матчей внутри текущего тура
             if current_tour is not None:
                 home = (r[0] if len(r) > 0 else '').strip()
                 away = (r[4] if len(r) > 4 else '').strip()
@@ -1046,13 +1063,11 @@ def api_schedule():
                 d = parse_date(date_str)
                 tm = parse_time(time_str)
                 dt = None
-                try:
-                    if d and tm:
-                        dt = datetime.combine(d, tm)
-                    elif d:
-                        dt = datetime.combine(d, datetime.min.time())
-                except Exception:
-                    dt = None
+                if d:
+                    try:
+                        dt = datetime.combine(d, tm or datetime.min.time())
+                    except Exception:
+                        dt = None
                 current_matches.append({
                     'home': home,
                     'away': away,
@@ -1061,33 +1076,51 @@ def api_schedule():
                     'datetime': (dt.isoformat() if dt else '')
                 })
 
-        # закрыть последний блок
+        # закрыть последний тур
         if current_tour is not None and current_matches:
-            starts = [m.get('datetime') for m in current_matches if m.get('datetime')]
-            start_at = min(starts) if starts else ''
+            start_dts = []
+            for m in current_matches:
+                ds = m.get('datetime')
+                if ds:
+                    try:
+                        start_dts.append(datetime.fromisoformat(ds))
+                    except Exception:
+                        pass
+                elif m.get('date'):
+                    try:
+                        dd = datetime.fromisoformat(m['date']).date()
+                        tt = parse_time(m.get('time','00:00') or '00:00') or datetime.min.time()
+                        start_dts.append(datetime.combine(dd, tt))
+                    except Exception:
+                        pass
+            start_at = start_dts and min(start_dts).isoformat() or ''
             tours.append({'tour': current_tour, 'title': current_title, 'start_at': start_at, 'matches': current_matches})
 
-        # фильтрация ближайших 3 туров
+        # ближайшие 3 тура: есть хотя бы один матч с датой >= сегодня
         today = datetime.now().date()
         def tour_is_upcoming(t):
-            # тур считается будущим, если у него есть матч с датой >= сегодня
             for m in t.get('matches', []):
                 try:
-                    if m.get('date') and datetime.fromisoformat(m['date']).date() >= today:
-                        return True
+                    if m.get('datetime'):
+                        if datetime.fromisoformat(m['datetime']).date() >= today:
+                            return True
+                    elif m.get('date'):
+                        if datetime.fromisoformat(m['date']).date() >= today:
+                            return True
                 except Exception:
                     continue
             return False
 
         upcoming = [t for t in tours if tour_is_upcoming(t)]
-        # сортируем по номеру тура (наиболее надёжно)
-        upcoming.sort(key=lambda x: (x.get('tour') or 10**9))
+        def tour_sort_key(t):
+            try:
+                return (datetime.fromisoformat(t.get('start_at') or '2100-01-01T00:00:00'), t.get('tour') or 10**9)
+            except Exception:
+                return (datetime(2100,1,1), t.get('tour') or 10**9)
+        upcoming.sort(key=tour_sort_key)
         upcoming = upcoming[:3]
 
-        payload = {
-            'updated_at': datetime.now(timezone.utc).isoformat(),
-            'tours': upcoming
-        }
+        payload = { 'updated_at': datetime.now(timezone.utc).isoformat(), 'tours': upcoming }
         SCHEDULE_CACHE['data'] = payload
         SCHEDULE_CACHE['ts'] = int(time.time())
         return jsonify(payload)
