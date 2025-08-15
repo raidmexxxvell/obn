@@ -526,8 +526,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (_scheduleLoading) return;
         const pane = document.getElementById('ufo-schedule');
         if (!pane) return;
-        _scheduleLoading = true;
-        pane.innerHTML = '<div class="schedule-loading">Загрузка расписания...</div>';
+    _scheduleLoading = true;
+    const CACHE_KEY = 'schedule:tours';
+    const FRESH_TTL = 10 * 60 * 1000; // 10 минут
+    const readCache = () => { try { return JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); } catch(_) { return null; } };
+    const cached = readCache();
+    if (!cached) pane.innerHTML = '<div class="schedule-loading">Загрузка расписания...</div>';
 
         // Хелпер: загрузка логотипа команды с фолбэками по названию
         const loadTeamLogo = (imgEl, teamName) => {
@@ -552,9 +556,10 @@ document.addEventListener('DOMContentLoaded', () => {
             };
             tryNext();
         };
-        fetch('/api/schedule').then(r => r.json()).then(data => {
+        const renderSchedule = (data) => {
             pane.innerHTML = '';
-            const tours = data.tours || [];
+            const ds = data?.tours ? data : (data?.data || {});
+            const tours = ds.tours || [];
             tours.forEach(t => {
                 const tourEl = document.createElement('div');
                 tourEl.className = 'tour-block';
@@ -687,13 +692,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 pane.appendChild(tourEl);
             });
-            if (!tours.length) {
-                pane.innerHTML = '<div class="schedule-empty">Нет ближайших туров</div>';
-            }
-    }).catch(err => {
-            console.error('schedule load error', err);
-            pane.innerHTML = '<div class="schedule-error">Не удалось загрузить расписание</div>';
-    }).finally(() => { _scheduleLoading = false; });
+            if (!tours.length) { pane.innerHTML = '<div class="schedule-empty">Нет ближайших туров</div>'; }
+        };
+
+        if (cached && (Date.now() - (cached.ts||0) < FRESH_TTL)) {
+            renderSchedule(cached);
+        }
+        const fetchWithETag = (etag) => fetch('/api/schedule', { headers: etag ? { 'If-None-Match': etag } : {} })
+            .then(async r => {
+                if (r.status === 304 && cached) return cached;
+                const data = await r.json();
+                const version = data.version || r.headers.get('ETag') || null;
+                const store = { data, version, ts: Date.now() };
+                try { localStorage.setItem(CACHE_KEY, JSON.stringify(store)); } catch(_) {}
+                return store;
+            });
+        const startNetwork = () => {
+            if (cached && cached.version) fetchWithETag(cached.version).then(renderSchedule).catch(()=>{});
+            else fetchWithETag(null).then(renderSchedule).catch(err => { console.error('schedule load error', err); if (!cached) pane.innerHTML = '<div class="schedule-error">Не удалось загрузить расписание</div>'; });
+        };
+        startNetwork();
+        _scheduleLoading = false;
     }
 
     // --------- РЕЗУЛЬТАТЫ ---------
@@ -702,8 +721,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (_resultsLoading) return;
         const pane = document.getElementById('ufo-results');
         if (!pane) return;
-        _resultsLoading = true;
-        pane.innerHTML = '<div class="schedule-loading">Загрузка результатов...</div>';
+    _resultsLoading = true;
+    const CACHE_KEY = 'results:list';
+    const FRESH_TTL = 10 * 60 * 1000; // 10 минут
+    const readCache = () => { try { return JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); } catch(_) { return null; } };
+    const cached = readCache();
+    if (!cached) pane.innerHTML = '<div class="schedule-loading">Загрузка результатов...</div>';
 
         const loadTeamLogo = (imgEl, teamName) => {
             const base = '/static/img/team-logos/';
@@ -721,11 +744,7 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         // ETag-кэш для /api/results
-        const CACHE_KEY = 'results:list';
-        const FRESH_TTL = 10 * 60 * 1000; // 10 минут
-        const readCache = () => { try { return JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); } catch(_) { return null; } };
-        const writeCache = (obj) => { try { localStorage.setItem(CACHE_KEY, JSON.stringify(obj)); } catch(_) {} };
-        const cached = readCache();
+    const writeCache = (obj) => { try { localStorage.setItem(CACHE_KEY, JSON.stringify(obj)); } catch(_) {} };
 
         const fetchWithETag = (etag) => fetch('/api/results', { headers: etag ? { 'If-None-Match': etag } : {} })
             .then(async r => {
@@ -815,19 +834,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const go = (store) => { renderResults(store?.data || store); _resultsLoading = false; _resultsPreloaded = true; trySignalAllReady(); };
 
-        if (cached && (Date.now() - (cached.ts||0) < FRESH_TTL)) {
-            go(cached);
-        } else if (cached && cached.version) {
-            fetchWithETag(cached.version).then(go).catch(() => go(cached));
-        } else if (cached) {
-            go(cached);
-        } else {
-            fetchWithETag(null).then(go).catch(err => {
-                console.error('results load error', err);
-                pane.innerHTML = '<div class="schedule-error">Не удалось загрузить результаты</div>';
-                _resultsLoading = false; _resultsPreloaded = true; trySignalAllReady();
-            });
-        }
+    if (cached && (Date.now() - (cached.ts||0) < FRESH_TTL)) { go(cached); }
+    else if (cached) { go(cached); }
+    // сеть — в любом случае валидируем/обновляем кэш
+    if (cached && cached.version) fetchWithETag(cached.version).then(go).catch(()=>{});
+    else fetchWithETag(null).then(go).catch(err => { console.error('results load error', err); if (!cached) pane.innerHTML = '<div class="schedule-error">Не удалось загрузить результаты</div>'; _resultsLoading = false; _resultsPreloaded = true; trySignalAllReady(); });
     }
 
     ; // separator for parser safety
@@ -840,14 +851,14 @@ document.addEventListener('DOMContentLoaded', () => {
         fetch('/api/stats-table', { headers: { 'Cache-Control': 'no-cache' } })
             .then(r => r.json()).then(() => { _statsPreloaded = true; trySignalAllReady(); })
             .catch(() => { _statsPreloaded = true; trySignalAllReady(); });
-        // Расписание
+        // Расписание — сохраним в кэш с версией
         fetch('/api/schedule', { headers: { 'Cache-Control': 'no-cache' } })
-            .then(r => r.json()).then(() => { _schedulePreloaded = true; trySignalAllReady(); })
-            .catch(() => { _schedulePreloaded = true; trySignalAllReady(); });
-        // Результаты (не блокируем)
+            .then(async r => { const data = await r.json(); const version = data.version || r.headers.get('ETag') || null; try { localStorage.setItem('schedule:tours', JSON.stringify({ data, version, ts: Date.now() })); } catch(_) {} })
+            .finally(() => { _schedulePreloaded = true; trySignalAllReady(); });
+        // Результаты — сохраним в кэш с версией
         fetch('/api/results', { headers: { 'Cache-Control': 'no-cache' } })
-            .then(r => r.json()).then(() => { _resultsPreloaded = true; trySignalAllReady(); })
-            .catch(() => { _resultsPreloaded = true; trySignalAllReady(); });
+            .then(async r => { const data = await r.json(); const version = data.version || r.headers.get('ETag') || null; try { localStorage.setItem('results:list', JSON.stringify({ data, version, ts: Date.now() })); } catch(_) {} })
+            .finally(() => { _resultsPreloaded = true; trySignalAllReady(); });
 
         // Прогнозы/Ставки: предзагрузка ближайшего тура и моих ставок (если в Telegram)
         try {

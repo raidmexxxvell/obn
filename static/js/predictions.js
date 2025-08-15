@@ -129,7 +129,7 @@
       };
 
       const cached = readCache();
-      if (cached && (Date.now() - (cached.ts||0) < FRESH_TTL)) {
+      if (cached) {
         renderTours(cached);
       } else {
         toursEl.innerHTML = '<div class="schedule-loading">Загрузка матчей...</div>';
@@ -145,7 +145,7 @@
           writeCache(store);
           return store;
         });
-      if (cached && cached.version) {
+  if (cached && cached.version) {
         fetchWithETag(cached.version).then(renderTours).catch(()=>{});
       } else {
         fetchWithETag(null).then(renderTours).catch(err => {
