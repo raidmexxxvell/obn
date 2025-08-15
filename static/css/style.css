@@ -642,6 +642,16 @@ body {
 }
 .schedule-loading, .schedule-empty, .schedule-error { color: var(--gray); padding: 10px; }
 
+/* --------- РЕЗУЛЬТАТЫ: пагинация по туру --------- */
+.results-container { margin: 12px 10px 20px; }
+.results-pager { display:flex; align-items:center; justify-content: space-between; margin-bottom: 10px; }
+.pager-btn { background: linear-gradient(90deg, var(--primary), var(--secondary)); color: #0b1220; border:none; border-radius: 10px; padding: 6px 10px; font-weight: 800; cursor:pointer; }
+.pager-btn:disabled { opacity: .5; cursor: not-allowed; }
+.pager-title { font-weight: 900; font-size: 16px; letter-spacing: .3px; background: linear-gradient(90deg, #7CFCCA, #1e40af); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+.winner-ring { box-shadow: 0 0 0 2px rgba(234,179,8,0.85); border-color: rgba(234,179,8,0.85) !important; }
+.winner-ring:hover { box-shadow: 0 0 0 2px rgba(234,179,8,0.95), 0 0 12px rgba(234,179,8,0.85); transform: translateY(-2px) scale(1.02); }
+
 /* Modal */
 .modal { position: fixed; inset: 0; z-index: 2000; }
 .modal-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.5); }

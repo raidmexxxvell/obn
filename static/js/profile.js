@@ -641,65 +641,114 @@ document.addEventListener('DOMContentLoaded', () => {
             tryNext();
         };
 
-        fetch('/api/results').then(r => r.json()).then(data => {
-            pane.innerHTML = '';
-            const list = document.createElement('div');
-            list.className = 'results-list';
-            const results = data.results || [];
-            results.forEach(m => {
-                const card = document.createElement('div');
-                card.className = 'match-card result';
+        // ETag-кэш для /api/results
+        const CACHE_KEY = 'results:list';
+        const FRESH_TTL = 10 * 60 * 1000; // 10 минут
+        const readCache = () => { try { return JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); } catch(_) { return null; } };
+        const writeCache = (obj) => { try { localStorage.setItem(CACHE_KEY, JSON.stringify(obj)); } catch(_) {} };
+        const cached = readCache();
 
-                const header = document.createElement('div');
-                header.className = 'match-header';
-                const dateStr = (() => { try { if (m.date) { const d = new Date(m.date); return d.toLocaleDateString(); } } catch(_) {} return ''; })();
-                header.textContent = `${dateStr}${m.time ? ' ' + m.time : ''}`;
-                card.appendChild(header);
-
-                const center = document.createElement('div');
-                center.className = 'match-center';
-
-                const home = document.createElement('div'); home.className = 'team home';
-                const hImg = document.createElement('img'); hImg.className = 'logo'; hImg.alt = m.home || '';
-                loadTeamLogo(hImg, m.home || '');
-                const hName = document.createElement('div'); hName.className = 'team-name'; hName.textContent = m.home || '';
-                home.append(hImg, hName);
-
-                const score = document.createElement('div'); score.className = 'score';
-                const sH = (m.score_home || '').toString().trim();
-                const sA = (m.score_away || '').toString().trim();
-                score.textContent = (sH && sA) ? `${sH} : ${sA}` : '— : —';
-
-                const away = document.createElement('div'); away.className = 'team away';
-                const aImg = document.createElement('img'); aImg.className = 'logo'; aImg.alt = m.away || '';
-                loadTeamLogo(aImg, m.away || '');
-                const aName = document.createElement('div'); aName.className = 'team-name'; aName.textContent = m.away || '';
-                away.append(aImg, aName);
-
-                // Подсветка победителя: золотое свечение при hover логотипа победителя
-                const toInt = (x) => { const n = parseInt(String(x).replace(/[^0-9-]/g,''), 10); return isNaN(n) ? null : n; };
-                const nH = toInt(sH), nA = toInt(sA);
-                if (nH != null && nA != null && nH !== nA) {
-                    if (nH > nA) {
-                        hImg.classList.add('winner-glow');
-                    } else {
-                        aImg.classList.add('winner-glow');
-                    }
-                }
-
-                center.append(home, score, away);
-                card.appendChild(center);
-                list.appendChild(card);
+        const fetchWithETag = (etag) => fetch('/api/results', { headers: etag ? { 'If-None-Match': etag } : {} })
+            .then(async r => {
+                if (r.status === 304 && cached) return cached; // валидный кэш
+                const data = await r.json();
+                const version = data.version || r.headers.get('ETag') || null;
+                const store = { data, version, ts: Date.now() };
+                writeCache(store);
+                return store;
             });
-            if (!results.length) {
+
+        const renderResults = (data) => {
+            pane.innerHTML = '';
+            const all = data?.results || [];
+            if (!all.length) {
                 pane.innerHTML = '<div class="schedule-empty">Нет прошедших матчей</div>';
-            } else {
-                pane.appendChild(list);
+                return;
             }
-        }).catch(err => {
-            console.error('results load error', err);
-            pane.innerHTML = '<div class="schedule-error">Не удалось загрузить результаты</div>';
-        }).finally(() => { _resultsLoading = false; _resultsPreloaded = true; trySignalAllReady(); });
+            // Группируем по туру
+            const byTour = new Map();
+            all.forEach(m => { const t = m.tour || 0; if (!byTour.has(t)) byTour.set(t, []); byTour.get(t).push(m); });
+            // Список туров по убыванию номера/даты
+            const tourList = Array.from(byTour.keys()).sort((a,b)=>b-a);
+            const container = document.createElement('div');
+            container.className = 'results-container';
+            // Pager
+            const pager = document.createElement('div'); pager.className = 'results-pager';
+            const prev = document.createElement('button'); prev.className = 'pager-btn'; prev.textContent = '←';
+            const title = document.createElement('div'); title.className = 'pager-title';
+            const next = document.createElement('button'); next.className = 'pager-btn'; next.textContent = '→';
+            pager.append(prev, title, next);
+            const listWrap = document.createElement('div'); listWrap.className = 'results-list';
+            container.append(pager, listWrap);
+            pane.appendChild(container);
+
+            let idx = 0;
+            const renderPage = () => {
+                const tour = tourList[idx];
+                title.textContent = `${tour} Тур`;
+                listWrap.innerHTML = '';
+                const matches = (byTour.get(tour) || []).slice();
+                // сортируем внутри тура по времени (новые сверху)
+                matches.sort((m1,m2)=>{
+                    const d1 = m1.datetime || m1.date || ''; const d2 = m2.datetime || m2.date || '';
+                    return (d2 > d1) ? 1 : (d2 < d1 ? -1 : 0);
+                });
+                matches.forEach(m => {
+                    const card = document.createElement('div');
+                    card.className = 'match-card result';
+                    const header = document.createElement('div'); header.className = 'match-header';
+                    const dateStr = (() => { try { if (m.date) { const d = new Date(m.date); return d.toLocaleDateString(); } } catch(_) {} return ''; })();
+                    header.textContent = `${dateStr}${m.time ? ' ' + m.time : ''}`;
+                    card.appendChild(header);
+
+                    const center = document.createElement('div'); center.className = 'match-center';
+                    const home = document.createElement('div'); home.className = 'team home';
+                    const hImg = document.createElement('img'); hImg.className = 'logo'; hImg.alt = m.home || '';
+                    loadTeamLogo(hImg, m.home || '');
+                    const hName = document.createElement('div'); hName.className = 'team-name'; hName.textContent = m.home || '';
+                    home.append(hImg, hName);
+                    const score = document.createElement('div'); score.className = 'score';
+                    const sH = (m.score_home || '').toString().trim(); const sA = (m.score_away || '').toString().trim();
+                    score.textContent = (sH && sA) ? `${sH} : ${sA}` : '— : —';
+                    const away = document.createElement('div'); away.className = 'team away';
+                    const aImg = document.createElement('img'); aImg.className = 'logo'; aImg.alt = m.away || '';
+                    loadTeamLogo(aImg, m.away || '');
+                    const aName = document.createElement('div'); aName.className = 'team-name'; aName.textContent = m.away || '';
+                    away.append(aImg, aName);
+
+                    // Подсветка победителя: постоянное золотое кольцо + усиление при hover
+                    const toInt = (x) => { const n = parseInt(String(x).replace(/[^0-9-]/g,''), 10); return isNaN(n) ? null : n; };
+                    const nH = toInt(sH), nA = toInt(sA);
+                    if (nH != null && nA != null && nH !== nA) {
+                        if (nH > nA) hImg.classList.add('winner-ring'); else aImg.classList.add('winner-ring');
+                    }
+
+                    center.append(home, score, away);
+                    card.appendChild(center);
+                    listWrap.appendChild(card);
+                });
+                prev.disabled = idx <= 0; next.disabled = idx >= tourList.length - 1;
+            };
+            prev.onclick = () => { if (idx > 0) { idx--; renderPage(); window.scrollTo({ top: 0, behavior: 'smooth' }); } };
+            next.onclick = () => { if (idx < tourList.length - 1) { idx++; renderPage(); window.scrollTo({ top: 0, behavior: 'smooth' }); } };
+            renderPage();
+        };
+
+        const go = (store) => { renderResults(store?.data || store); _resultsLoading = false; _resultsPreloaded = true; trySignalAllReady(); };
+
+        if (cached && (Date.now() - (cached.ts||0) < FRESH_TTL)) {
+            go(cached);
+        } else if (cached && cached.version) {
+            fetchWithETag(cached.version).then(go).catch(() => go(cached));
+        } else if (cached) {
+            go(cached);
+        } else {
+            fetchWithETag(null).then(go).catch(err => {
+                console.error('results load error', err);
+                pane.innerHTML = '<div class="schedule-error">Не удалось загрузить результаты</div>';
+                _resultsLoading = false; _resultsPreloaded = true; trySignalAllReady();
+            });
+        }
     }
 
     // Предзагрузка статистики и расписания во время заставки
