@@ -699,3 +699,12 @@ body {
 .totals-table { display: flex; flex-direction: column; gap: 6px; }
 .totals-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 8px; }
 .totals-line { color: var(--light); font-weight: 600; }
+
+/* LIVE badge / dot */
+.live-badge { display: inline-flex; align-items: center; gap: 6px; background: rgba(0, 200, 0, 0.12); color: #2de02d; border: 1px solid rgba(0, 200, 0, 0.25); border-radius: 999px; padding: 2px 8px; font-size: 12px; font-weight: 700; margin-left: 8px; }
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: #2de02d; box-shadow: 0 0 6px #2de02d; }
+
+/* Toast notifications */
+.toast-container { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 9999; display: flex; flex-direction: column; gap: 8px; }
+.toast { background: rgba(0,0,0,0.85); color: #fff; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 10px 14px; min-width: 240px; max-width: 90vw; box-shadow: 0 8px 24px rgba(0,0,0,0.3); animation: toastIn 200ms ease-out; }
+@keyframes toastIn { from { opacity: 0; transform: translateX(-50%) translateY(-10px);} to { opacity: 1; transform: translateX(-50%) translateY(0);} }

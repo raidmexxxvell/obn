@@ -48,7 +48,16 @@
           (t.matches||[]).forEach(m => {
             const card = document.createElement('div'); card.className = 'match-card';
             const header = document.createElement('div'); header.className = 'match-header';
-            header.textContent = formatDateTime(m.date, m.time); card.appendChild(header);
+            const dtText = formatDateTime(m.date, m.time);
+            const span = document.createElement('span'); span.textContent = dtText; header.appendChild(span);
+            // LIVE badge
+            if (isLiveNow(m)) {
+              const live = document.createElement('span'); live.className = 'live-badge';
+              const dot = document.createElement('span'); dot.className = 'live-dot';
+              const lbl = document.createElement('span'); lbl.textContent = 'LIVE';
+              live.append(dot, lbl); header.appendChild(live);
+            }
+            card.appendChild(header);
             const center = document.createElement('div'); center.className = 'match-center';
             const home = mkTeam(m.home); const score = document.createElement('div'); score.className='score'; score.textContent = 'VS'; const away = mkTeam(m.away);
             center.append(home, score, away); card.appendChild(center);
@@ -80,6 +89,33 @@
                 table.appendChild(rowEl);
               });
               extra.appendChild(table);
+            }
+
+            // Спецрынки: пенальти/красная (Да/Нет)
+            const specials = (m.markets && m.markets.specials) || {};
+            const mkYN = (title, odds, marketKey) => {
+              if (!odds) return null;
+              const rowEl = document.createElement('div'); rowEl.className = 'totals-row';
+              const lbl = document.createElement('div'); lbl.className = 'totals-line'; lbl.textContent = title;
+              const yesBtn = document.createElement('button'); yesBtn.className='bet-btn'; yesBtn.textContent = `Да (${Number(odds.yes).toFixed(2)})`;
+              const noBtn = document.createElement('button'); noBtn.className='bet-btn'; noBtn.textContent = `Нет (${Number(odds.no).toFixed(2)})`;
+              yesBtn.disabled = !!m.lock; noBtn.disabled = !!m.lock;
+              yesBtn.addEventListener('click', ()=> openStakeModal(t.tour, m, 'yes', marketKey));
+              noBtn.addEventListener('click', ()=> openStakeModal(t.tour, m, 'no', marketKey));
+              rowEl.append(lbl, yesBtn, noBtn);
+              return rowEl;
+            };
+            if (specials.penalty?.available) {
+              const block = document.createElement('div'); block.className = 'totals-table';
+              const row = mkYN('Пенальти (Да/Нет)', specials.penalty.odds, 'penalty');
+              if (row) block.appendChild(row);
+              extra.appendChild(block);
+            }
+            if (specials.redcard?.available) {
+              const block = document.createElement('div'); block.className = 'totals-table';
+              const row = mkYN('Красная карточка (Да/Нет)', specials.redcard.odds, 'redcard');
+              if (row) block.appendChild(row);
+              extra.appendChild(block);
             }
 
             card.appendChild(moreWrap);
@@ -230,6 +266,21 @@
         return `${ds}${ts ? ' ' + ts : ''}`;
       } catch(_) { return time || ''; }
     }
+
+      function isLiveNow(m) {
+        try {
+          const now = new Date();
+          if (m.datetime) {
+            const dt = new Date(m.datetime); const dtEnd = new Date(dt.getTime() + 2*60*60*1000);
+            return now >= dt && now < dtEnd;
+          } else if (m.date && m.time) {
+            const dt = new Date(m.date + 'T' + (m.time?.length===5? m.time+':00': m.time||''));
+            const dtEnd = new Date(dt.getTime() + 2*60*60*1000);
+            return now >= dt && now < dtEnd;
+          }
+        } catch(_) {}
+        return false;
+      }
 
     // Автозагрузка при входе во вкладку
     document.addEventListener('click', (e) => {

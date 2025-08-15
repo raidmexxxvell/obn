@@ -42,16 +42,16 @@ Base = declarative_base()
 
 # Caches and TTLs
 LEAGUE_TABLE_CACHE = {'data': None, 'ts': 0}
-LEAGUE_TABLE_TTL = 60 * 60
+LEAGUE_TABLE_TTL = 30  # сек
 
 SCHEDULE_CACHE = {'data': None, 'ts': 0}
-SCHEDULE_TTL = 15 * 60
+SCHEDULE_TTL = 30  # сек
 
 STATS_TABLE_CACHE = {'data': None, 'ts': 0}
-STATS_TABLE_TTL = 60 * 60
+STATS_TABLE_TTL = 30  # сек
 
 MATCH_DETAILS_CACHE = {}
-MATCH_DETAILS_TTL = 60 * 60
+MATCH_DETAILS_TTL = 30  # сек
 
 # Betting config
 BET_MIN_STAKE = int(os.environ.get('BET_MIN_STAKE', '10'))
@@ -109,6 +109,7 @@ def api_betting_place():
     """Размещает ставку. Маркеты: 
     - 1X2: selection in ['home','draw','away']
     - totals: selection in ['over','under'], требуется поле line (например 3.5)
+    - penalty/redcard: selection in ['yes','no']
     Поля: initData, tour, home, away, market, selection, stake, [line]
     """
     parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
@@ -119,13 +120,16 @@ def api_betting_place():
         return jsonify({'error': 'БД недоступна'}), 500
     market = (request.form.get('market') or '1x2').strip().lower()
     sel = (request.form.get('selection') or '').strip().lower()
-    if market not in ('1x2','totals'):
+    if market not in ('1x2','totals','penalty','redcard'):
         return jsonify({'error': 'Неверный рынок'}), 400
     if market == '1x2':
         if sel not in ('home','draw','away'):
             return jsonify({'error': 'Неверная ставка'}), 400
-    else:
+    elif market == 'totals':
         if sel not in ('over','under'):
+            return jsonify({'error': 'Неверная ставка'}), 400
+    else:
+        if sel not in ('yes','no'):
             return jsonify({'error': 'Неверная ставка'}), 400
     try:
         stake = int(request.form.get('stake') or '0')
@@ -191,7 +195,7 @@ def api_betting_place():
             k = odds_map.get(sel) or 2.00
             selection_to_store = sel
             market_to_store = '1x2'
-        else:
+        elif market == 'totals':
             # totals требует line
             try:
                 line = float((request.form.get('line') or '').replace(',', '.'))
@@ -203,6 +207,12 @@ def api_betting_place():
             k = odds_map.get(sel) or 2.00
             selection_to_store = f"{sel}_{line}"
             market_to_store = 'totals'
+        else:
+            # спецрынки: пенальти/красная. Простая модель вероятности с поправкой по силам.
+            odds_map = _compute_specials_odds(home, away, market)
+            k = odds_map.get(sel) or 2.00
+            selection_to_store = sel
+            market_to_store = market
         # списываем кредиты
         db_user.credits = int(db_user.credits or 0) - stake
         db_user.updated_at = datetime.now(timezone.utc)
@@ -264,12 +274,22 @@ class Bet(Base):
     away = Column(Text, nullable=False)
     match_datetime = Column(DateTime(timezone=False), nullable=True)
     market = Column(String(16), default='1x2')
-    selection = Column(String(8), nullable=False)  # 'home' | 'draw' | 'away'
+    selection = Column(String(32), nullable=False)  # 'home' | 'draw' | 'away' | 'over_3.5' | 'yes'/'no'
     odds = Column(String(16), default='')         # храним как строку для простоты (например, '2.20')
     stake = Column(Integer, nullable=False)
     payout = Column(Integer, default=0)
     status = Column(String(16), default='open')   # open | won | lost | void
     placed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+class MatchSpecials(Base):
+    __tablename__ = 'match_specials'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    home = Column(Text, nullable=False)
+    away = Column(Text, nullable=False)
+    # Фиксация факта события в матче
+    penalty_yes = Column(Integer, default=None)   # 1=yes, 0=no, None=не задано
+    redcard_yes = Column(Integer, default=None)   # 1=yes, 0=no, None=не задано
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 if engine is not None:
@@ -482,6 +502,42 @@ def _compute_totals_odds(home: str, away: str, line: float) -> dict:
         except Exception:
             return 1.10
     return { 'over': to_odds(po), 'under': to_odds(pu) }
+
+def _compute_specials_odds(home: str, away: str, market: str) -> dict:
+    """Модель коэффициентов для спецрынков Да/Нет:
+    - market in {'penalty','redcard'} => возвращаем {'yes': k, 'no': k}
+    Базовые вероятности (эвристика): penalty_yes≈0.35, redcard_yes≈0.22.
+    Усиливаем вероятность для неравных команд на пару пунктов, затем применяем маржу.
+    """
+    base_yes = 0.30
+    if market == 'penalty':
+        base_yes = float(os.environ.get('BET_BASE_PENALTY', '0.35'))
+    elif market == 'redcard':
+        base_yes = float(os.environ.get('BET_BASE_REDCARD', '0.22'))
+    # корректировка по разнице сил
+    def to_norm(s: str) -> str:
+        s = (s or '').strip().lower().replace('\u00A0',' ').replace('ё','е')
+        return ''.join(ch for ch in s if ch.isalnum())
+    ranks = _load_league_ranks()
+    rh = ranks.get(to_norm(home))
+    ra = ranks.get(to_norm(away))
+    adj = 0.0
+    if rh and ra:
+        delta = abs(rh - ra)
+        adj = min(0.05, delta * 0.005)  # до +5 п.п. к вероятности события в напряжённых матчах
+    p_yes = max(0.02, min(0.95, base_yes + adj))
+    p_no = max(0.02, 1.0 - p_yes)
+    overround = 1.0 + BET_MARGIN
+    denom = p_yes + p_no
+    py = (p_yes / denom) * overround
+    pn = (p_no / denom) * overround
+    def to_odds(p):
+        try:
+            o = 1.0 / p
+            return round(max(1.10, o), 2)
+        except Exception:
+            return 1.10
+    return { 'yes': to_odds(py), 'no': to_odds(pn) }
 
 def get_referrals_sheet():
     """Возвращает лист 'referrals', создаёт при отсутствии."""
@@ -1616,17 +1672,37 @@ def api_betting_tours():
                     totals = []
                     for ln in (3.5, 4.5, 5.5):
                         totals.append({'line': ln, 'odds': _compute_totals_odds(m.get('home',''), m.get('away',''), ln)})
+                    # спецрынки: пенальти и красная карта (Да/Нет)
+                    sp_pen = _compute_specials_odds(m.get('home',''), m.get('away',''), 'penalty')
+                    sp_red = _compute_specials_odds(m.get('home',''), m.get('away',''), 'redcard')
                     m['markets'] = {
                         'totals': totals,
                         'specials': {
-                            'penalty': { 'available': False },
-                            'redcard': { 'available': False }
+                            'penalty': { 'available': True, 'odds': sp_pen },
+                            'redcard': { 'available': True, 'odds': sp_red }
                         }
                     }
                 except Exception:
                     m['lock'] = True
 
-        return jsonify({ 'tours': tours, 'updated_at': datetime.now(timezone.utc).isoformat() })
+        payload = { 'tours': tours, 'updated_at': datetime.now(timezone.utc).isoformat() }
+        # Генерируем ETag по главным данным
+        try:
+            _core = {'tours': tours}
+            etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+        except Exception:
+            etag = None
+        inm = request.headers.get('If-None-Match')
+        if etag and inm and inm == etag:
+            resp = jsonify({})
+            resp.status_code = 304
+            resp.headers['ETag'] = etag
+            return resp
+        resp = jsonify({ **payload, 'version': etag })
+        if etag:
+            resp.headers['ETag'] = etag
+        resp.headers['Cache-Control'] = 'private, max-age=300'
+        return resp
     except Exception as e:
         app.logger.error(f"Ошибка betting tours: {e}")
         return jsonify({'error': 'Не удалось загрузить туры для ставок'}), 500
@@ -1714,6 +1790,25 @@ def _get_match_total_goals(home: str, away: str):
                 return h + a
     return None
 
+def _get_special_result(home: str, away: str, market: str):
+    """Возвращает True/False для исхода спецрынка, если зафиксирован, иначе None.
+    market: 'penalty' | 'redcard'
+    """
+    if SessionLocal is None:
+        return None
+    db: Session = get_db()
+    try:
+        row = db.query(MatchSpecials).filter(MatchSpecials.home==home, MatchSpecials.away==away).first()
+        if not row:
+            return None
+        if market == 'penalty':
+            return (True if row.penalty_yes == 1 else (False if row.penalty_yes == 0 else None))
+        if market == 'redcard':
+            return (True if row.redcard_yes == 1 else (False if row.redcard_yes == 0 else None))
+        return None
+    finally:
+        db.close()
+
 def _settle_open_bets():
     if SessionLocal is None:
         return
@@ -1745,6 +1840,13 @@ def _settle_open_bets():
                 if total is None:
                     continue
                 won = (total > line) if side == 'over' else (total < line)
+            elif b.market in ('penalty','redcard'):
+                # Да/Нет по записи в MatchSpecials
+                res = _get_special_result(b.home, b.away, b.market)
+                if res is None:
+                    continue
+                # selection: 'yes'|'no'
+                won = ((res is True) and b.selection == 'yes') or ((res is False) and b.selection == 'no')
             else:
                 # не поддерживаемый рынок
                 continue
@@ -2090,6 +2192,84 @@ def api_stats_table():
     except Exception as e:
         app.logger.error(f"Ошибка загрузки таблицы статистики: {str(e)}")
         return jsonify({'error': 'Не удалось загрузить статистику'}), 500
+
+@app.route('/api/specials/set', methods=['POST'])
+def api_specials_set():
+    """Админ-эндпоинт для фиксации факта пенальти/красной карточки в матче.
+    Поля: initData, home, away, [penalty_yes=0|1], [redcard_yes=0|1]
+    Требуется совпадение user_id с ADMIN_USER_ID.
+    """
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+        home = (request.form.get('home') or '').strip()
+        away = (request.form.get('away') or '').strip()
+        if not home or not away:
+            return jsonify({'error': 'home/away обязательны'}), 400
+        val_pen = request.form.get('penalty_yes')
+        val_red = request.form.get('redcard_yes')
+        def to_int01(v):
+            if v is None or v == '':
+                return None
+            return 1 if str(v).strip() in ('1','true','yes','on') else 0
+        p_yes = to_int01(val_pen)
+        r_yes = to_int01(val_red)
+        if SessionLocal is None:
+            return jsonify({'error': 'БД недоступна'}), 500
+        db: Session = get_db()
+        try:
+            row = db.query(MatchSpecials).filter(MatchSpecials.home==home, MatchSpecials.away==away).first()
+            when = datetime.now(timezone.utc)
+            if not row:
+                row = MatchSpecials(home=home, away=away)
+                db.add(row)
+            if p_yes is not None:
+                row.penalty_yes = p_yes
+            if r_yes is not None:
+                row.redcard_yes = r_yes
+            row.updated_at = when
+            db.commit()
+            # после фиксации — сразу пробуем рассчитать соответствующие ставки
+            try:
+                _settle_open_bets()
+            except Exception as se:
+                app.logger.warning(f"Auto-settle after specials set failed: {se}")
+            return jsonify({'status': 'ok', 'home': home, 'away': away, 'penalty_yes': row.penalty_yes, 'redcard_yes': row.redcard_yes, 'updated_at': when.isoformat()})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"Ошибка specials/set: {e}")
+        return jsonify({'error': 'Не удалось сохранить данные'}), 500
+
+@app.route('/api/specials/get', methods=['GET'])
+def api_specials_get():
+    """Получить текущее состояние спецсобытий для матча (penalty/redcard). Параметры: home, away"""
+    try:
+        home = (request.args.get('home') or '').strip()
+        away = (request.args.get('away') or '').strip()
+        if not home or not away:
+            return jsonify({'error': 'home/away обязательны'}), 400
+        if SessionLocal is None:
+            return jsonify({'error': 'БД недоступна'}), 500
+        db: Session = get_db()
+        try:
+            row = db.query(MatchSpecials).filter(MatchSpecials.home==home, MatchSpecials.away==away).first()
+            return jsonify({
+                'home': home,
+                'away': away,
+                'penalty_yes': (None if not row else row.penalty_yes),
+                'redcard_yes': (None if not row else row.redcard_yes)
+            })
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"Ошибка specials/get: {e}")
+        return jsonify({'error': 'Не удалось получить данные'}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

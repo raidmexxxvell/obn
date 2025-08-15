@@ -579,7 +579,31 @@ document.addEventListener('DOMContentLoaded', () => {
                         return '';
                     })();
                     const timeStr = m.time || '';
-                    header.textContent = `${dateStr}${timeStr ? ' ' + timeStr : ''}`;
+                    // LIVE вычисление: если есть точное datetime, используем его; иначе, если дата сегодня и время пусто, считаем не LIVE
+                    const now = new Date();
+                    let isLive = false;
+                    try {
+                        if (m.datetime) {
+                            const dt = new Date(m.datetime);
+                            // считаем live, если dt <= now < dt+2ч
+                            const dtEnd = new Date(dt.getTime() + 2*60*60*1000);
+                            isLive = now >= dt && now < dtEnd;
+                        } else if (m.date && m.time) {
+                            const dt = new Date(m.date + 'T' + (m.time.length===5? m.time+':00': m.time));
+                            const dtEnd = new Date(dt.getTime() + 2*60*60*1000);
+                            isLive = now >= dt && now < dtEnd;
+                        }
+                    } catch(_) {}
+                    const headerText = document.createElement('span');
+                    headerText.textContent = `${dateStr}${timeStr ? ' ' + timeStr : ''}`;
+                    header.appendChild(headerText);
+                    if (isLive) {
+                        const live = document.createElement('span'); live.className = 'live-badge';
+                        const dot = document.createElement('span'); dot.className = 'live-dot';
+                        const lbl = document.createElement('span'); lbl.textContent = 'LIVE';
+                        live.append(dot, lbl);
+                        header.appendChild(live);
+                    }
                     card.appendChild(header);
 
                     const center = document.createElement('div');
@@ -646,6 +670,16 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                     });
                     footer.appendChild(btn);
+                    // Админ-кнопка «Спецсобытия» (пенальти/красная)
+                    try {
+                        const adminId = document.body.getAttribute('data-admin');
+                        const currentId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id ? String(window.Telegram.WebApp.initDataUnsafe.user.id) : '';
+                        if (adminId && currentId && String(adminId) === currentId) {
+                            const spBtn = document.createElement('button'); spBtn.className = 'details-btn'; spBtn.textContent = 'Спецсобытия'; spBtn.style.marginLeft = '8px';
+                            spBtn.addEventListener('click', () => openSpecialsPanel(m));
+                            footer.appendChild(spBtn);
+                        }
+                    } catch(_) {}
                     card.appendChild(footer);
 
                     tourEl.appendChild(card);
@@ -656,10 +690,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!tours.length) {
                 pane.innerHTML = '<div class="schedule-empty">Нет ближайших туров</div>';
             }
-        }).catch(err => {
+    }).catch(err => {
             console.error('schedule load error', err);
             pane.innerHTML = '<div class="schedule-error">Не удалось загрузить расписание</div>';
-        }).finally(() => { _scheduleLoading = false; });
+    }).finally(() => { _scheduleLoading = false; });
     }
 
     // --------- РЕЗУЛЬТАТЫ ---------
@@ -939,6 +973,68 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
+    // Панель админа для фиксации пенальти/красной
+    function openSpecialsPanel(m) {
+        const tg = window.Telegram?.WebApp || null;
+        const host = document.createElement('div');
+        host.className = 'admin-panel';
+        host.style.marginTop = '8px'; host.style.padding = '8px'; host.style.border = '1px solid rgba(255,255,255,0.1)'; host.style.borderRadius = '10px';
+        const title = document.createElement('div'); title.style.marginBottom = '6px'; title.textContent = 'Спецсобытия матча';
+        const row1 = document.createElement('div'); row1.style.display='flex'; row1.style.gap='8px'; row1.style.alignItems='center';
+        const lab1 = document.createElement('div'); lab1.textContent = 'Пенальти:';
+        const sel1 = document.createElement('select'); sel1.innerHTML = '<option value="">—</option><option value="1">Да</option><option value="0">Нет</option>';
+        row1.append(lab1, sel1);
+        const row2 = document.createElement('div'); row2.style.display='flex'; row2.style.gap='8px'; row2.style.alignItems='center'; row2.style.marginTop='6px';
+        const lab2 = document.createElement('div'); lab2.textContent = 'Красная:';
+        const sel2 = document.createElement('select'); sel2.innerHTML = '<option value="">—</option><option value="1">Да</option><option value="0">Нет</option>';
+        row2.append(lab2, sel2);
+        const actions = document.createElement('div'); actions.style.marginTop='8px';
+        const save = document.createElement('button'); save.className = 'details-btn'; save.textContent = 'Сохранить и рассчитать';
+        actions.append(save);
+        host.append(title, row1, row2, actions);
+
+        // Вставим панель рядом с карточкой матча
+        const schedPane = document.getElementById('ufo-schedule');
+        const cards = schedPane?.querySelectorAll('.match-card') || [];
+        let placeAfter = null;
+        cards.forEach(c => {
+            const teamEls = c.querySelectorAll('.team-name');
+            const h = teamEls[0]?.textContent || '';
+            const a = teamEls[1]?.textContent || '';
+            if (h === (m.home||'') && a === (m.away||'')) placeAfter = c;
+        });
+        if (!placeAfter) return;
+        // Удалим старые панели
+        placeAfter.parentElement.querySelectorAll('.admin-panel').forEach(el => el.remove());
+        placeAfter.after(host);
+
+        // Загрузим текущее состояние
+        fetch(`/api/specials/get?home=${encodeURIComponent(m.home||'')}&away=${encodeURIComponent(m.away||'')}`)
+            .then(r=>r.json())
+            .then(d => {
+                if (d.penalty_yes === 1) sel1.value = '1'; else if (d.penalty_yes === 0) sel1.value = '0'; else sel1.value='';
+                if (d.redcard_yes === 1) sel2.value = '1'; else if (d.redcard_yes === 0) sel2.value = '0'; else sel2.value='';
+            }).catch(()=>{});
+
+        save.addEventListener('click', () => {
+            const fd = new FormData();
+            fd.append('initData', tg?.initData || '');
+            fd.append('home', m.home || '');
+            fd.append('away', m.away || '');
+            if (sel1.value !== '') fd.append('penalty_yes', sel1.value);
+            if (sel2.value !== '') fd.append('redcard_yes', sel2.value);
+            save.disabled = true; const old = save.textContent; save.textContent = 'Сохранение...';
+            fetch('/api/specials/set', { method: 'POST', body: fd })
+                .then(r => r.json())
+                .then(resp => {
+                    if (resp?.error) { try { tg?.showAlert?.(resp.error); } catch(_) {} return; }
+                    try { tg?.showAlert?.('Сохранено. Расчёт запущен.'); } catch(_) {}
+                })
+                .catch(err => { console.error('specials set error', err); try { tg?.showAlert?.('Ошибка сохранения'); } catch(_) {} })
+                .finally(()=>{ save.disabled=false; save.textContent = old; });
+        });
+    }
+
     function loadAchievementsCatalog() {
         const table = document.getElementById('achv-catalog-table');
         const updated = document.getElementById('achv-catalog-updated');
@@ -1034,4 +1130,61 @@ document.addEventListener('DOMContentLoaded', () => {
     // Стартовая предзагрузка UFO-данных во время заставки
     preloadUfoData();
     setupEventListeners();
+
+    // ---------- LIVE notifications ----------
+    const LiveWatcher = (() => {
+        let lastLiveKeys = new Set();
+        const getKey = (m) => `${m.home||''}__${m.away||''}__${m.datetime||m.date||''}`;
+        const isLive = (m) => {
+            try {
+                const now = new Date();
+                if (m.datetime) {
+                    const dt = new Date(m.datetime);
+                    const dtEnd = new Date(dt.getTime() + 2*60*60*1000);
+                    return now >= dt && now < dtEnd;
+                } else if (m.date && m.time) {
+                    const dt = new Date(m.date + 'T' + (m.time.length===5? m.time+':00': m.time));
+                    const dtEnd = new Date(dt.getTime() + 2*60*60*1000);
+                    return now >= dt && now < dtEnd;
+                }
+            } catch(_) {}
+            return false;
+        };
+        const showToast = (text) => {
+            let cont = document.querySelector('.toast-container');
+            if (!cont) { cont = document.createElement('div'); cont.className = 'toast-container'; document.body.appendChild(cont); }
+            const el = document.createElement('div'); el.className = 'toast'; el.textContent = text;
+            cont.appendChild(el);
+            setTimeout(()=>{ el.remove(); if (cont.childElementCount===0) cont.remove(); }, 3500);
+        };
+        const scan = () => {
+            // берём из кэша /api/schedule
+            try {
+                const cached = JSON.parse(localStorage.getItem('schedule:tours') || 'null');
+                const tours = cached?.data?.tours || [];
+                const currentLive = new Set();
+                tours.forEach(t => (t.matches||[]).forEach(m => { if (isLive(m)) currentLive.add(getKey(m)); }));
+                // уведомляем о новых LIVE матчах
+                currentLive.forEach(k => { if (!lastLiveKeys.has(k)) showToast('Матч начался!'); });
+                lastLiveKeys = currentLive;
+            } catch(_) {}
+        };
+        setInterval(scan, 30000); // каждые 30 секунд мягкий опрос клиентского кэша
+        // тестовая кнопка для админа
+        document.addEventListener('DOMContentLoaded', () => {
+            try {
+                const adminId = document.body.getAttribute('data-admin');
+                const currentId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id ? String(window.Telegram.WebApp.initDataUnsafe.user.id) : '';
+                if (adminId && currentId && String(adminId) === currentId) {
+                    const btn = document.createElement('button');
+                    btn.textContent = 'Тест уведомления LIVE';
+                    btn.className = 'details-btn';
+                    btn.style.position = 'fixed'; btn.style.bottom = '90px'; btn.style.right = '12px'; btn.style.zIndex = '9999';
+                    btn.addEventListener('click', () => showToast('Матч начался!'));
+                    document.body.appendChild(btn);
+                }
+            } catch(_) {}
+        });
+        return { scan };
+    })();
 });
