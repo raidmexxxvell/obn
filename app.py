@@ -6,6 +6,7 @@ import hmac
 import hashlib
 from datetime import datetime, timedelta, timezone, date
 from flask import Flask, render_template, request, jsonify
+import importlib
 from urllib.parse import parse_qs
 import gspread
 from google.oauth2.service_account import Credentials
@@ -13,6 +14,22 @@ from sqlalchemy import create_engine, Column, Integer, String, Date, DateTime, T
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 
 app = Flask(__name__)
+try:
+    _fc = importlib.import_module('flask_compress')
+    _fc.Compress(app)
+    app.config.setdefault('COMPRESS_LEVEL', 6)
+    app.config.setdefault('COMPRESS_MIMETYPES', ['application/json', 'text/css', 'application/javascript'])
+    print('[INFO] Compression enabled')
+except Exception as _e:
+    print('[INFO] Compression not active:', _e)
+
+@app.after_request
+def _secure_headers(resp):
+    resp.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    resp.headers.setdefault('X-Frame-Options', 'DENY')
+    resp.headers.setdefault('Referrer-Policy', 'no-referrer')
+    resp.headers.setdefault('Permissions-Policy', 'geolocation=(), microphone=(), camera=()')
+    return resp
 
 # Простой кеш для таблицы лиги (обновление раз в час)
 LEAGUE_TABLE_CACHE = {
@@ -34,6 +51,10 @@ SCHEDULE_CACHE = {
     'data': None
 }
 SCHEDULE_TTL = 60 * 60  # 1 час
+
+# Кеш для составов (по паре команд) — чтобы не дергать Sheets при пиковых запросах
+MATCH_DETAILS_CACHE = {}
+MATCH_DETAILS_TTL = 10 * 60  # 10 минут
 
 # ---------------- PostgreSQL / SQLAlchemy -----------------
 DATABASE_URL = os.environ.get('DATABASE_URL') or os.environ.get('DATABASE_URL_RENDER')
@@ -130,8 +151,13 @@ def _generate_ref_code(uid: int) -> str:
     return digest[:8]
 
 # Настройка Google Sheets
+_GOOGLE_CLIENT = None
+_DOC_CACHE = {}
 def get_google_client():
-    """Создает клиент для работы с Google Sheets API"""
+    """Создает клиент для работы с Google Sheets API (и кэширует его)."""
+    global _GOOGLE_CLIENT
+    if _GOOGLE_CLIENT is not None:
+        return _GOOGLE_CLIENT
     scopes = [
         'https://www.googleapis.com/auth/spreadsheets',
         'https://www.googleapis.com/auth/drive'
@@ -141,12 +167,22 @@ def get_google_client():
         creds_data = json.loads(creds_raw) if creds_raw else {}
     except Exception:
         creds_data = {}
-    
+
     if not creds_data:
         raise ValueError("Отсутствуют данные сервисного аккаунта в переменных окружения")
 
     credentials = Credentials.from_service_account_info(creds_data, scopes=scopes)
-    return gspread.authorize(credentials)
+    _GOOGLE_CLIENT = gspread.authorize(credentials)
+    return _GOOGLE_CLIENT
+
+def _get_doc(sheet_id: str):
+    """Кэширует объект документа Google Sheets, чтобы не открывать каждый раз."""
+    client = get_google_client()
+    doc = _DOC_CACHE.get(sheet_id)
+    if doc is None:
+        doc = client.open_by_key(sheet_id)
+        _DOC_CACHE[sheet_id] = doc
+    return doc
 
 def get_user_sheet():
     """Получает лист пользователей из Google Sheets"""
@@ -154,8 +190,8 @@ def get_user_sheet():
     sheet_id = os.environ.get('SHEET_ID')
     if not sheet_id:
         raise ValueError("SHEET_ID не установлен в переменных окружения")
-    sheet = client.open_by_key(sheet_id)
-    return sheet.worksheet("users")
+    doc = _get_doc(sheet_id)
+    return doc.worksheet("users")
 
 def get_achievements_sheet():
     """Возвращает лист достижений, создаёт при отсутствии."""
@@ -163,7 +199,7 @@ def get_achievements_sheet():
     sheet_id = os.environ.get('SHEET_ID')
     if not sheet_id:
         raise ValueError("SHEET_ID не установлен в переменных окружения")
-    doc = client.open_by_key(sheet_id)
+    doc = _get_doc(sheet_id)
     try:
         ws = doc.worksheet("achievements")
     except gspread.exceptions.WorksheetNotFound:
@@ -192,7 +228,7 @@ def get_table_sheet():
     sheet_id = os.environ.get('SHEET_ID')
     if not sheet_id:
         raise ValueError("SHEET_ID не установлен в переменных окружения")
-    doc = client.open_by_key(sheet_id)
+    doc = _get_doc(sheet_id)
     return doc.worksheet("ТАБЛИЦА")
 
 def get_referrals_sheet():
@@ -201,7 +237,7 @@ def get_referrals_sheet():
     sheet_id = os.environ.get('SHEET_ID')
     if not sheet_id:
         raise ValueError("SHEET_ID не установлен в переменных окружения")
-    doc = client.open_by_key(sheet_id)
+    doc = _get_doc(sheet_id)
     try:
         ws = doc.worksheet("referrals")
     except gspread.exceptions.WorksheetNotFound:
@@ -249,7 +285,7 @@ def get_stats_sheet():
     sheet_id = os.environ.get('SHEET_ID')
     if not sheet_id:
         raise ValueError("SHEET_ID не установлен в переменных окружения")
-    doc = client.open_by_key(sheet_id)
+    doc = _get_doc(sheet_id)
     return doc.worksheet("СТАТИСТИКА")
 
 def get_schedule_sheet():
@@ -258,7 +294,7 @@ def get_schedule_sheet():
     sheet_id = os.environ.get('SHEET_ID')
     if not sheet_id:
         raise ValueError("SHEET_ID не установлен в переменных окружения")
-    doc = client.open_by_key(sheet_id)
+    doc = _get_doc(sheet_id)
     return doc.worksheet("РАСПИСАНИЕ ИГР")
 
 def get_rosters_sheet():
@@ -267,7 +303,7 @@ def get_rosters_sheet():
     sheet_id = os.environ.get('SHEET_ID')
     if not sheet_id:
         raise ValueError("SHEET_ID не установлен в переменных окружения")
-    doc = client.open_by_key(sheet_id)
+    doc = _get_doc(sheet_id)
     return doc.worksheet("СОСТАВЫ")
 
 def get_user_achievements_row(user_id):
@@ -960,6 +996,16 @@ def api_league_table():
             'updated_at': datetime.now(timezone.utc).isoformat(),
             'values': normalized
         }
+        # ETag для условного запроса
+        _core = {'range': 'A1:H10', 'values': normalized}
+        _etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+        inm = request.headers.get('If-None-Match')
+        if inm and inm == _etag and LEAGUE_TABLE_CACHE['data']:
+            resp = app.response_class(status=304)
+            resp.headers['ETag'] = _etag
+            resp.headers['Cache-Control'] = 'private, max-age=1800'
+            return resp
+
         LEAGUE_TABLE_CACHE['data'] = payload
         LEAGUE_TABLE_CACHE['ts'] = now
         # Сохраняем в БД (если настроена)
@@ -986,7 +1032,10 @@ def api_league_table():
                 app.logger.warning(f"Не удалось сохранить лигу в БД: {e}")
             finally:
                 db.close()
-        return jsonify(payload)
+        resp = jsonify({**payload, 'version': _etag})
+        resp.headers['ETag'] = _etag
+        resp.headers['Cache-Control'] = 'private, max-age=1800'
+        return resp
     except Exception as e:
         app.logger.error(f"Ошибка загрузки таблицы лиги: {str(e)}")
         return jsonify({'error': 'Не удалось загрузить таблицу'}), 500
@@ -1064,6 +1113,9 @@ def api_schedule():
             # строки матчей внутри текущего тура
             if current_tour is not None:
                 home = (r[0] if len(r) > 0 else '').strip()
+                # Счёт: B (дом), D (гости)
+                score_home = (r[1] if len(r) > 1 else '').strip()
+                score_away = (r[3] if len(r) > 3 else '').strip()
                 away = (r[4] if len(r) > 4 else '').strip()
                 date_str = (r[5] if len(r) > 5 else '').strip()
                 time_str = (r[6] if len(r) > 6 else '').strip()
@@ -1080,6 +1132,8 @@ def api_schedule():
                 current_matches.append({
                     'home': home,
                     'away': away,
+                    'score_home': score_home,
+                    'score_away': score_away,
                     'date': (d.isoformat() if d else ''),
                     'time': time_str,
                     'datetime': (dt.isoformat() if dt else '')
@@ -1130,12 +1184,139 @@ def api_schedule():
         upcoming = upcoming[:3]
 
         payload = { 'updated_at': datetime.now(timezone.utc).isoformat(), 'tours': upcoming }
+        _core = {'tours': upcoming}
+        _etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+        inm = request.headers.get('If-None-Match')
+        if inm and inm == _etag and SCHEDULE_CACHE['data']:
+            resp = app.response_class(status=304)
+            resp.headers['ETag'] = _etag
+            resp.headers['Cache-Control'] = 'private, max-age=900'
+            return resp
+
         SCHEDULE_CACHE['data'] = payload
         SCHEDULE_CACHE['ts'] = int(time.time())
-        return jsonify(payload)
+        resp = jsonify({**payload, 'version': _etag})
+        resp.headers['ETag'] = _etag
+        resp.headers['Cache-Control'] = 'private, max-age=900'
+        return resp
     except Exception as e:
         app.logger.error(f"Ошибка загрузки расписания: {str(e)}")
         return jsonify({'error': 'Не удалось загрузить расписание'}), 500
+
+@app.route('/api/results', methods=['GET'])
+def api_results():
+    """Возвращает все прошедшие матчи из листа 'РАСПИСАНИЕ ИГР'.
+    Использует колонки: A(home), B(score_home), D(score_away), E(away), F(date dd.mm.yy), G(time HH:MM).
+    """
+    try:
+        ws = get_schedule_sheet()
+        rows = ws.get_all_values() or []
+
+        def parse_date(d: str):
+            d = (d or '').strip()
+            if not d:
+                return None
+            for fmt in ("%d.%m.%y", "%d.%m.%Y"):
+                try:
+                    return datetime.strptime(d, fmt).date()
+                except Exception:
+                    continue
+            return None
+
+        def parse_time(t: str):
+            t = (t or '').strip()
+            try:
+                return datetime.strptime(t, "%H:%M").time()
+            except Exception:
+                return None
+
+        results = []
+        current_tour = None
+        for r in rows:
+            a = (r[0] if len(r) > 0 else '').strip()
+            # Заголовок тура: "N Тур"
+            header_num = None
+            if a:
+                parts = a.replace('\u00A0', ' ').strip().split()
+                if len(parts) >= 2 and parts[0].isdigit() and parts[1].lower().startswith('тур'):
+                    header_num = int(parts[0])
+            if header_num is not None:
+                current_tour = header_num
+                continue
+
+            # строки матчей
+            if current_tour is not None:
+                home = (r[0] if len(r) > 0 else '').strip()
+                score_home = (r[1] if len(r) > 1 else '').strip()
+                score_away = (r[3] if len(r) > 3 else '').strip()
+                away = (r[4] if len(r) > 4 else '').strip()
+                date_str = (r[5] if len(r) > 5 else '').strip()
+                time_str = (r[6] if len(r) > 6 else '').strip()
+                if not home and not away:
+                    continue
+
+                d = parse_date(date_str)
+                tm = parse_time(time_str)
+                dt = None
+                if d:
+                    try:
+                        dt = datetime.combine(d, tm or datetime.min.time())
+                    except Exception:
+                        dt = None
+
+                # матч считается прошедшим, если дата/время <= сейчас
+                now = datetime.now()
+                is_past = False
+                try:
+                    if dt:
+                        is_past = dt <= now
+                    elif d:
+                        is_past = d <= now.date()
+                except Exception:
+                    is_past = False
+
+                if is_past:
+                    results.append({
+                        'tour': current_tour,
+                        'home': home,
+                        'away': away,
+                        'score_home': score_home,
+                        'score_away': score_away,
+                        'date': (d.isoformat() if d else ''),
+                        'time': time_str,
+                        'datetime': (dt.isoformat() if dt else '')
+                    })
+
+        # сортируем прошедшие матчи по дате/времени убыв.
+        def sort_key(m):
+            try:
+                if m.get('datetime'):
+                    return datetime.fromisoformat(m['datetime'])
+                if m.get('date'):
+                    return datetime.fromisoformat(m['date'])
+            except Exception:
+                return datetime.min
+            return datetime.min
+        results.sort(key=sort_key, reverse=True)
+
+        payload = { 'updated_at': datetime.now(timezone.utc).isoformat(), 'results': results }
+        _core = {'results': results[:200]}  # усечённое ядро для ETag, чтобы не дуло слишком длинным
+        _etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+        inm = request.headers.get('If-None-Match')
+        # простой in-memory кеш по etag можно добавить при необходимости; пока полагаемся на клиентский ETag
+        if inm and inm == _etag:
+            resp = app.response_class(status=304)
+            resp.headers['ETag'] = _etag
+            resp.headers['Cache-Control'] = 'private, max-age=900'
+            return resp
+
+        resp = jsonify({**payload, 'version': _etag})
+        resp.headers['ETag'] = _etag
+        resp.headers['Cache-Control'] = 'private, max-age=900'
+        return resp
+    except Exception as e:
+        app.logger.error(f"Ошибка загрузки результатов: {str(e)}")
+        return jsonify({'error': 'Не удалось загрузить результаты'}), 500
 
 @app.route('/api/match-details', methods=['GET'])
 def api_match_details():
@@ -1153,6 +1334,24 @@ def api_match_details():
             s = s.replace('\u00A0', ' ').replace('ё', 'е')
             s = s.replace('фк', '', 1).strip() if s.startswith('фк') else s  # убираем префикс ФК
             return ''.join(ch for ch in s if ch.isalnum())
+
+        # Ключ кеша по нормализованным названиям
+        home_key = norm(home)
+        away_key = norm(away)
+        cache_key = f"{home_key}|{away_key}"
+        now_ts = int(time.time())
+        cached = MATCH_DETAILS_CACHE.get(cache_key)
+        inm = request.headers.get('If-None-Match')
+        if cached and (now_ts - cached['ts'] < MATCH_DETAILS_TTL):
+            if inm and inm == cached.get('etag'):
+                resp = app.response_class(status=304)
+                resp.headers['ETag'] = cached['etag']
+                resp.headers['Cache-Control'] = 'private, max-age=3600'
+                return resp
+            resp = jsonify({ **cached['payload'], 'version': cached['etag'] })
+            resp.headers['ETag'] = cached['etag']
+            resp.headers['Cache-Control'] = 'private, max-age=3600'
+            return resp
 
         ws = get_rosters_sheet()
         headers = ws.row_values(1) or []
@@ -1183,16 +1382,20 @@ def api_match_details():
 
         home_data = extract(home)
         away_data = extract(away)
-        return jsonify({
-            'teams': {
-                'home': home_data['team'],
-                'away': away_data['team']
-            },
-            'rosters': {
-                'home': home_data['players'],
-                'away': away_data['players']
-            }
-        })
+
+        # Версионируем содержимое через хеш, чтобы поддержать ETag/кэш
+        import hashlib, json as _json
+        payload_core = {
+            'teams': {'home': home_data['team'], 'away': away_data['team']},
+            'rosters': {'home': home_data['players'], 'away': away_data['players']}
+        }
+        etag = hashlib.md5(_json.dumps(payload_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+        # Сохраняем в кеш
+        MATCH_DETAILS_CACHE[cache_key] = { 'ts': now_ts, 'etag': etag, 'payload': payload_core }
+        resp = jsonify({ **payload_core, 'version': etag })
+        resp.headers['ETag'] = etag
+        resp.headers['Cache-Control'] = 'private, max-age=3600'
+        return resp
     except Exception as e:
         app.logger.error(f"Ошибка получения составов: {str(e)}")
         return jsonify({'error': 'Не удалось загрузить составы'}), 500
@@ -1272,6 +1475,16 @@ def api_stats_table():
             'updated_at': datetime.now(timezone.utc).isoformat(),
             'values': normalized
         }
+        # ETag и условный ответ
+        _core = {'range': 'A1:G11', 'values': normalized}
+        _etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+        inm = request.headers.get('If-None-Match')
+        if inm and inm == _etag and STATS_TABLE_CACHE['data']:
+            resp = app.response_class(status=304)
+            resp.headers['ETag'] = _etag
+            resp.headers['Cache-Control'] = 'private, max-age=1800'
+            return resp
+
         STATS_TABLE_CACHE['data'] = payload
         STATS_TABLE_CACHE['ts'] = now
 
@@ -1300,7 +1513,10 @@ def api_stats_table():
             finally:
                 db.close()
 
-        return jsonify(payload)
+        resp = jsonify({**payload, 'version': _etag})
+        resp.headers['ETag'] = _etag
+        resp.headers['Cache-Control'] = 'private, max-age=1800'
+        return resp
     except Exception as e:
         app.logger.error(f"Ошибка загрузки таблицы статистики: {str(e)}")
         return jsonify({'error': 'Не удалось загрузить статистику'}), 500

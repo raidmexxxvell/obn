@@ -90,6 +90,21 @@ body {
     width: 36px;
     height: 36px;
     object-fit: contain;
+.winner-glow:hover {
+    box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.9), 0 0 12px rgba(234, 179, 8, 0.9);
+    transform: translateY(-2px) scale(1.02);
+}
+
+/* Результаты: список карточек как в расписании/статистике */
+.results-list {
+    display: flex;
+    flex-direction: column;
+}
+.match-card.result .match-header {
+    font-weight: 600;
+    color: var(--light);
+    margin-bottom: 6px;
+}
 }
 
 /* --- СТИЛИ ПРОФИЛЯ --- */
@@ -641,6 +656,10 @@ body {
 .match-modal-header .datetime { color: var(--gray); font-size: 12px; }
 .modal-subtabs { margin: 8px 0; }
 .md-pane { min-height: 80px; }
+/* Match details screen */
+.match-details-topbar { display: flex; align-items: center; gap: 8px; margin: 6px 6px 10px; }
+.match-details-topbar .md-title { font-weight: 700; }
+.back-btn { background: rgba(255,255,255,0.08); color: #fff; border: 1px solid rgba(255,255,255,0.12); padding: 6px 10px; border-radius: 10px; cursor: pointer; }
 /* Rosters */
 .roster-list { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: 1fr; gap: 6px; }
 .roster-list li { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08); padding: 8px 10px; border-radius: 8px; }

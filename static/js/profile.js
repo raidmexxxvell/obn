@@ -329,6 +329,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         loadStatsTable();
                     } else if (key === 'schedule') {
                         loadSchedule();
+                    } else if (key === 'results') {
+                        loadResults();
                     }
                 }
             });
@@ -557,25 +559,46 @@ document.addEventListener('DOMContentLoaded', () => {
                     btn.className = 'details-btn';
                     btn.textContent = 'Детали';
                     btn.setAttribute('data-throttle', '800');
-                    // При клике сначала загружаем составы, затем открываем модалку
+                    // При клике: используем кэш, затем при необходимости валидируем и открываем детальный экран
                     btn.addEventListener('click', () => {
                         const original = btn.textContent;
                         btn.disabled = true;
                         btn.textContent = 'Загрузка контента...';
                         const params = new URLSearchParams({ home: m.home || '', away: m.away || '' });
-                        fetch(`/api/match-details?${params.toString()}`)
-                          .then(r => r.json())
-                          .then(details => {
-                              openMatchModal({ home: m.home, away: m.away, date: m.date, time: m.time }, details);
-                          })
-                          .catch(err => {
-                              console.error('match details load error', err);
-                              try { window.Telegram?.WebApp?.showAlert?.('Не удалось загрузить данные матча'); } catch(_) {}
-                          })
-                          .finally(() => {
-                              btn.disabled = false;
-                              btn.textContent = original;
-                          });
+                        const cacheKey = `md:${(m.home||'').toLowerCase()}::${(m.away||'').toLowerCase()}`;
+                        const cached = (() => { try { return JSON.parse(localStorage.getItem(cacheKey) || 'null'); } catch(_) { return null; } })();
+                        const fetchWithETag = (etag) => fetch(`/api/match-details?${params.toString()}`, { headers: etag ? { 'If-None-Match': etag } : {} })
+                            .then(async r => {
+                                if (r.status === 304 && cached) return cached; // валидный кэш
+                                const data = await r.json();
+                                const version = data.version || r.headers.get('ETag') || null;
+                                const toStore = { data, version, ts: Date.now() };
+                                try { localStorage.setItem(cacheKey, JSON.stringify(toStore)); } catch(_) {}
+                                return toStore;
+                            });
+
+                        const go = (store) => {
+                            openMatchScreen({ home: m.home, away: m.away, date: m.date, time: m.time }, store?.data || store);
+                            btn.disabled = false; btn.textContent = original;
+                        };
+
+                        const FRESH_TTL = 10 * 60 * 1000; // 10 минут
+                        if (cached && (Date.now() - (cached.ts||0) < FRESH_TTL)) {
+                            // достаточно свежо — используем сразу без сети
+                            go(cached);
+                        } else if (cached && cached.version) {
+                            // не свежее — мягкая валидация по ETag
+                            fetchWithETag(cached.version).then(go).catch(() => { go(cached); });
+                        } else if (cached) {
+                            // старый формат без версии
+                            go(cached);
+                        } else {
+                            fetchWithETag(null).then(go).catch(err => {
+                                console.error('match details load error', err);
+                                try { window.Telegram?.WebApp?.showAlert?.('Не удалось загрузить данные матча'); } catch(_) {}
+                                btn.disabled = false; btn.textContent = original;
+                            });
+                        }
                     });
                     footer.appendChild(btn);
                     card.appendChild(footer);
@@ -594,12 +617,119 @@ document.addEventListener('DOMContentLoaded', () => {
         }).finally(() => { _scheduleLoading = false; });
     }
 
-    // ---------- MODAL: MATCH DETAILS ----------
-    function openMatchModal(match, details) {
-        const modal = document.getElementById('match-modal');
-        if (!modal) return;
-        const closeBtn = document.getElementById('match-modal-close');
-        const overlay = modal.querySelector('.modal-overlay');
+    // --------- РЕЗУЛЬТАТЫ ---------
+    let _resultsLoading = false;
+    function loadResults() {
+        if (_resultsLoading) return;
+        const pane = document.getElementById('ufo-results');
+        if (!pane) return;
+        _resultsLoading = true;
+        pane.innerHTML = '<div class="schedule-loading">Загрузка результатов...</div>';
+
+        const loadTeamLogo = (imgEl, teamName) => {
+            const base = '/static/img/team-logos/';
+            const name = (teamName || '').trim();
+            const candidates = [];
+            if (name) {
+                candidates.push(base + encodeURIComponent(name + '.png'));
+                const norm = name.toLowerCase().replace(/\s+/g, '').replace(/ё/g, 'е');
+                candidates.push(base + encodeURIComponent(norm + '.png'));
+            }
+            candidates.push(base + 'default.png');
+            let idx = 0;
+            const tryNext = () => { if (idx >= candidates.length) return; imgEl.onerror = () => { idx++; tryNext(); }; imgEl.src = candidates[idx]; };
+            tryNext();
+        };
+
+        fetch('/api/results').then(r => r.json()).then(data => {
+            pane.innerHTML = '';
+            const list = document.createElement('div');
+            list.className = 'results-list';
+            const results = data.results || [];
+            results.forEach(m => {
+                const card = document.createElement('div');
+                card.className = 'match-card result';
+
+                const header = document.createElement('div');
+                header.className = 'match-header';
+                const dateStr = (() => { try { if (m.date) { const d = new Date(m.date); return d.toLocaleDateString(); } } catch(_) {} return ''; })();
+                header.textContent = `${dateStr}${m.time ? ' ' + m.time : ''}`;
+                card.appendChild(header);
+
+                const center = document.createElement('div');
+                center.className = 'match-center';
+
+                const home = document.createElement('div'); home.className = 'team home';
+                const hImg = document.createElement('img'); hImg.className = 'logo'; hImg.alt = m.home || '';
+                loadTeamLogo(hImg, m.home || '');
+                const hName = document.createElement('div'); hName.className = 'team-name'; hName.textContent = m.home || '';
+                home.append(hImg, hName);
+
+                const score = document.createElement('div'); score.className = 'score';
+                const sH = (m.score_home || '').toString().trim();
+                const sA = (m.score_away || '').toString().trim();
+                score.textContent = (sH && sA) ? `${sH} : ${sA}` : '— : —';
+
+                const away = document.createElement('div'); away.className = 'team away';
+                const aImg = document.createElement('img'); aImg.className = 'logo'; aImg.alt = m.away || '';
+                loadTeamLogo(aImg, m.away || '');
+                const aName = document.createElement('div'); aName.className = 'team-name'; aName.textContent = m.away || '';
+                away.append(aImg, aName);
+
+                // Подсветка победителя: золотое свечение при hover логотипа победителя
+                const toInt = (x) => { const n = parseInt(String(x).replace(/[^0-9-]/g,''), 10); return isNaN(n) ? null : n; };
+                const nH = toInt(sH), nA = toInt(sA);
+                if (nH != null && nA != null && nH !== nA) {
+                    if (nH > nA) {
+                        hImg.classList.add('winner-glow');
+                    } else {
+                        aImg.classList.add('winner-glow');
+                    }
+                }
+
+                center.append(home, score, away);
+                card.appendChild(center);
+                list.appendChild(card);
+            });
+            if (!results.length) {
+                pane.innerHTML = '<div class="schedule-empty">Нет прошедших матчей</div>';
+            } else {
+                pane.appendChild(list);
+            }
+        }).catch(err => {
+            console.error('results load error', err);
+            pane.innerHTML = '<div class="schedule-error">Не удалось загрузить результаты</div>';
+        }).finally(() => { _resultsLoading = false; _resultsPreloaded = true; trySignalAllReady(); });
+    }
+
+    // Предзагрузка статистики и расписания во время заставки
+    let _resultsPreloaded = false;
+    let _schedulePreloaded = false;
+    let _statsPreloaded = false;
+    function preloadUfoData() {
+        // Статистика
+        fetch('/api/stats-table', { headers: { 'Cache-Control': 'no-cache' } })
+            .then(r => r.json()).then(() => { _statsPreloaded = true; trySignalAllReady(); })
+            .catch(() => { _statsPreloaded = true; trySignalAllReady(); });
+        // Расписание
+        fetch('/api/schedule', { headers: { 'Cache-Control': 'no-cache' } })
+            .then(r => r.json()).then(() => { _schedulePreloaded = true; trySignalAllReady(); })
+            .catch(() => { _schedulePreloaded = true; trySignalAllReady(); });
+        // Результаты (не блокируем)
+        fetch('/api/results', { headers: { 'Cache-Control': 'no-cache' } })
+            .then(r => r.json()).then(() => { _resultsPreloaded = true; trySignalAllReady(); })
+            .catch(() => { _resultsPreloaded = true; trySignalAllReady(); });
+    }
+
+    // ---------- MATCH DETAILS SCREEN (in-app, not modal) ----------
+    function openMatchScreen(match, details) {
+        const schedulePane = document.getElementById('ufo-schedule');
+        const mdPane = document.getElementById('ufo-match-details');
+        if (!schedulePane || !mdPane) return;
+        // показать экран деталей
+        schedulePane.style.display = 'none';
+        mdPane.style.display = '';
+
         const hLogo = document.getElementById('md-home-logo');
         const aLogo = document.getElementById('md-away-logo');
         const hName = document.getElementById('md-home-name');
@@ -637,13 +767,13 @@ document.addEventListener('DOMContentLoaded', () => {
             } else { dt.textContent = ''; }
         } catch(_) { dt.textContent = match.time || ''; }
 
-        // вкладки модалки
-        modal.querySelectorAll('.modal-subtabs .subtab-item').forEach((el) => el.classList.remove('active'));
-        modal.querySelector('.modal-subtabs .subtab-item[data-mdtab="home"]').classList.add('active');
+        // вкладки
+        mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach((el) => el.classList.remove('active'));
+        mdPane.querySelector('.modal-subtabs .subtab-item[data-mdtab="home"]').classList.add('active');
         homePane.style.display = '';
         awayPane.style.display = 'none';
 
-        // заполнение составов из details (если переданы)
+        // заполнение составов
         const renderRoster = (pane, players) => {
             pane.innerHTML = '';
             const ul = document.createElement('ul');
@@ -666,26 +796,29 @@ document.addEventListener('DOMContentLoaded', () => {
             awayPane.textContent = 'Нет данных';
         }
 
-        // открытие/закрытие
-        modal.style.display = '';
-        const close = () => {
-            modal.style.display = 'none';
-            // очистка содержимого, чтобы при следующем матче было свежее состояние
-            homePane.innerHTML = '';
-            awayPane.innerHTML = '';
-        };
-        closeBtn.onclick = close;
-        overlay.onclick = close;
-        // переключение вкладок в модалке
-        modal.querySelectorAll('.modal-subtabs .subtab-item').forEach((btn) => {
+        // переключение вкладок
+        mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach((btn) => {
             btn.onclick = () => {
-                modal.querySelectorAll('.modal-subtabs .subtab-item').forEach((x)=>x.classList.remove('active'));
+                mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach((x)=>x.classList.remove('active'));
                 btn.classList.add('active');
                 const key = btn.getAttribute('data-mdtab');
                 if (key === 'home') { homePane.style.display = ''; awayPane.style.display = 'none'; }
                 else { homePane.style.display = 'none'; awayPane.style.display = ''; }
             };
         });
+
+        // кнопка Назад
+        const back = document.getElementById('match-back');
+        if (back) back.onclick = () => {
+            // очистка
+            homePane.innerHTML = '';
+            awayPane.innerHTML = '';
+            // вернуть расписание
+            mdPane.style.display = 'none';
+            schedulePane.style.display = '';
+            // прокрутка к верху для UX
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        };
     }
 
     function loadAchievementsCatalog() {
@@ -755,7 +888,9 @@ document.addEventListener('DOMContentLoaded', () => {
     let _achLoaded = false;
     let _tableLoaded = false;
     function trySignalAllReady() {
-        if (_achLoaded && _tableLoaded) {
+        // считаем готовность, когда базовые данные профиля есть, таблица лиги подтянулась,
+        // и стартовые данные UFO (stats/schedule/results) прогреты (не обязательно успешны)
+        if (_achLoaded && _tableLoaded && _statsPreloaded && _schedulePreloaded && _resultsPreloaded) {
             window.dispatchEvent(new CustomEvent('app:all-ready'));
         }
     }
@@ -772,5 +907,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // старт
     initApp();
+    // Стартовая предзагрузка UFO-данных во время заставки
+    preloadUfoData();
     setupEventListeners();
 });
