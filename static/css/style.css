@@ -20,7 +20,7 @@ body {
     background: linear-gradient(135deg, var(--dark), var(--darker));
     color: var(--light);
     min-height: 100vh;
-    padding: 20px 20px 72px; /* нижний паддинг под навигацию (уменьшили, т.к. бар стал ниже) */
+    padding: 16px 12px 64px; /* компактнее, чтобы поместилось */
     line-height: 1.6;
     margin: 0;
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -36,11 +36,11 @@ body {
     left: 50%;
     transform: translateX(-50%);
     bottom: 14px;
-    width: min(540px, calc(100% - 16px));
+    width: min(520px, calc(100% - 12px));
     background: rgba(10, 18, 40, 0.92);
     backdrop-filter: blur(12px);
-    border-radius: 20px;
-    padding: 10px 12px;
+    border-radius: 16px;
+    padding: 8px 8px;
     display: flex;
     justify-content: space-between;
     z-index: 1000;
@@ -49,26 +49,26 @@ body {
 }
 
 .nav-item {
-    display: grid;
-    grid-template-columns: 20px auto;
-    grid-auto-flow: column;
+    display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 8px;
-    color: rgba(255,255,255,0.6);
-    font-size: 13px;
-    padding: 8px 12px;
-    border-radius: 14px;
+    gap: 2px;
+    color: rgba(255,255,255,0.75);
+    font-size: 11px;
+    padding: 6px 8px;
+    border-radius: 10px;
     transition: var(--transition);
     cursor: pointer;
     min-width: auto;
 }
 
 .nav-item:hover, .nav-item.active {
-    color: #f5f6fb;
+    color: #fff;
     background: rgba(255, 255, 255, 0.08);
 }
 
-.nav-icon { font-size: 16px; }
+.nav-icon { font-size: 16px; line-height: 1; }
+.nav-label { font-size: 11px; line-height: 1; }
 
 
 /* --- ВЕРХНЯЯ ПАНЕЛЬ --- */

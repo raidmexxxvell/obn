@@ -93,6 +93,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 5 * 60 * 1000);
     }
 
+    // Загрузка достижений
+    function fetchAchievements() {
+        // если нет Telegram — пропускаем (сервер требует initData)
+        if (!tg || !tg.initDataUnsafe?.user) {
+            renderAchievements([]);
+            return Promise.resolve([]);
+        }
+        const fd = new FormData();
+        fd.append('initData', tg.initData || '');
+        return fetch('/api/achievements', { method: 'POST', body: fd })
+            .then(r => r.json())
+            .then(data => { renderAchievements(data.achievements || []); return data.achievements || []; })
+            .catch(err => { console.error('achievements load error', err); renderAchievements([]); return []; });
+    }
+
     function fetchUserData() {
         if (!tg || !tg.initDataUnsafe?.user) {
             // dev-заглушка
@@ -415,9 +430,79 @@ document.addEventListener('DOMContentLoaded', () => {
                 btn.classList.add('active');
                 Object.values(panes).forEach(p => { if (p) p.style.display = 'none'; });
                 if (panes[key]) panes[key].style.display = '';
+                if (key === 'cart') renderCart();
             });
         });
+        initShop();
     });
+
+    // ---------- МАГАЗИН ----------
+    function readCart() {
+        try { return JSON.parse(localStorage.getItem('shop:cart') || '[]'); } catch(_) { return []; }
+    }
+    function writeCart(items) {
+        try { localStorage.setItem('shop:cart', JSON.stringify(items)); } catch(_) {}
+    }
+    function addToCart(item) {
+        const cart = readCart();
+        const idx = cart.findIndex(x => x.id === item.id);
+        if (idx >= 0) { cart[idx].qty = (cart[idx].qty || 1) + 1; }
+        else { cart.push({ ...item, qty: 1 }); }
+        writeCart(cart);
+        try { window.Telegram?.WebApp?.showAlert?.('Товар добавлен в корзину'); } catch(_) {}
+        renderCart();
+    }
+    function removeFromCart(id) {
+        let cart = readCart();
+        cart = cart.filter(x => x.id !== id);
+        writeCart(cart);
+        renderCart();
+    }
+    function renderCart() {
+        const pane = document.getElementById('shop-pane-cart');
+        if (!pane) return;
+        const cart = readCart();
+        const wrap = document.createElement('div');
+        wrap.className = 'cart-list';
+        if (!cart.length) {
+            pane.innerHTML = '<div style="padding:12px; color: var(--gray);">Корзина пуста.</div>';
+            return;
+        }
+        let total = 0;
+        cart.forEach(it => {
+            total += (it.price || 0) * (it.qty || 1);
+            const row = document.createElement('div');
+            row.className = 'cart-row';
+            const left = document.createElement('div'); left.className = 'cart-left'; left.textContent = `${it.name} × ${it.qty || 1}`;
+            const right = document.createElement('div'); right.className = 'cart-right'; right.textContent = `${(it.price* (it.qty||1)).toLocaleString()} кр.`;
+            const del = document.createElement('button'); del.className = 'details-btn'; del.textContent = 'Убрать'; del.style.marginLeft = '8px';
+            del.addEventListener('click', () => removeFromCart(it.id));
+            const line = document.createElement('div'); line.className = 'cart-line';
+            line.append(left, right, del);
+            wrap.appendChild(line);
+        });
+        const totalEl = document.createElement('div'); totalEl.className = 'cart-total'; totalEl.textContent = `Итого: ${total.toLocaleString()} кредитов`;
+        pane.innerHTML = '';
+        pane.appendChild(wrap);
+        pane.appendChild(totalEl);
+    }
+    function initShop() {
+        // Подвяжем кнопки «В корзину» и метаданные товаров
+        const cards = document.querySelectorAll('#shop-pane-store .store-item');
+        const catalogue = [];
+        cards.forEach((card, i) => {
+            const id = card.getAttribute('data-id') || `item_${i+1}`;
+            const name = card.getAttribute('data-name') || (card.querySelector('.store-name')?.textContent || `Товар ${i+1}`);
+            const priceAttr = card.getAttribute('data-price') || '0';
+            const price = parseInt(String(priceAttr).replace(/[^0-9]/g,''), 10) || 0;
+            catalogue.push({ id, name, price });
+            const btn = card.querySelector('button');
+            if (btn) {
+                btn.disabled = false;
+                btn.addEventListener('click', () => addToCart({ id, name, price }));
+            }
+        });
+    }
 
     let _leagueLoading = false;
     function loadLeagueTable() {

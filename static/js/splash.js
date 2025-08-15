@@ -1,5 +1,7 @@
 // static/js/splash.js
 document.addEventListener('DOMContentLoaded', () => {
+    // Гарантируем пульсацию логотипа даже при сниженных системных анимациях
+    try { document.body.classList.add('force-anim'); } catch (_) {}
     // --- Логгер -------------------------------------------------------------
     const LOG_PREFIX = '[SPLASH]';
     const debugEnabled = (typeof URL !== 'undefined' && (() => {
