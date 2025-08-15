@@ -31,9 +31,14 @@
 
     function loadTours() {
       if (!toursEl) return;
-      toursEl.innerHTML = '<div class="schedule-loading">Загрузка матчей...</div>';
-      fetch('/api/betting/tours').then(r => r.json()).then(data => {
-        const tours = data.tours || [];
+      const CACHE_KEY = 'betting:tours';
+      const FRESH_TTL = 5 * 60 * 1000; // 5 минут
+      const readCache = () => { try { return JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); } catch(_) { return null; } };
+      const writeCache = (obj) => { try { localStorage.setItem(CACHE_KEY, JSON.stringify(obj)); } catch(_) {} };
+
+      const renderTours = (data) => {
+        const ds = data?.tours ? data : (data?.data || {});
+        const tours = ds.tours || [];
         if (!tours.length) { toursEl.innerHTML = '<div class="schedule-empty">Нет ближайших туров</div>'; return; }
         const container = document.createElement('div');
         container.className = 'pred-tours-container';
@@ -57,10 +62,33 @@
         });
         toursEl.innerHTML = '';
         toursEl.appendChild(container);
-      }).catch(err => {
-        console.error('betting tours load error', err);
-        toursEl.innerHTML = '<div class="schedule-error">Не удалось загрузить</div>';
-      });
+      };
+
+      const cached = readCache();
+      if (cached && (Date.now() - (cached.ts||0) < FRESH_TTL)) {
+        renderTours(cached);
+      } else {
+        toursEl.innerHTML = '<div class="schedule-loading">Загрузка матчей...</div>';
+      }
+
+      // Валидация/обновление по сети с ETag
+      const fetchWithETag = (etag) => fetch('/api/betting/tours', { headers: etag ? { 'If-None-Match': etag } : {} })
+        .then(async r => {
+          if (r.status === 304 && cached) return cached;
+          const data = await r.json();
+          const version = data.version || r.headers.get('ETag') || null;
+          const store = { data, version, ts: Date.now() };
+          writeCache(store);
+          return store;
+        });
+      if (cached && cached.version) {
+        fetchWithETag(cached.version).then(renderTours).catch(()=>{});
+      } else {
+        fetchWithETag(null).then(renderTours).catch(err => {
+          console.error('betting tours load error', err);
+          if (!cached) toursEl.innerHTML = '<div class="schedule-error">Не удалось загрузить</div>';
+        });
+      }
     }
 
     function mkTeam(name) {
@@ -128,29 +156,39 @@
     function loadMyBets() {
       if (!myBetsEl) return;
       if (!tg || !tg.initDataUnsafe?.user) { myBetsEl.textContent = 'Недоступно вне Telegram'; return; }
-      myBetsEl.innerHTML = '<div class="schedule-loading">Загрузка...</div>';
+      const CACHE_KEY = 'betting:mybets';
+      const FRESH_TTL = 2 * 60 * 1000; // 2 минуты
+      const readCache = () => { try { return JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); } catch(_) { return null; } };
+      const render = (data) => {
+        const ds = data?.bets ? data : (data?.data || {});
+        const bets = ds.bets || [];
+        if (!bets.length) { myBetsEl.innerHTML = '<div class="schedule-empty">Ставок нет</div>'; return; }
+        const list = document.createElement('div'); list.className = 'bets-list';
+        bets.forEach(b => {
+          const card = document.createElement('div'); card.className = 'bet-card';
+          const top = document.createElement('div'); top.className = 'bet-top';
+          const title = document.createElement('div'); title.className = 'bet-title'; title.textContent = `${b.home} vs ${b.away}`;
+          const when = document.createElement('div'); when.className = 'bet-when'; when.textContent = b.datetime ? formatDateTime(b.datetime) : '';
+          top.append(title, when);
+          const mid = document.createElement('div'); mid.className = 'bet-mid'; mid.textContent = `Исход: ${b.selection.toUpperCase()} | Кф: ${b.odds || '-'} | Ставка: ${b.stake}`;
+          const st = document.createElement('div'); st.className = `bet-status ${b.status}`; st.textContent = b.status;
+          card.append(top, mid, st);
+          list.appendChild(card);
+        });
+        myBetsEl.innerHTML = '';
+        myBetsEl.appendChild(list);
+      };
+      const cached = readCache();
+      if (cached && (Date.now() - (cached.ts||0) < FRESH_TTL)) {
+        render(cached);
+      } else {
+        myBetsEl.innerHTML = '<div class="schedule-loading">Загрузка...</div>';
+      }
       const fd = new FormData(); fd.append('initData', tg.initData || '');
       fetch('/api/betting/my-bets', { method: 'POST', body: fd })
         .then(r => r.json())
-        .then(data => {
-          const bets = data.bets || [];
-          if (!bets.length) { myBetsEl.innerHTML = '<div class="schedule-empty">Ставок нет</div>'; return; }
-          const list = document.createElement('div'); list.className = 'bets-list';
-          bets.forEach(b => {
-            const card = document.createElement('div'); card.className = 'bet-card';
-            const top = document.createElement('div'); top.className = 'bet-top';
-            const title = document.createElement('div'); title.className = 'bet-title'; title.textContent = `${b.home} vs ${b.away}`;
-            const when = document.createElement('div'); when.className = 'bet-when'; when.textContent = b.datetime ? formatDateTime(b.datetime) : '';
-            top.append(title, when);
-            const mid = document.createElement('div'); mid.className = 'bet-mid'; mid.textContent = `Исход: ${b.selection.toUpperCase()} | Кф: ${b.odds || '-'} | Ставка: ${b.stake}`;
-            const st = document.createElement('div'); st.className = `bet-status ${b.status}`; st.textContent = b.status;
-            card.append(top, mid, st);
-            list.appendChild(card);
-          });
-          myBetsEl.innerHTML = '';
-          myBetsEl.appendChild(list);
-        })
-        .catch(err => { console.error('my bets load error', err); myBetsEl.innerHTML = '<div class="schedule-error">Ошибка загрузки</div>'; });
+        .then(data => { try { localStorage.setItem(CACHE_KEY, JSON.stringify({ data, ts: Date.now() })); } catch(_) {} render(data); })
+        .catch(err => { console.error('my bets load error', err); if (!cached) myBetsEl.innerHTML = '<div class="schedule-error">Ошибка загрузки</div>'; });
     }
 
     function formatDateTime(dateIso, time) {

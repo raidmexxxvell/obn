@@ -624,7 +624,7 @@ body {
 .match-header { color: var(--gray); font-size: 12px; margin-bottom: 6px; text-align:center; }
 .match-center { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; }
 .team { font-weight: 600; text-align: center; display:flex; flex-direction: column; align-items: center; gap: 6px; }
-.team .logo { width: 44px; height: 44px; object-fit: contain; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4)); border-radius: 50%; background: transparent; }
+.team .logo { width: 44px; height: 44px; object-fit: contain; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4)); border-radius: 0; background: transparent; }
 .team .team-name { max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .score { color: var(--secondary); font-weight: 800; font-size: 18px; }
 .match-footer { margin-top: 10px; display: flex; justify-content: center; }
@@ -656,7 +656,7 @@ body {
 .modal-close { position: absolute; right: 8px; top: 6px; background: transparent; border: none; color: #fff; font-size: 20px; cursor: pointer; }
 .match-modal-header { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 6px; padding: 8px 4px; }
 .match-modal-header .side { display:flex; flex-direction: column; align-items: center; gap:6px; }
-.match-modal-header .logo { width: 56px; height: 56px; object-fit: contain; }
+.match-modal-header .logo { width: 56px; height: 56px; object-fit: contain; border-radius: 0; background: transparent; }
 .match-modal-header .name { font-weight: 700; text-align:center; }
 .match-modal-header .center { display:flex; flex-direction: column; align-items:center; gap:4px; }
 .match-modal-header .score { color: var(--secondary); font-size:20px; font-weight:800; }

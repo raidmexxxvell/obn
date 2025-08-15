@@ -814,6 +814,29 @@ document.addEventListener('DOMContentLoaded', () => {
         fetch('/api/results', { headers: { 'Cache-Control': 'no-cache' } })
             .then(r => r.json()).then(() => { _resultsPreloaded = true; trySignalAllReady(); })
             .catch(() => { _resultsPreloaded = true; trySignalAllReady(); });
+
+        // Прогнозы/Ставки: предзагрузка ближайшего тура и моих ставок (если в Telegram)
+        try {
+            const tg = window.Telegram?.WebApp || null;
+            const FRESH_TTL = 5 * 60 * 1000; // 5 минут
+            // Туры для ставок (публично, GET)
+            fetch('/api/betting/tours', { headers: { 'Cache-Control': 'no-cache' } })
+                .then(async r => {
+                    const data = await r.json();
+                    const version = data.version || r.headers.get('ETag') || null;
+                    const store = { data, version, ts: Date.now() };
+                    try { localStorage.setItem('betting:tours', JSON.stringify(store)); } catch(_) {}
+                })
+                .catch(()=>{});
+            // Мои ставки (только в Telegram)
+            if (tg?.initDataUnsafe?.user) {
+                const fd = new FormData(); fd.append('initData', tg.initData || '');
+                fetch('/api/betting/my-bets', { method: 'POST', body: fd })
+                    .then(r => r.json())
+                    .then(data => { try { localStorage.setItem('betting:mybets', JSON.stringify({ data, ts: Date.now() })); } catch(_) {} })
+                    .catch(()=>{});
+            }
+        } catch(_) {}
     }
 
     // ---------- MATCH DETAILS SCREEN (in-app, not modal) ----------
