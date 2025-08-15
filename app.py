@@ -17,6 +17,7 @@ from sqlalchemy import (
     create_engine, Column, Integer, String, Text, DateTime, Date, func, case, and_
 )
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
+import threading
 
 # Flask app
 app = Flask(__name__, static_folder='static', template_folder='templates')
@@ -328,6 +329,12 @@ class WeeklyCreditBaseline(Base):
     period_start = Column(DateTime(timezone=True), primary_key=True)
     credits_base = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+class Snapshot(Base):
+    __tablename__ = 'snapshots'
+    key = Column(String(64), primary_key=True)
+    payload = Column(Text, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 def ensure_weekly_baselines(db: Session, period_start: datetime):
     """Создаёт снимок credits для всех пользователей в начале недели (если ещё не создан).
@@ -807,9 +814,551 @@ def _etag_for_payload(payload: dict) -> str:
 def _cache_fresh(cache_obj: dict, ttl: int) -> bool:
     return bool(cache_obj.get('data') is not None and (time.time() - (cache_obj.get('ts') or 0) < ttl))
 
+# ---------------------- DB SNAPSHOTS HELPERS ----------------------
+def _snapshot_get(db: Session, key: str):
+    try:
+        row = db.get(Snapshot, key)
+        if not row:
+            return None
+        try:
+            data = json.loads(row.payload)
+        except Exception:
+            data = None
+        return {
+            'key': key,
+            'payload': data,
+            'updated_at': (row.updated_at or datetime.now(timezone.utc)).isoformat()
+        }
+    except Exception as e:
+        app.logger.warning(f"Snapshot get failed for {key}: {e}")
+        return None
+
+def _snapshot_set(db: Session, key: str, payload: dict):
+    try:
+        raw = json.dumps(payload, ensure_ascii=False)
+        row = db.get(Snapshot, key)
+        now = datetime.now(timezone.utc)
+        if row:
+            row.payload = raw
+            row.updated_at = now
+        else:
+            row = Snapshot(key=key, payload=raw, updated_at=now)
+            db.add(row)
+        db.commit()
+        return True
+    except Exception as e:
+        app.logger.warning(f"Snapshot set failed for {key}: {e}")
+        return False
+
+# ---------------------- BUILDERS FROM SHEETS ----------------------
+def _build_league_payload_from_sheet():
+    ws = get_table_sheet()
+    values = ws.get('A1:H10') or []
+    normalized = []
+    for i in range(10):
+        row = values[i] if i < len(values) else []
+        row = list(row) + [''] * (8 - len(row))
+        normalized.append(row[:8])
+    payload = {
+        'range': 'A1:H10',
+        'updated_at': datetime.now(timezone.utc).isoformat(),
+        'values': normalized
+    }
+    return payload
+
+def _build_stats_payload_from_sheet():
+    ws = get_stats_sheet()
+    values = ws.get('A1:G11') or []
+    normalized = []
+    for i in range(11):
+        row = values[i] if i < len(values) else []
+        row = list(row) + [''] * (7 - len(row))
+        normalized.append(row[:7])
+    payload = {
+        'range': 'A1:G11',
+        'updated_at': datetime.now(timezone.utc).isoformat(),
+        'values': normalized
+    }
+    return payload
+
+def _build_schedule_payload_from_sheet():
+    ws = get_schedule_sheet()
+    rows = ws.get_all_values() or []
+
+    def parse_date(d: str):
+        d = (d or '').strip()
+        if not d:
+            return None
+        for fmt in ("%d.%m.%y", "%d.%m.%Y"):
+            try:
+                return datetime.strptime(d, fmt).date()
+            except Exception:
+                continue
+        return None
+
+    def parse_time(t: str):
+        t = (t or '').strip()
+        try:
+            return datetime.strptime(t, "%H:%M").time()
+        except Exception:
+            return None
+
+    tours = []
+    current_tour = None
+    current_title = None
+    current_matches = []
+
+    def flush_curr():
+        nonlocal current_tour, current_title, current_matches
+        if current_tour is not None and current_matches:
+            start_dts = []
+            for m in current_matches:
+                ds = m.get('datetime')
+                if ds:
+                    try:
+                        start_dts.append(datetime.fromisoformat(ds))
+                    except Exception:
+                        pass
+                elif m.get('date'):
+                    try:
+                        dd = datetime.fromisoformat(m['date']).date()
+                        tt = parse_time(m.get('time','00:00') or '00:00') or datetime.min.time()
+                        start_dts.append(datetime.combine(dd, tt))
+                    except Exception:
+                        pass
+            start_at = start_dts and min(start_dts).isoformat() or ''
+            tours.append({'tour': current_tour, 'title': current_title, 'start_at': start_at, 'matches': current_matches})
+        current_tour = None
+        current_title = None
+        current_matches = []
+
+    for r in rows:
+        a = (r[0] if len(r) > 0 else '').strip()
+        header_num = None
+        if a:
+            parts = a.replace('\u00A0', ' ').strip().split()
+            if len(parts) >= 2 and parts[0].isdigit() and parts[1].lower().startswith('тур'):
+                header_num = int(parts[0])
+        if header_num is not None:
+            flush_curr()
+            current_tour = header_num
+            current_title = a
+            current_matches = []
+            continue
+
+        if current_tour is not None:
+            home = (r[0] if len(r) > 0 else '').strip()
+            score_home = (r[1] if len(r) > 1 else '').strip()
+            score_away = (r[3] if len(r) > 3 else '').strip()
+            away = (r[4] if len(r) > 4 else '').strip()
+            date_str = (r[5] if len(r) > 5 else '').strip()
+            time_str = (r[6] if len(r) > 6 else '').strip()
+            if not home and not away:
+                continue
+            d = parse_date(date_str)
+            tm = parse_time(time_str)
+            dt = None
+            if d:
+                try:
+                    dt = datetime.combine(d, tm or datetime.min.time())
+                except Exception:
+                    dt = None
+            current_matches.append({
+                'home': home,
+                'away': away,
+                'score_home': score_home,
+                'score_away': score_away,
+                'date': (d.isoformat() if d else ''),
+                'time': time_str,
+                'datetime': (dt.isoformat() if dt else '')
+            })
+
+    flush_curr()
+
+    # ближайшие 3 тура (как в api)
+    today = datetime.now().date()
+    def tour_is_upcoming(t):
+        for m in t.get('matches', []):
+            try:
+                if m.get('datetime'):
+                    if datetime.fromisoformat(m['datetime']).date() >= today:
+                        return True
+                elif m.get('date'):
+                    if datetime.fromisoformat(m['date']).date() >= today:
+                        return True
+            except Exception:
+                continue
+        return False
+    upcoming = [t for t in tours if tour_is_upcoming(t)]
+    def tour_sort_key(t):
+        try:
+            return (datetime.fromisoformat(t.get('start_at') or '2100-01-01T00:00:00'), t.get('tour') or 10**9)
+        except Exception:
+            return (datetime(2100,1,1), t.get('tour') or 10**9)
+    upcoming.sort(key=tour_sort_key)
+    upcoming = upcoming[:3]
+
+    payload = { 'updated_at': datetime.now(timezone.utc).isoformat(), 'tours': upcoming }
+    return payload
+
+def _build_results_payload_from_sheet():
+    ws = get_schedule_sheet()
+    rows = ws.get_all_values() or []
+
+    def parse_date(d: str):
+        d = (d or '').strip()
+        if not d:
+            return None
+        for fmt in ("%d.%m.%y", "%d.%m.%Y"):
+            try:
+                return datetime.strptime(d, fmt).date()
+            except Exception:
+                continue
+        return None
+
+    def parse_time(t: str):
+        t = (t or '').strip()
+        try:
+            return datetime.strptime(t, "%H:%M").time()
+        except Exception:
+            return None
+
+    results = []
+    current_tour = None
+    for r in rows:
+        a = (r[0] if len(r) > 0 else '').strip()
+        header_num = None
+        if a:
+            parts = a.replace('\u00A0', ' ').strip().split()
+            if len(parts) >= 2 and parts[0].isdigit() and parts[1].lower().startswith('тур'):
+                header_num = int(parts[0])
+        if header_num is not None:
+            current_tour = header_num
+            continue
+
+        if current_tour is not None:
+            home = (r[0] if len(r) > 0 else '').strip()
+            score_home = (r[1] if len(r) > 1 else '').strip()
+            score_away = (r[3] if len(r) > 3 else '').strip()
+            away = (r[4] if len(r) > 4 else '').strip()
+            date_str = (r[5] if len(r) > 5 else '').strip()
+            time_str = (r[6] if len(r) > 6 else '').strip()
+            if not home and not away:
+                continue
+
+            d = parse_date(date_str)
+            tm = parse_time(time_str)
+            dt = None
+            if d:
+                try:
+                    dt = datetime.combine(d, tm or datetime.min.time())
+                except Exception:
+                    dt = None
+
+            now_local = datetime.now()
+            is_past = False
+            try:
+                if dt:
+                    is_past = dt <= now_local
+                elif d:
+                    is_past = d <= now_local.date()
+            except Exception:
+                is_past = False
+
+            if is_past:
+                results.append({
+                    'tour': current_tour,
+                    'home': home,
+                    'away': away,
+                    'score_home': score_home,
+                    'score_away': score_away,
+                    'date': (d.isoformat() if d else ''),
+                    'time': time_str,
+                    'datetime': (dt.isoformat() if dt else '')
+                })
+
+    def sort_key(m):
+        try:
+            if m.get('datetime'):
+                return datetime.fromisoformat(m['datetime'])
+            if m.get('date'):
+                return datetime.fromisoformat(m['date'])
+        except Exception:
+            return datetime.min
+        return datetime.min
+    results.sort(key=sort_key, reverse=True)
+    payload = { 'updated_at': datetime.now(timezone.utc).isoformat(), 'results': results }
+    return payload
+
+# ---------------------- BACKGROUND SYNC ----------------------
+_BG_THREAD = None
+
+def _should_start_bg() -> bool:
+    # Avoid double-start under reloader; start in main runtime only in debug
+    debug = os.environ.get('FLASK_DEBUG', '') in ('1','true','True')
+    if debug:
+        return os.environ.get('WERKZEUG_RUN_MAIN') == 'true'
+    return True
+
+def _bg_sync_once():
+    if SessionLocal is None:
+        return
+    db = get_db()
+    try:
+        # League table
+        try:
+            league_payload = _build_league_payload_from_sheet()
+            _snapshot_set(db, 'league-table', league_payload)
+            # also persist normalized rows to relational tables (as before)
+            normalized = league_payload.get('values') or []
+            when = datetime.now(timezone.utc)
+            for idx, r in enumerate(normalized, start=1):
+                row = db.get(LeagueTableRow, idx)
+                if not row:
+                    row = LeagueTableRow(
+                        row_index=idx,
+                        c1=str(r[0] or ''), c2=str(r[1] or ''), c3=str(r[2] or ''), c4=str(r[3] or ''),
+                        c5=str(r[4] or ''), c6=str(r[5] or ''), c7=str(r[6] or ''), c8=str(r[7] or ''),
+                        updated_at=when
+                    )
+                    db.add(row)
+                else:
+                    row.c1, row.c2, row.c3, row.c4 = str(r[0] or ''), str(r[1] or ''), str(r[2] or ''), str(r[3] or '')
+                    row.c5, row.c6, row.c7, row.c8 = str(r[4] or ''), str(r[5] or ''), str(r[6] or ''), str(r[7] or '')
+                    row.updated_at = when
+            db.commit()
+        except Exception as e:
+            app.logger.warning(f"BG sync league failed: {e}")
+
+        # Stats table
+        try:
+            stats_payload = _build_stats_payload_from_sheet()
+            _snapshot_set(db, 'stats-table', stats_payload)
+            # persist relational
+            normalized = stats_payload.get('values') or []
+            when = datetime.now(timezone.utc)
+            for idx, r in enumerate(normalized, start=1):
+                row = db.get(StatsTableRow, idx)
+                if not row:
+                    row = StatsTableRow(
+                        row_index=idx,
+                        c1=str(r[0] or ''), c2=str(r[1] or ''), c3=str(r[2] or ''), c4=str(r[3] or ''),
+                        c5=str(r[4] or ''), c6=str(r[5] or ''), c7=str(r[6] or ''),
+                        updated_at=when
+                    )
+                    db.add(row)
+                else:
+                    row.c1, row.c2, row.c3, row.c4 = str(r[0] or ''), str(r[1] or ''), str(r[2] or ''), str(r[3] or '')
+                    row.c5, row.c6, row.c7 = str(r[4] or ''), str(r[5] or ''), str(r[6] or '')
+                    row.updated_at = when
+            db.commit()
+        except Exception as e:
+            app.logger.warning(f"BG sync stats failed: {e}")
+
+        # Schedule
+        try:
+            schedule_payload = _build_schedule_payload_from_sheet()
+            _snapshot_set(db, 'schedule', schedule_payload)
+        except Exception as e:
+            app.logger.warning(f"BG sync schedule failed: {e}")
+
+        # Results
+        try:
+            results_payload = _build_results_payload_from_sheet()
+            _snapshot_set(db, 'results', results_payload)
+        except Exception as e:
+            app.logger.warning(f"BG sync results failed: {e}")
+
+        # Betting tours (enriched with odds/markets/locks for nearest tour)
+        try:
+            tours_payload = _build_betting_tours_payload()
+            _snapshot_set(db, 'betting-tours', tours_payload)
+        except Exception as e:
+            app.logger.warning(f"BG sync betting-tours failed: {e}")
+
+        # Leaderboards precompute (hourly semantics; run on each loop, responses are cached by clients)
+        try:
+            lb_payloads = _build_leaderboards_payloads(db)
+            _snapshot_set(db, 'leader-top-predictors', lb_payloads['top_predictors'])
+            _snapshot_set(db, 'leader-top-rich', lb_payloads['top_rich'])
+            _snapshot_set(db, 'leader-server-leaders', lb_payloads['server_leaders'])
+            _snapshot_set(db, 'leader-prizes', lb_payloads['prizes'])
+        except Exception as e:
+            app.logger.warning(f"BG sync leaderboards failed: {e}")
+    finally:
+        db.close()
+
+def _bg_sync_loop(interval_sec: int):
+    while True:
+        try:
+            _bg_sync_once()
+        except Exception as e:
+            app.logger.warning(f"BG sync loop error: {e}")
+        try:
+            time.sleep(interval_sec)
+        except Exception:
+            pass
+
+def start_background_sync():
+    global _BG_THREAD
+    if _BG_THREAD is not None:
+        return
+    try:
+        enabled = os.environ.get('ENABLE_SCHEDULER', '1') in ('1','true','True')
+        if not enabled or SessionLocal is None:
+            return
+        if not _should_start_bg():
+            return
+        interval = int(os.environ.get('SYNC_INTERVAL_SEC', '600'))
+        t = threading.Thread(target=_bg_sync_loop, args=(interval,), daemon=True)
+        t.start()
+        _BG_THREAD = t
+        app.logger.info(f"Background sync started, interval={interval}s")
+    except Exception as e:
+        app.logger.warning(f"Failed to start background sync: {e}")
+
+# ---------------------- Builders for betting tours and leaderboards ----------------------
+def _build_betting_tours_payload():
+    # Build nearest tour with odds, markets, and locks for each match
+    all_tours = _load_all_tours_from_sheet()
+    today = datetime.now().date()
+
+    def is_relevant(t):
+        for m in t.get('matches', []):
+            try:
+                if m.get('datetime'):
+                    if datetime.fromisoformat(m['datetime']).date() >= today:
+                        return True
+                elif m.get('date'):
+                    if datetime.fromisoformat(m['date']).date() >= today:
+                        return True
+            except Exception:
+                continue
+        return False
+
+    tours = [t for t in all_tours if is_relevant(t)]
+    def sort_key(t):
+        try:
+            return (datetime.fromisoformat(t.get('start_at') or '2100-01-01T00:00:00'), t.get('tour') or 10**9)
+        except Exception:
+            return (datetime(2100,1,1), t.get('tour') or 10**9)
+    tours.sort(sort_key)
+    tours = tours[:1]
+
+    now_local = datetime.now()
+    for t in tours:
+        for m in t.get('matches', []):
+            try:
+                lock = False
+                if m.get('datetime'):
+                    lock = datetime.fromisoformat(m['datetime']) <= now_local
+                elif m.get('date'):
+                    d = datetime.fromisoformat(m['date']).date()
+                    lock = datetime.combine(d, datetime.max.time()) <= now_local
+                m['lock'] = bool(lock)
+                m['odds'] = _compute_match_odds(m.get('home',''), m.get('away',''))
+                totals = []
+                for ln in (3.5, 4.5, 5.5):
+                    totals.append({'line': ln, 'odds': _compute_totals_odds(m.get('home',''), m.get('away',''), ln)})
+                sp_pen = _compute_specials_odds(m.get('home',''), m.get('away',''), 'penalty')
+                sp_red = _compute_specials_odds(m.get('home',''), m.get('away',''), 'redcard')
+                m['markets'] = {
+                    'totals': totals,
+                    'specials': {
+                        'penalty': { 'available': True, 'odds': sp_pen },
+                        'redcard': { 'available': True, 'odds': sp_red }
+                    }
+                }
+            except Exception:
+                m['lock'] = True
+    return { 'tours': tours, 'updated_at': datetime.now(timezone.utc).isoformat() }
+
+def _build_leaderboards_payloads(db: Session) -> dict:
+    # predictors
+    won_case = case((Bet.status == 'won', 1), else_=0)
+    period_start = _week_period_start_msk_to_utc()
+    q = (
+        db.query(
+            User.user_id.label('user_id'),
+            (User.display_name).label('display_name'),
+            (User.tg_username).label('tg_username'),
+            func.count(Bet.id).label('bets_total'),
+            func.sum(won_case).label('bets_won')
+        )
+        .join(Bet, Bet.user_id == User.user_id)
+        .filter(Bet.placed_at >= period_start)
+        .group_by(User.user_id, User.display_name, User.tg_username)
+        .having(func.count(Bet.id) > 0)
+    )
+    rows_pred = []
+    for r in q:
+        total = int(r.bets_total or 0)
+        won = int(r.bets_won or 0)
+        pct = round((won / total) * 100, 1) if total > 0 else 0.0
+        rows_pred.append({
+            'user_id': int(r.user_id),
+            'display_name': r.display_name or 'User',
+            'tg_username': r.tg_username or '',
+            'bets_total': total,
+            'bets_won': won,
+            'winrate': pct
+        })
+    rows_pred.sort(key=lambda x: (-x['winrate'], -x['bets_total'], x['display_name']))
+    rows_pred = rows_pred[:10]
+
+    # rich
+    ensure_weekly_baselines(db, period_start)
+    bases = { int(r.user_id): int(r.credits_base or 0) for r in db.query(WeeklyCreditBaseline).filter(WeeklyCreditBaseline.period_start == period_start).all() }
+    rows_rich = []
+    for u in db.query(User).all():
+        base = bases.get(int(u.user_id), int(u.credits or 0))
+        gain = int(u.credits or 0) - base
+        rows_rich.append({'user_id': int(u.user_id), 'display_name': u.display_name or 'User', 'tg_username': u.tg_username or '', 'gain': int(gain)})
+    rows_rich.sort(key=lambda x: (-x['gain'], x['display_name']))
+    rows_rich = rows_rich[:10]
+
+    # server leaders
+    rows_serv = []
+    for u in db.query(User).all():
+        score = int(u.xp or 0) + int(u.level or 0) * 100 + int(u.consecutive_days or 0) * 5
+        rows_serv.append({ 'user_id': int(u.user_id), 'display_name': u.display_name or 'User', 'tg_username': u.tg_username or '', 'xp': int(u.xp or 0), 'level': int(u.level or 1), 'streak': int(u.consecutive_days or 0), 'score': score })
+    rows_serv.sort(key=lambda x: (-x['score'], -x['level'], -x['xp']))
+    rows_serv = rows_serv[:10]
+
+    # prizes
+    preds3 = [ {k:v for k,v in item.items() if k in ('user_id','display_name','tg_username','winrate') } for item in rows_pred[:3] ]
+    rich3 = [ {k:v for k,v in item.items() if k in ('user_id','display_name','tg_username','gain') } for item in rows_rich[:3] ]
+    serv3 = [ {k:v for k,v in item.items() if k in ('user_id','display_name','tg_username','score') } for item in rows_serv[:3] ]
+    prizes_payload = { 'predictors': preds3, 'rich': rich3, 'server': serv3 }
+
+    return {
+        'top_predictors': { 'items': rows_pred, 'updated_at': datetime.now(timezone.utc).isoformat() },
+        'top_rich': { 'items': rows_rich, 'updated_at': datetime.now(timezone.utc).isoformat() },
+        'server_leaders': { 'items': rows_serv, 'updated_at': datetime.now(timezone.utc).isoformat() },
+        'prizes': { 'data': prizes_payload, 'updated_at': datetime.now(timezone.utc).isoformat() }
+    }
+
 @app.route('/api/leaderboard/top-predictors')
 def api_leader_top_predictors():
     """Топ-10 прогнозистов: имя, всего ставок, выигрышных, % выигрышных. Кэш 1 час."""
+    # Сначала пытаемся отдать предвычисленный снапшот
+    if SessionLocal is not None:
+        db = get_db()
+        try:
+            snap = _snapshot_get(db, 'leader-top-predictors')
+            if snap and snap.get('payload'):
+                payload = snap['payload']
+                _core = {'items': payload.get('items')}
+                etag = _etag_for_payload(_core)
+                inm = request.headers.get('If-None-Match')
+                if inm and inm == etag:
+                    return ('', 304)
+                resp = jsonify({ **payload, 'version': etag })
+                resp.headers['ETag'] = etag
+                resp.headers['Cache-Control'] = 'public, max-age=3600, stale-while-revalidate=600'
+                return resp
+        finally:
+            db.close()
     global LEADER_PRED_CACHE
     if _cache_fresh(LEADER_PRED_CACHE, LEADER_TTL):
         client_etag = request.headers.get('If-None-Match')
@@ -873,6 +1422,23 @@ def api_leader_top_predictors():
 @app.route('/api/leaderboard/top-rich')
 def api_leader_top_rich():
     """Топ-10 по приросту кредитов за текущую неделю (с понедельника 03:00 МСК)."""
+    if SessionLocal is not None:
+        db = get_db()
+        try:
+            snap = _snapshot_get(db, 'leader-top-rich')
+            if snap and snap.get('payload'):
+                payload = snap['payload']
+                _core = {'items': payload.get('items')}
+                etag = _etag_for_payload(_core)
+                inm = request.headers.get('If-None-Match')
+                if inm and inm == etag:
+                    return ('', 304)
+                resp = jsonify({ **payload, 'version': etag })
+                resp.headers['ETag'] = etag
+                resp.headers['Cache-Control'] = 'public, max-age=3600, stale-while-revalidate=600'
+                return resp
+        finally:
+            db.close()
     global LEADER_RICH_CACHE
     if _cache_fresh(LEADER_RICH_CACHE, LEADER_TTL):
         client_etag = request.headers.get('If-None-Match')
@@ -925,6 +1491,23 @@ def api_leader_server_leaders():
     Можно настроить по-другому: например, активность (кол-во чек-инов за месяц) или приглашённые.
     Возвращаем топ-10 по score = xp + level*100 + consecutive_days*5.
     """
+    if SessionLocal is not None:
+        db = get_db()
+        try:
+            snap = _snapshot_get(db, 'leader-server-leaders')
+            if snap and snap.get('payload'):
+                payload = snap['payload']
+                _core = {'items': payload.get('items')}
+                etag = _etag_for_payload(_core)
+                inm = request.headers.get('If-None-Match')
+                if inm and inm == etag:
+                    return ('', 304)
+                resp = jsonify({ **payload, 'version': etag })
+                resp.headers['ETag'] = etag
+                resp.headers['Cache-Control'] = 'public, max-age=3600, stale-while-revalidate=600'
+                return resp
+        finally:
+            db.close()
     global LEADER_SERVER_CACHE
     if _cache_fresh(LEADER_SERVER_CACHE, LEADER_TTL):
         client_etag = request.headers.get('If-None-Match')
@@ -972,6 +1555,23 @@ def api_leader_prizes():
     """Возвращает пьедесталы по трем категориям: прогнозисты, богачи, лидеры сервера (по 3 места).
     Включаем только display_name и user_id (фото на фронте через Telegram).
     """
+    if SessionLocal is not None:
+        db = get_db()
+        try:
+            snap = _snapshot_get(db, 'leader-prizes')
+            if snap and snap.get('payload'):
+                payload = snap['payload']
+                _core = {'data': payload.get('data')}
+                etag = _etag_for_payload(_core)
+                inm = request.headers.get('If-None-Match')
+                if inm and inm == etag:
+                    return ('', 304)
+                resp = jsonify({ **payload, 'version': etag })
+                resp.headers['ETag'] = etag
+                resp.headers['Cache-Control'] = 'public, max-age=3600, stale-while-revalidate=600'
+                return resp
+        finally:
+            db.close()
     global LEADER_PRIZES_CACHE
     if _cache_fresh(LEADER_PRIZES_CACHE, LEADER_TTL):
         client_etag = request.headers.get('If-None-Match')
@@ -1647,65 +2247,43 @@ def health():
 
 @app.route('/api/league-table', methods=['GET'])
 def api_league_table():
-    """Возвращает таблицу лиги (A1:H10) с кешем на 1 час."""
+    """Возвращает таблицу лиги из снапшота БД; при отсутствии — bootstrap из Sheets. ETag/304 поддерживаются."""
     try:
-        now = int(time.time())
-        if LEAGUE_TABLE_CACHE['data'] and (now - LEAGUE_TABLE_CACHE['ts'] < LEAGUE_TABLE_TTL):
-            return jsonify(LEAGUE_TABLE_CACHE['data'])
-
-        ws = get_table_sheet()
-        values = ws.get('A1:H10') or []
-        # Гарантируем 10 строк и 8 столбцов (заполним пустыми строками/ячейками при необходимости)
-        normalized = []
-        for i in range(10):
-            row = values[i] if i < len(values) else []
-            row = list(row) + [''] * (8 - len(row))
-            normalized.append(row[:8])
-
-        payload = {
-            'range': 'A1:H10',
-            'updated_at': datetime.now(timezone.utc).isoformat(),
-            'values': normalized
-        }
-        # ETag для условного запроса
-        _core = {'range': 'A1:H10', 'values': normalized}
-        _etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
-        inm = request.headers.get('If-None-Match')
-        if inm and inm == _etag and LEAGUE_TABLE_CACHE['data']:
-            resp = app.response_class(status=304)
-            resp.headers['ETag'] = _etag
-            resp.headers['Cache-Control'] = 'private, max-age=1800'
-            return resp
-
-        LEAGUE_TABLE_CACHE['data'] = payload
-        LEAGUE_TABLE_CACHE['ts'] = now
-        # Сохраняем в БД (если настроена)
+        # 1) Пытаемся отдать снапшот
         if SessionLocal is not None:
             db: Session = get_db()
             try:
-                for idx, r in enumerate(normalized, start=1):
-                    row = db.get(LeagueTableRow, idx)
-                    when = datetime.now(timezone.utc)
-                    if not row:
-                        row = LeagueTableRow(
-                            row_index=idx,
-                            c1=str(r[0] or ''), c2=str(r[1] or ''), c3=str(r[2] or ''), c4=str(r[3] or ''),
-                            c5=str(r[4] or ''), c6=str(r[5] or ''), c7=str(r[6] or ''), c8=str(r[7] or ''),
-                            updated_at=when
-                        )
-                        db.add(row)
-                    else:
-                        row.c1, row.c2, row.c3, row.c4 = str(r[0] or ''), str(r[1] or ''), str(r[2] or ''), str(r[3] or '')
-                        row.c5, row.c6, row.c7, row.c8 = str(r[4] or ''), str(r[5] or ''), str(r[6] or ''), str(r[7] or '')
-                        row.updated_at = when
-                db.commit()
-            except Exception as e:
-                app.logger.warning(f"Не удалось сохранить лигу в БД: {e}")
+                snap = _snapshot_get(db, 'league-table')
+                if snap and snap.get('payload'):
+                    payload = snap['payload']
+                    _core = {'range': payload.get('range'), 'values': payload.get('values')}
+                    _etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+                    inm = request.headers.get('If-None-Match')
+                    if inm and inm == _etag:
+                        resp = app.response_class(status=304)
+                        resp.headers['ETag'] = _etag
+                        resp.headers['Cache-Control'] = 'public, max-age=1800, stale-while-revalidate=600'
+                        return resp
+                    resp = jsonify({**payload, 'version': _etag})
+                    resp.headers['ETag'] = _etag
+                    resp.headers['Cache-Control'] = 'public, max-age=1800, stale-while-revalidate=600'
+                    return resp
+            finally:
+                db.close()
+        # 2) Bootstrap из Sheets, если снапшот отсутствует
+        payload = _build_league_payload_from_sheet()
+        _core = {'range': 'A1:H10', 'values': payload.get('values')}
+        _etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+        # сохраним снапшот для будущих запросов
+        if SessionLocal is not None:
+            db = get_db()
+            try:
+                _snapshot_set(db, 'league-table', payload)
             finally:
                 db.close()
         resp = jsonify({**payload, 'version': _etag})
         resp.headers['ETag'] = _etag
-        resp.headers['Cache-Control'] = 'private, max-age=1800'
+        resp.headers['Cache-Control'] = 'public, max-age=1800, stale-while-revalidate=600'
         return resp
     except Exception as e:
         app.logger.error(f"Ошибка загрузки таблицы лиги: {str(e)}")
@@ -1713,162 +2291,41 @@ def api_league_table():
 
 @app.route('/api/schedule', methods=['GET'])
 def api_schedule():
-    """Возвращает ближайшие 3 тура из листа 'РАСПИСАНИЕ ИГР'.
-    Ожидается структура блоками: строка с 'N Тур', затем 3-5 строк матчей: A(home), E(away), F(дата dd.mm.yy), G(время HH:MM).
-    """
+    """Возвращает ближайшие 3 тура из снапшота БД; при отсутствии — bootstrap из Sheets. ETag/304 поддерживаются."""
     try:
-        now = int(time.time())
-        if SCHEDULE_CACHE['data'] and (now - SCHEDULE_CACHE['ts'] < SCHEDULE_TTL):
-            return jsonify(SCHEDULE_CACHE['data'])
-
-        ws = get_schedule_sheet()
-        rows = ws.get_all_values() or []
-
-        def parse_date(d: str):
-            d = (d or '').strip()
-            if not d:
-                return None
-            for fmt in ("%d.%m.%y", "%d.%m.%Y"):
-                try:
-                    return datetime.strptime(d, fmt).date()
-                except Exception:
-                    continue
-            return None
-
-        def parse_time(t: str):
-            t = (t or '').strip()
+        if SessionLocal is not None:
+            db: Session = get_db()
             try:
-                return datetime.strptime(t, "%H:%M").time()
-            except Exception:
-                return None
-
-        tours = []
-        current_tour = None
-        current_title = None
-        current_matches = []
-
-        for r in rows:
-            a = (r[0] if len(r) > 0 else '').strip()
-            # заголовок вида "1 Тур" (число + слово Тур)
-            header_num = None
-            if a:
-                parts = a.replace('\u00A0', ' ').strip().split()
-                if len(parts) >= 2 and parts[0].isdigit() and parts[1].lower().startswith('тур'):
-                    header_num = int(parts[0])
-            if header_num is not None:
-                if current_tour is not None and current_matches:
-                    # закрываем предыдущий: вычислим старт тура как минимальная дата/время
-                    start_dts = []
-                    for m in current_matches:
-                        ds = m.get('datetime')
-                        if ds:
-                            try:
-                                start_dts.append(datetime.fromisoformat(ds))
-                            except Exception:
-                                pass
-                        elif m.get('date'):
-                            try:
-                                dd = datetime.fromisoformat(m['date']).date()
-                                tt = parse_time(m.get('time','00:00') or '00:00') or datetime.min.time()
-                                start_dts.append(datetime.combine(dd, tt))
-                            except Exception:
-                                pass
-                    start_at = start_dts and min(start_dts).isoformat() or ''
-                    tours.append({'tour': current_tour, 'title': current_title, 'start_at': start_at, 'matches': current_matches})
-                # начинаем новый блок тура
-                current_tour = header_num
-                current_title = a
-                current_matches = []
-                continue
-
-            # строки матчей внутри текущего тура
-            if current_tour is not None:
-                home = (r[0] if len(r) > 0 else '').strip()
-                # Счёт: B (дом), D (гости)
-                score_home = (r[1] if len(r) > 1 else '').strip()
-                score_away = (r[3] if len(r) > 3 else '').strip()
-                away = (r[4] if len(r) > 4 else '').strip()
-                date_str = (r[5] if len(r) > 5 else '').strip()
-                time_str = (r[6] if len(r) > 6 else '').strip()
-                if not home and not away:
-                    continue
-                d = parse_date(date_str)
-                tm = parse_time(time_str)
-                dt = None
-                if d:
-                    try:
-                        dt = datetime.combine(d, tm or datetime.min.time())
-                    except Exception:
-                        dt = None
-                current_matches.append({
-                    'home': home,
-                    'away': away,
-                    'score_home': score_home,
-                    'score_away': score_away,
-                    'date': (d.isoformat() if d else ''),
-                    'time': time_str,
-                    'datetime': (dt.isoformat() if dt else '')
-                })
-
-        # закрыть последний тур
-        if current_tour is not None and current_matches:
-            start_dts = []
-            for m in current_matches:
-                ds = m.get('datetime')
-                if ds:
-                    try:
-                        start_dts.append(datetime.fromisoformat(ds))
-                    except Exception:
-                        pass
-                elif m.get('date'):
-                    try:
-                        dd = datetime.fromisoformat(m['date']).date()
-                        tt = parse_time(m.get('time','00:00') or '00:00') or datetime.min.time()
-                        start_dts.append(datetime.combine(dd, tt))
-                    except Exception:
-                        pass
-            start_at = start_dts and min(start_dts).isoformat() or ''
-            tours.append({'tour': current_tour, 'title': current_title, 'start_at': start_at, 'matches': current_matches})
-
-        # ближайшие 3 тура: есть хотя бы один матч с датой >= сегодня
-        today = datetime.now().date()
-        def tour_is_upcoming(t):
-            for m in t.get('matches', []):
-                try:
-                    if m.get('datetime'):
-                        if datetime.fromisoformat(m['datetime']).date() >= today:
-                            return True
-                    elif m.get('date'):
-                        if datetime.fromisoformat(m['date']).date() >= today:
-                            return True
-                except Exception:
-                    continue
-            return False
-
-        upcoming = [t for t in tours if tour_is_upcoming(t)]
-        def tour_sort_key(t):
-            try:
-                return (datetime.fromisoformat(t.get('start_at') or '2100-01-01T00:00:00'), t.get('tour') or 10**9)
-            except Exception:
-                return (datetime(2100,1,1), t.get('tour') or 10**9)
-        upcoming.sort(key=tour_sort_key)
-        upcoming = upcoming[:3]
-
-        payload = { 'updated_at': datetime.now(timezone.utc).isoformat(), 'tours': upcoming }
-        _core = {'tours': upcoming}
+                snap = _snapshot_get(db, 'schedule')
+                if snap and snap.get('payload'):
+                    payload = snap['payload']
+                    _core = {'tours': payload.get('tours')}
+                    _etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+                    inm = request.headers.get('If-None-Match')
+                    if inm and inm == _etag:
+                        resp = app.response_class(status=304)
+                        resp.headers['ETag'] = _etag
+                        resp.headers['Cache-Control'] = 'public, max-age=900, stale-while-revalidate=600'
+                        return resp
+                    resp = jsonify({**payload, 'version': _etag})
+                    resp.headers['ETag'] = _etag
+                    resp.headers['Cache-Control'] = 'public, max-age=900, stale-while-revalidate=600'
+                    return resp
+            finally:
+                db.close()
+        # Bootstrap
+        payload = _build_schedule_payload_from_sheet()
+        _core = {'tours': payload.get('tours')}
         _etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
-        inm = request.headers.get('If-None-Match')
-        if inm and inm == _etag and SCHEDULE_CACHE['data']:
-            resp = app.response_class(status=304)
-            resp.headers['ETag'] = _etag
-            resp.headers['Cache-Control'] = 'private, max-age=900'
-            return resp
-
-        SCHEDULE_CACHE['data'] = payload
-        SCHEDULE_CACHE['ts'] = int(time.time())
+        if SessionLocal is not None:
+            db = get_db()
+            try:
+                _snapshot_set(db, 'schedule', payload)
+            finally:
+                db.close()
         resp = jsonify({**payload, 'version': _etag})
         resp.headers['ETag'] = _etag
-        resp.headers['Cache-Control'] = 'private, max-age=900'
+        resp.headers['Cache-Control'] = 'public, max-age=900, stale-while-revalidate=600'
         return resp
     except Exception as e:
         app.logger.error(f"Ошибка загрузки расписания: {str(e)}")
@@ -1976,8 +2433,8 @@ def _load_all_tours_from_sheet():
 
 @app.route('/api/betting/tours', methods=['GET'])
 def api_betting_tours():
-    """Возвращает туры для ставок: начиная с текущего дня и ещё два следующих тура.
-    Для матчей в прошлом блокируем ставки (поле lock: true)."""
+    """Возвращает ближайший тур для ставок, из снапшота БД; при отсутствии — собирает on-demand.
+    Для матчей в прошлом блокируем ставки (поле lock: true). Поддерживает ETag/304."""
     try:
         # авто-расчёт открытых ставок (раз в 5 минут)
         global _LAST_SETTLE_TS
@@ -1989,82 +2446,41 @@ def api_betting_tours():
                 app.logger.warning(f"Авторасчёт ставок: {e}")
             _LAST_SETTLE_TS = now_ts
 
-        all_tours = _load_all_tours_from_sheet()
-        today = datetime.now().date()
-
-        def is_relevant(t):
-            # тур релевантен, если есть матч с датой >= сегодня
-            for m in t.get('matches', []):
-                try:
-                    if m.get('datetime'):
-                        if datetime.fromisoformat(m['datetime']).date() >= today:
-                            return True
-                    elif m.get('date'):
-                        if datetime.fromisoformat(m['date']).date() >= today:
-                            return True
-                except Exception:
-                    continue
-            return False
-
-        tours = [t for t in all_tours if is_relevant(t)]
-
-        def sort_key(t):
+        # 1) Отдать снапшот, если есть
+        if SessionLocal is not None:
+            db: Session = get_db()
             try:
-                return (datetime.fromisoformat(t.get('start_at') or '2100-01-01T00:00:00'), t.get('tour') or 10**9)
-            except Exception:
-                return (datetime(2100,1,1), t.get('tour') or 10**9)
-        tours.sort(key=sort_key)
-        tours = tours[:1]  # только ближайший тур
+                snap = _snapshot_get(db, 'betting-tours')
+                if snap and snap.get('payload'):
+                    payload = snap['payload']
+                    _core = {'tours': payload.get('tours')}
+                    etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+                    inm = request.headers.get('If-None-Match')
+                    if inm and inm == etag:
+                        resp = app.response_class(status=304)
+                        resp.headers['ETag'] = etag
+                        resp.headers['Cache-Control'] = 'public, max-age=300, stale-while-revalidate=300'
+                        return resp
+                    resp = jsonify({ **payload, 'version': etag })
+                    resp.headers['ETag'] = etag
+                    resp.headers['Cache-Control'] = 'public, max-age=300, stale-while-revalidate=300'
+                    return resp
+            finally:
+                db.close()
 
-        # отметим для каждого матча, можно ли ставить (до начала)
-        now = datetime.now()
-        for t in tours:
-            for m in t.get('matches', []):
-                try:
-                    lock = False
-                    if m.get('datetime'):
-                        lock = datetime.fromisoformat(m['datetime']) <= now
-                    elif m.get('date'):
-                        # если нет времени — считаем до конца дня
-                        d = datetime.fromisoformat(m['date']).date()
-                        lock = datetime.combine(d, datetime.max.time()) <= now
-                    m['lock'] = bool(lock)
-                    # посчитаем коэффициенты для отображения
-                    m['odds'] = _compute_match_odds(m.get('home',''), m.get('away',''))
-                    # дополнительные рынки: тоталы (3.5/4.5/5.5)
-                    totals = []
-                    for ln in (3.5, 4.5, 5.5):
-                        totals.append({'line': ln, 'odds': _compute_totals_odds(m.get('home',''), m.get('away',''), ln)})
-                    # спецрынки: пенальти и красная карта (Да/Нет)
-                    sp_pen = _compute_specials_odds(m.get('home',''), m.get('away',''), 'penalty')
-                    sp_red = _compute_specials_odds(m.get('home',''), m.get('away',''), 'redcard')
-                    m['markets'] = {
-                        'totals': totals,
-                        'specials': {
-                            'penalty': { 'available': True, 'odds': sp_pen },
-                            'redcard': { 'available': True, 'odds': sp_red }
-                        }
-                    }
-                except Exception:
-                    m['lock'] = True
-
-        payload = { 'tours': tours, 'updated_at': datetime.now(timezone.utc).isoformat() }
-        # Генерируем ETag по главным данным
-        try:
-            _core = {'tours': tours}
-            etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
-        except Exception:
-            etag = None
-        inm = request.headers.get('If-None-Match')
-        if etag and inm and inm == etag:
-            resp = jsonify({})
-            resp.status_code = 304
-            resp.headers['ETag'] = etag
-            return resp
+        # 2) On-demand сборка и запись снапшота
+        payload = _build_betting_tours_payload()
+        _core = {'tours': payload.get('tours')}
+        etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+        if SessionLocal is not None:
+            db = get_db()
+            try:
+                _snapshot_set(db, 'betting-tours', payload)
+            finally:
+                db.close()
         resp = jsonify({ **payload, 'version': etag })
-        if etag:
-            resp.headers['ETag'] = etag
-        resp.headers['Cache-Control'] = 'private, max-age=300'
+        resp.headers['ETag'] = etag
+        resp.headers['Cache-Control'] = 'public, max-age=300, stale-while-revalidate=300'
         return resp
     except Exception as e:
         app.logger.error(f"Ошибка betting tours: {e}")
@@ -2240,114 +2656,41 @@ def _settle_open_bets():
 
 @app.route('/api/results', methods=['GET'])
 def api_results():
-    """Возвращает все прошедшие матчи из листа 'РАСПИСАНИЕ ИГР'.
-    Использует колонки: A(home), B(score_home), D(score_away), E(away), F(date dd.mm.yy), G(time HH:MM).
-    """
+    """Возвращает прошедшие матчи из снапшота БД; при отсутствии — bootstrap из Sheets. ETag/304 поддерживаются."""
     try:
-        ws = get_schedule_sheet()
-        rows = ws.get_all_values() or []
-
-        def parse_date(d: str):
-            d = (d or '').strip()
-            if not d:
-                return None
-            for fmt in ("%d.%m.%y", "%d.%m.%Y"):
-                try:
-                    return datetime.strptime(d, fmt).date()
-                except Exception:
-                    continue
-            return None
-
-        def parse_time(t: str):
-            t = (t or '').strip()
+        if SessionLocal is not None:
+            db: Session = get_db()
             try:
-                return datetime.strptime(t, "%H:%M").time()
-            except Exception:
-                return None
-
-        results = []
-        current_tour = None
-        for r in rows:
-            a = (r[0] if len(r) > 0 else '').strip()
-            # Заголовок тура: "N Тур"
-            header_num = None
-            if a:
-                parts = a.replace('\u00A0', ' ').strip().split()
-                if len(parts) >= 2 and parts[0].isdigit() and parts[1].lower().startswith('тур'):
-                    header_num = int(parts[0])
-            if header_num is not None:
-                current_tour = header_num
-                continue
-
-            # строки матчей
-            if current_tour is not None:
-                home = (r[0] if len(r) > 0 else '').strip()
-                score_home = (r[1] if len(r) > 1 else '').strip()
-                score_away = (r[3] if len(r) > 3 else '').strip()
-                away = (r[4] if len(r) > 4 else '').strip()
-                date_str = (r[5] if len(r) > 5 else '').strip()
-                time_str = (r[6] if len(r) > 6 else '').strip()
-                if not home and not away:
-                    continue
-
-                d = parse_date(date_str)
-                tm = parse_time(time_str)
-                dt = None
-                if d:
-                    try:
-                        dt = datetime.combine(d, tm or datetime.min.time())
-                    except Exception:
-                        dt = None
-
-                # матч считается прошедшим, если дата/время <= сейчас
-                now = datetime.now()
-                is_past = False
-                try:
-                    if dt:
-                        is_past = dt <= now
-                    elif d:
-                        is_past = d <= now.date()
-                except Exception:
-                    is_past = False
-
-                if is_past:
-                    results.append({
-                        'tour': current_tour,
-                        'home': home,
-                        'away': away,
-                        'score_home': score_home,
-                        'score_away': score_away,
-                        'date': (d.isoformat() if d else ''),
-                        'time': time_str,
-                        'datetime': (dt.isoformat() if dt else '')
-                    })
-
-        # сортируем прошедшие матчи по дате/времени убыв.
-        def sort_key(m):
-            try:
-                if m.get('datetime'):
-                    return datetime.fromisoformat(m['datetime'])
-                if m.get('date'):
-                    return datetime.fromisoformat(m['date'])
-            except Exception:
-                return datetime.min
-            return datetime.min
-        results.sort(key=sort_key, reverse=True)
-
-        payload = { 'updated_at': datetime.now(timezone.utc).isoformat(), 'results': results }
-        _core = {'results': results[:200]}  # усечённое ядро для ETag, чтобы не дуло слишком длинным
+                snap = _snapshot_get(db, 'results')
+                if snap and snap.get('payload'):
+                    payload = snap['payload']
+                    _core = {'results': (payload.get('results') or [])[:200]}
+                    _etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+                    inm = request.headers.get('If-None-Match')
+                    if inm and inm == _etag:
+                        resp = app.response_class(status=304)
+                        resp.headers['ETag'] = _etag
+                        resp.headers['Cache-Control'] = 'public, max-age=900, stale-while-revalidate=600'
+                        return resp
+                    resp = jsonify({**payload, 'version': _etag})
+                    resp.headers['ETag'] = _etag
+                    resp.headers['Cache-Control'] = 'public, max-age=900, stale-while-revalidate=600'
+                    return resp
+            finally:
+                db.close()
+        # Bootstrap
+        payload = _build_results_payload_from_sheet()
+        _core = {'results': (payload.get('results') or [])[:200]}
         _etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
-        inm = request.headers.get('If-None-Match')
-        # простой in-memory кеш по etag можно добавить при необходимости; пока полагаемся на клиентский ETag
-        if inm and inm == _etag:
-            resp = app.response_class(status=304)
-            resp.headers['ETag'] = _etag
-            resp.headers['Cache-Control'] = 'private, max-age=900'
-            return resp
-
+        if SessionLocal is not None:
+            db = get_db()
+            try:
+                _snapshot_set(db, 'results', payload)
+            finally:
+                db.close()
         resp = jsonify({**payload, 'version': _etag})
         resp.headers['ETag'] = _etag
-        resp.headers['Cache-Control'] = 'private, max-age=900'
+        resp.headers['Cache-Control'] = 'public, max-age=900, stale-while-revalidate=600'
         return resp
     except Exception as e:
         app.logger.error(f"Ошибка загрузки результатов: {str(e)}")
@@ -2490,67 +2833,42 @@ def api_league_table_refresh():
 
 @app.route('/api/stats-table', methods=['GET'])
 def api_stats_table():
-    """Возвращает таблицу статистики (A1:G11) с кешем на 1 час и сохраняет в БД."""
+    """Возвращает таблицу статистики из снапшота БД; при отсутствии — bootstrap из Sheets. ETag/304 поддерживаются."""
     try:
-        now = int(time.time())
-        if STATS_TABLE_CACHE['data'] and (now - STATS_TABLE_CACHE['ts'] < STATS_TABLE_TTL):
-            return jsonify(STATS_TABLE_CACHE['data'])
-
-        ws = get_stats_sheet()
-        values = ws.get('A1:G11') or []
-        # Гарантируем 11 строк и 7 столбцов
-        normalized = []
-        for i in range(11):
-            row = values[i] if i < len(values) else []
-            row = list(row) + [''] * (7 - len(row))
-            normalized.append(row[:7])
-
-        payload = {
-            'range': 'A1:G11',
-            'updated_at': datetime.now(timezone.utc).isoformat(),
-            'values': normalized
-        }
-        # ETag и условный ответ
-        _core = {'range': 'A1:G11', 'values': normalized}
-        _etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
-        inm = request.headers.get('If-None-Match')
-        if inm and inm == _etag and STATS_TABLE_CACHE['data']:
-            resp = app.response_class(status=304)
-            resp.headers['ETag'] = _etag
-            resp.headers['Cache-Control'] = 'private, max-age=1800'
-            return resp
-
-        STATS_TABLE_CACHE['data'] = payload
-        STATS_TABLE_CACHE['ts'] = now
-
-        # Сохраняем в БД (если настроена)
         if SessionLocal is not None:
             db: Session = get_db()
             try:
-                when = datetime.now(timezone.utc)
-                for idx, r in enumerate(normalized, start=1):
-                    row = db.get(StatsTableRow, idx)
-                    if not row:
-                        row = StatsTableRow(
-                            row_index=idx,
-                            c1=str(r[0] or ''), c2=str(r[1] or ''), c3=str(r[2] or ''), c4=str(r[3] or ''),
-                            c5=str(r[4] or ''), c6=str(r[5] or ''), c7=str(r[6] or ''),
-                            updated_at=when
-                        )
-                        db.add(row)
-                    else:
-                        row.c1, row.c2, row.c3, row.c4 = str(r[0] or ''), str(r[1] or ''), str(r[2] or ''), str(r[3] or '')
-                        row.c5, row.c6, row.c7 = str(r[4] or ''), str(r[5] or ''), str(r[6] or '')
-                        row.updated_at = when
-                db.commit()
-            except Exception as e:
-                app.logger.warning(f"Не удалось сохранить статистику в БД: {e}")
+                snap = _snapshot_get(db, 'stats-table')
+                if snap and snap.get('payload'):
+                    payload = snap['payload']
+                    _core = {'range': payload.get('range'), 'values': payload.get('values')}
+                    _etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+                    inm = request.headers.get('If-None-Match')
+                    if inm and inm == _etag:
+                        resp = app.response_class(status=304)
+                        resp.headers['ETag'] = _etag
+                        resp.headers['Cache-Control'] = 'public, max-age=1800, stale-while-revalidate=600'
+                        return resp
+                    resp = jsonify({**payload, 'version': _etag})
+                    resp.headers['ETag'] = _etag
+                    resp.headers['Cache-Control'] = 'public, max-age=1800, stale-while-revalidate=600'
+                    return resp
+            finally:
+                db.close()
+
+        payload = _build_stats_payload_from_sheet()
+        _core = {'range': 'A1:G11', 'values': payload.get('values')}
+        _etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+        if SessionLocal is not None:
+            db = get_db()
+            try:
+                _snapshot_set(db, 'stats-table', payload)
             finally:
                 db.close()
 
         resp = jsonify({**payload, 'version': _etag})
         resp.headers['ETag'] = _etag
-        resp.headers['Cache-Control'] = 'private, max-age=1800'
+        resp.headers['Cache-Control'] = 'public, max-age=1800, stale-while-revalidate=600'
         return resp
     except Exception as e:
         app.logger.error(f"Ошибка загрузки таблицы статистики: {str(e)}")
@@ -2635,5 +2953,10 @@ def api_specials_get():
         return jsonify({'error': 'Не удалось получить данные'}), 500
 
 if __name__ == '__main__':
+    # Стартуем фоновой синхронизатор при локальном запуске
+    try:
+        start_background_sync()
+    except Exception as _e:
+        print(f"[WARN] Background sync not started: {_e}")
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=True)

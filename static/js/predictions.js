@@ -29,8 +29,10 @@
       });
     });
 
+    let _toursLoading = false;
     function loadTours() {
-      if (!toursEl) return;
+      if (!toursEl || _toursLoading) return;
+      _toursLoading = true;
       const CACHE_KEY = 'betting:tours';
       const FRESH_TTL = 5 * 60 * 1000; // 5 минут
       const readCache = () => { try { return JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); } catch(_) { return null; } };
@@ -39,7 +41,12 @@
       const renderTours = (data) => {
         const ds = data?.tours ? data : (data?.data || {});
         const tours = ds.tours || [];
-        if (!tours.length) { toursEl.innerHTML = '<div class="schedule-empty">Нет ближайших туров</div>'; return; }
+        if (!tours.length) {
+          // если у нас уже есть контент — не затираем его пустым ответом
+          if (toursEl.childElementCount > 0 || toursEl.dataset.hasContent === '1') { return; }
+          toursEl.innerHTML = '<div class="schedule-empty">Нет ближайших туров</div>';
+          return;
+        }
         const container = document.createElement('div');
         container.className = 'pred-tours-container';
         tours.forEach(t => {
@@ -68,7 +75,7 @@
 
             // Кнопка «Больше прогнозов» и скрытая панель с доп.рынками (тоталы)
             const moreWrap = document.createElement('div'); moreWrap.style.marginTop = '8px'; moreWrap.style.textAlign = 'center';
-            const moreBtn = document.createElement('button'); moreBtn.className = 'details-btn'; moreBtn.textContent = 'Больше прогнозов';
+            const moreBtn = document.createElement('button'); moreBtn.className = 'details-btn'; moreBtn.textContent = 'Больше прогнозов'; moreBtn.setAttribute('data-throttle','800');
             const extra = document.createElement('div'); extra.className = 'extra-markets hidden'; extra.style.marginTop = '8px';
             moreBtn.addEventListener('click', () => { extra.classList.toggle('hidden'); });
             moreWrap.appendChild(moreBtn);
@@ -83,8 +90,18 @@
                 const btnOver = document.createElement('button'); btnOver.className='bet-btn'; btnOver.textContent = `Больше (${Number(row.odds.over).toFixed(2)})`;
                 const btnUnder = document.createElement('button'); btnUnder.className='bet-btn'; btnUnder.textContent = `Меньше (${Number(row.odds.under).toFixed(2)})`;
                 btnOver.disabled = !!m.lock; btnUnder.disabled = !!m.lock;
-                btnOver.addEventListener('click', ()=> openStakeModal(t.tour, m, 'over', 'totals', row.line));
-                btnUnder.addEventListener('click', ()=> openStakeModal(t.tour, m, 'under', 'totals', row.line));
+                btnOver.setAttribute('data-throttle','1200');
+                btnUnder.setAttribute('data-throttle','1200');
+                btnOver.addEventListener('click', ()=> {
+                  if (btnOver.disabled) return;
+                  btnOver.disabled = true;
+                  Promise.resolve(openStakeModal(t.tour, m, 'over', 'totals', row.line)).finally(()=>{ btnOver.disabled = false; });
+                });
+                btnUnder.addEventListener('click', ()=> {
+                  if (btnUnder.disabled) return;
+                  btnUnder.disabled = true;
+                  Promise.resolve(openStakeModal(t.tour, m, 'under', 'totals', row.line)).finally(()=>{ btnUnder.disabled = false; });
+                });
                 rowEl.append(lbl, btnOver, btnUnder);
                 table.appendChild(rowEl);
               });
@@ -100,8 +117,18 @@
               const yesBtn = document.createElement('button'); yesBtn.className='bet-btn'; yesBtn.textContent = `Да (${Number(odds.yes).toFixed(2)})`;
               const noBtn = document.createElement('button'); noBtn.className='bet-btn'; noBtn.textContent = `Нет (${Number(odds.no).toFixed(2)})`;
               yesBtn.disabled = !!m.lock; noBtn.disabled = !!m.lock;
-              yesBtn.addEventListener('click', ()=> openStakeModal(t.tour, m, 'yes', marketKey));
-              noBtn.addEventListener('click', ()=> openStakeModal(t.tour, m, 'no', marketKey));
+              yesBtn.setAttribute('data-throttle','1200');
+              noBtn.setAttribute('data-throttle','1200');
+              yesBtn.addEventListener('click', ()=> {
+                if (yesBtn.disabled) return;
+                yesBtn.disabled = true;
+                Promise.resolve(openStakeModal(t.tour, m, 'yes', marketKey)).finally(()=>{ yesBtn.disabled = false; });
+              });
+              noBtn.addEventListener('click', ()=> {
+                if (noBtn.disabled) return;
+                noBtn.disabled = true;
+                Promise.resolve(openStakeModal(t.tour, m, 'no', marketKey)).finally(()=>{ noBtn.disabled = false; });
+              });
               rowEl.append(lbl, yesBtn, noBtn);
               return rowEl;
             };
@@ -124,8 +151,9 @@
           });
           container.appendChild(tourEl);
         });
-        toursEl.innerHTML = '';
-        toursEl.appendChild(container);
+  toursEl.innerHTML = '';
+  toursEl.appendChild(container);
+  toursEl.dataset.hasContent = '1';
       };
 
       const cached = readCache();
@@ -142,17 +170,22 @@
           const data = await r.json();
           const version = data.version || r.headers.get('ETag') || null;
           const store = { data, version, ts: Date.now() };
-          writeCache(store);
+          // не перезатираем кэш пустыми турами, если ранее были валидные
+          const incoming = Array.isArray(data?.tours) ? data.tours : Array.isArray(data?.data?.tours) ? data.data.tours : [];
+          const cachedTours = Array.isArray(cached?.data?.tours) ? cached.data.tours : [];
+          const shouldWrite = incoming.length > 0 || !cached || cachedTours.length === 0;
+          if (shouldWrite) writeCache(store);
           return store;
         });
   if (cached && cached.version) {
-        fetchWithETag(cached.version).then(renderTours).catch(()=>{});
+        fetchWithETag(cached.version).then(renderTours).catch(()=>{}).finally(()=>{ _toursLoading = false; });
       } else {
         fetchWithETag(null).then(renderTours).catch(err => {
           console.error('betting tours load error', err);
           if (!cached) toursEl.innerHTML = '<div class="schedule-error">Не удалось загрузить</div>';
-        });
+        }).finally(()=>{ _toursLoading = false; });
       }
+      if (cached && !(_toursLoading)) { /* уже отрисовали кэш; загрузка в фоне */ }
     }
 
     function mkTeam(name) {
@@ -180,10 +213,16 @@
     function mkOptions(tour, m, locked) {
       const box = document.createElement('div'); box.className = 'options-box';
       const odds = m.odds || {};
-      const mkBtn = (key, label) => {
+  const mkBtn = (key, label) => {
         const b = document.createElement('button'); b.className='bet-btn';
         const k = odds[key] != null ? ` (${Number(odds[key]).toFixed(2)})` : '';
-        b.textContent = label + k; b.disabled = !!locked; b.addEventListener('click', ()=> openStakeModal(tour, m, key)); return b;
+        b.textContent = label + k; b.disabled = !!locked;
+        b.addEventListener('click', ()=> {
+          if (b.disabled) return;
+          b.disabled = true;
+          Promise.resolve(openStakeModal(tour, m, key)).finally(()=>{ b.disabled = false; });
+        });
+        return b;
       };
       box.append(mkBtn('home','П1'), mkBtn('draw','Х'), mkBtn('away','П2'));
       return box;
@@ -191,10 +230,10 @@
 
     function openStakeModal(tour, m, selection, market='1x2', line=null) {
       const stake = prompt(`Ставка на ${m.home} vs ${m.away}. Исход: ${selection.toUpperCase()}. Введите сумму:`,'100');
-      if (!stake) return;
+      if (!stake) return Promise.resolve();
       const amt = parseInt(String(stake).replace(/[^0-9]/g,''), 10) || 0;
-      if (amt <= 0) return;
-      if (!tg || !tg.initDataUnsafe?.user) { try { alert('Нужен Telegram WebApp'); } catch(_) {} return; }
+      if (amt <= 0) return Promise.resolve();
+      if (!tg || !tg.initDataUnsafe?.user) { try { alert('Нужен Telegram WebApp'); } catch(_) {} return Promise.resolve(); }
       const fd = new FormData();
       fd.append('initData', tg.initData || '');
       if (tour != null) fd.append('tour', String(tour));
@@ -204,7 +243,7 @@
       if (market) fd.append('market', market);
       if (market === 'totals' && line != null) fd.append('line', String(line));
       fd.append('stake', String(amt));
-      fetch('/api/betting/place', { method: 'POST', body: fd })
+      return fetch('/api/betting/place', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(resp => {
           if (resp?.error) { try { tg?.showAlert?.(resp.error); } catch(_) { alert(resp.error); } return; }

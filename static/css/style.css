@@ -52,10 +52,10 @@ body {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 2px;
+    gap: 0px; /* меньше расстояние между иконкой и подписью */
     color: rgba(255,255,255,0.75);
     font-size: 11px;
-    padding: 6px 8px;
+    padding: 4px 6px; /* компактнее общий отступ */
     border-radius: 10px;
     transition: var(--transition);
     cursor: pointer;
@@ -67,8 +67,8 @@ body {
     background: rgba(255, 255, 255, 0.08);
 }
 
-.nav-icon { font-size: 16px; line-height: 1; }
-.nav-label { font-size: 11px; line-height: 1; }
+.nav-icon { font-size: 16px; line-height: 1; margin-bottom: 0; }
+.nav-label { font-size: 11px; line-height: 1; margin-top: 0; }
 
 
 /* --- ВЕРХНЯЯ ПАНЕЛЬ --- */

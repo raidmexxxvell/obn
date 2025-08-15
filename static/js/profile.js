@@ -1,4 +1,31 @@
 // static/js/profile.js
+// --- Global fetch rate limiter: <= 20 req/sec, limited concurrency ---
+(() => {
+    try {
+        const originalFetch = window.fetch.bind(window);
+        const cfg = Object.assign({ tokensPerSec: 20, bucketCapacity: 20, maxConcurrent: 6 }, window.__FETCH_LIMITS__ || {});
+        let tokens = cfg.bucketCapacity;
+        let inFlight = 0;
+        const q = [];
+        const schedule = () => {
+            while (q.length && tokens > 0 && inFlight < cfg.maxConcurrent) {
+                tokens -= 1;
+                const job = q.shift();
+                inFlight += 1;
+                const p = originalFetch(...job.args);
+                p.finally(() => { inFlight = Math.max(0, inFlight - 1); schedule(); });
+                job.resolve(p);
+            }
+        };
+        const refillMs = Math.max(5, Math.floor(1000 / Math.max(1, cfg.tokensPerSec)));
+        setInterval(() => { tokens = Math.min(cfg.bucketCapacity, tokens + 1); schedule(); }, refillMs);
+        window.fetch = function(...args) {
+            return new Promise((resolve) => { q.push({ args, resolve }); schedule(); });
+        };
+        window.__FETCH_QUEUE__ = { cfg, get length() { return q.length; }, get inFlight() { return inFlight; } };
+    } catch (_) { /* no-op */ }
+})();
+
 document.addEventListener('DOMContentLoaded', () => {
     const tg = window.Telegram?.WebApp || null;
     const splash = document.getElementById('splash');
@@ -49,12 +76,26 @@ document.addEventListener('DOMContentLoaded', () => {
     // Управление заставкой вынесено в static/js/splash.js
 
     // --- Антиспам защиты ---
-    // Делегированный троттлинг кликов по элементам с data-throttle (в миллисекундах)
+    // Делегированный троттлинг кликов. Если data-throttle нет, задаём дефолт для популярных элементов.
     const _clickThrottle = new WeakMap();
+    const _defaultThrottleFor = (el) => {
+        if (!el) return 0;
+        if (el.matches('.bet-btn')) return 1200;
+        if (el.matches('.details-btn')) return 800;
+        if (el.matches('.subtab-item')) return 600;
+        if (el.matches('.nav-item')) return 600;
+        if (el.tagName === 'BUTTON') return 500;
+        return 0;
+    };
     document.addEventListener('click', (e) => {
-        const el = e.target.closest('[data-throttle]');
+        let el = e.target.closest('[data-throttle], .bet-btn, .details-btn, .subtab-item, .nav-item, button');
         if (!el) return;
-        const ms = parseInt(el.getAttribute('data-throttle'), 10) || 800;
+        if (!el.hasAttribute('data-throttle')) {
+            const def = _defaultThrottleFor(el);
+            if (def > 0) el.setAttribute('data-throttle', String(def));
+        }
+        const ms = parseInt(el.getAttribute('data-throttle') || '0', 10) || 0;
+        if (ms <= 0) return;
         const now = Date.now();
         const last = _clickThrottle.get(el) || 0;
         if (now - last < ms) {
@@ -332,7 +373,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (elements.editName) elements.editName.setAttribute('data-throttle', '1500');
     // переключение вкладок нижнего меню
         const navItems = document.querySelectorAll('.nav-item');
-        navItems.forEach(item => {
+    navItems.forEach(item => {
             item.setAttribute('data-throttle', '600');
             item.addEventListener('click', () => {
                 const tab = item.getAttribute('data-tab');
@@ -353,6 +394,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.scrollTo({ top: 0, behavior: 'smooth' });
             });
         });
+        // Стартовая вкладка: Профиль
+        try {
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            const profItem = document.querySelector('.nav-item[data-tab="profile"]');
+            if (profItem) profItem.classList.add('active');
+            const prof = document.getElementById('tab-profile');
+            const ufo = document.getElementById('tab-ufo');
+            const preds = document.getElementById('tab-predictions');
+            const lead = document.getElementById('tab-leaderboard');
+            const shop = document.getElementById('tab-shop');
+            [prof, ufo, preds, lead, shop].forEach(el => { if (el) el.style.display = 'none'; });
+            if (prof) prof.style.display = '';
+        } catch(_) {}
 
         // подвкладки НЛО
         const subtabItems = document.querySelectorAll('#ufo-subtabs .subtab-item');
@@ -418,8 +472,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Подвкладки Магазина
-    document.addEventListener('DOMContentLoaded', () => {
+    // Подвкладки Магазина — инициализация сразу (без вложенного DOMContentLoaded)
+    function initShopUI() {
         const tabs = document.querySelectorAll('#shop-subtabs .subtab-item');
         const panes = { store: document.getElementById('shop-pane-store'), cart: document.getElementById('shop-pane-cart') };
         tabs.forEach(btn => {
@@ -434,7 +488,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
         initShop();
-    });
+    }
 
     // ---------- МАГАЗИН ----------
     function readCart() {
@@ -475,7 +529,7 @@ document.addEventListener('DOMContentLoaded', () => {
             row.className = 'cart-row';
             const left = document.createElement('div'); left.className = 'cart-left'; left.textContent = `${it.name} × ${it.qty || 1}`;
             const right = document.createElement('div'); right.className = 'cart-right'; right.textContent = `${(it.price* (it.qty||1)).toLocaleString()} кр.`;
-            const del = document.createElement('button'); del.className = 'details-btn'; del.textContent = 'Убрать'; del.style.marginLeft = '8px';
+            const del = document.createElement('button'); del.className = 'details-btn'; del.textContent = 'Убрать'; del.style.marginLeft = '8px'; del.setAttribute('data-throttle','600');
             del.addEventListener('click', () => removeFromCart(it.id));
             const line = document.createElement('div'); line.className = 'cart-line';
             line.append(left, right, del);
@@ -499,6 +553,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const btn = card.querySelector('button');
             if (btn) {
                 btn.disabled = false;
+                btn.setAttribute('data-throttle','600');
                 btn.addEventListener('click', () => addToCart({ id, name, price }));
             }
         });
@@ -827,7 +882,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (_scheduleLoading) return;
         const pane = document.getElementById('ufo-schedule');
         if (!pane) return;
-    _scheduleLoading = true;
+        _scheduleLoading = true;
     const CACHE_KEY = 'schedule:tours';
     const FRESH_TTL = 10 * 60 * 1000; // 10 минут
     const readCache = () => { try { return JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); } catch(_) { return null; } };
@@ -858,9 +913,17 @@ document.addEventListener('DOMContentLoaded', () => {
             tryNext();
         };
         const renderSchedule = (data) => {
-            pane.innerHTML = '';
             const ds = data?.tours ? data : (data?.data || {});
             const tours = ds.tours || [];
+            if (!tours.length) {
+                // Если уже есть контент, не затираем его пустым ответом
+                if (pane.childElementCount > 0 || pane.dataset.hasContent === '1') {
+                    return;
+                }
+                pane.innerHTML = '<div class="schedule-empty">Нет ближайших туров</div>';
+                return;
+            }
+            pane.innerHTML = '';
             tours.forEach(t => {
                 const tourEl = document.createElement('div');
                 tourEl.className = 'tour-block';
@@ -981,7 +1044,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         const adminId = document.body.getAttribute('data-admin');
                         const currentId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id ? String(window.Telegram.WebApp.initDataUnsafe.user.id) : '';
                         if (adminId && currentId && String(adminId) === currentId) {
-                            const spBtn = document.createElement('button'); spBtn.className = 'details-btn'; spBtn.textContent = 'Спецсобытия'; spBtn.style.marginLeft = '8px';
+                            const spBtn = document.createElement('button'); spBtn.className = 'details-btn'; spBtn.textContent = 'Спесобытия'; spBtn.style.marginLeft = '8px'; spBtn.setAttribute('data-throttle','1000');
                             spBtn.addEventListener('click', () => openSpecialsPanel(m));
                             footer.appendChild(spBtn);
                         }
@@ -993,7 +1056,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 pane.appendChild(tourEl);
             });
-            if (!tours.length) { pane.innerHTML = '<div class="schedule-empty">Нет ближайших туров</div>'; }
+            // пометим, что контент есть
+            pane.dataset.hasContent = '1';
         };
 
         if (cached && (Date.now() - (cached.ts||0) < FRESH_TTL)) {
@@ -1005,15 +1069,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await r.json();
                 const version = data.version || r.headers.get('ETag') || null;
                 const store = { data, version, ts: Date.now() };
-                try { localStorage.setItem(CACHE_KEY, JSON.stringify(store)); } catch(_) {}
+                // Не затираем кэш пустыми турами, если кэш уже есть и свежий
+                const incomingTours = Array.isArray(data?.tours) ? data.tours : Array.isArray(data?.data?.tours) ? data.data.tours : [];
+                const cachedTours = Array.isArray(cached?.data?.tours) ? cached.data.tours : [];
+                const shouldWrite = incomingTours.length > 0 || !cached || cachedTours.length === 0;
+                if (shouldWrite) { try { localStorage.setItem(CACHE_KEY, JSON.stringify(store)); } catch(_) {} }
                 return store;
             });
         const startNetwork = () => {
-            if (cached && cached.version) fetchWithETag(cached.version).then(renderSchedule).catch(()=>{});
-            else fetchWithETag(null).then(renderSchedule).catch(err => { console.error('schedule load error', err); if (!cached) pane.innerHTML = '<div class="schedule-error">Не удалось загрузить расписание</div>'; });
+            const p = (cached && cached.version) ? fetchWithETag(cached.version) : fetchWithETag(null);
+            p.then(renderSchedule)
+             .catch(err => { console.error('schedule load error', err); if (!cached && pane.childElementCount === 0) pane.innerHTML = '<div class="schedule-error">Не удалось загрузить расписание</div>'; })
+             .finally(() => { _scheduleLoading = false; });
         };
         startNetwork();
-        _scheduleLoading = false;
     }
 
     // --------- РЕЗУЛЬТАТЫ ---------
@@ -1047,23 +1116,30 @@ document.addEventListener('DOMContentLoaded', () => {
         // ETag-кэш для /api/results
     const writeCache = (obj) => { try { localStorage.setItem(CACHE_KEY, JSON.stringify(obj)); } catch(_) {} };
 
-        const fetchWithETag = (etag) => fetch('/api/results', { headers: etag ? { 'If-None-Match': etag } : {} })
+    const fetchWithETag = (etag) => fetch('/api/results', { headers: etag ? { 'If-None-Match': etag } : {} })
             .then(async r => {
                 if (r.status === 304 && cached) return cached; // валидный кэш
                 const data = await r.json();
                 const version = data.version || r.headers.get('ETag') || null;
                 const store = { data, version, ts: Date.now() };
-                writeCache(store);
+        // Не перезаписываем кэш пустыми результатами, если уже были
+        const incoming = Array.isArray(data?.results) ? data.results : Array.isArray(data?.data?.results) ? data.data.results : [];
+        const cachedList = Array.isArray(cached?.data?.results) ? cached.data.results : [];
+        const shouldWrite = incoming.length > 0 || !cached || cachedList.length === 0;
+        if (shouldWrite) writeCache(store);
                 return store;
             });
 
         const renderResults = (data) => {
-            pane.innerHTML = '';
             const all = data?.results || [];
             if (!all.length) {
+                if (pane.childElementCount > 0 || pane.dataset.hasContent === '1') {
+                    return;
+                }
                 pane.innerHTML = '<div class="schedule-empty">Нет прошедших матчей</div>';
                 return;
             }
+            pane.innerHTML = '';
             // Группируем по туру
             const byTour = new Map();
             all.forEach(m => { const t = m.tour || 0; if (!byTour.has(t)) byTour.set(t, []); byTour.get(t).push(m); });
@@ -1131,6 +1207,7 @@ document.addEventListener('DOMContentLoaded', () => {
             prev.onclick = () => { if (idx > 0) { idx--; renderPage(); window.scrollTo({ top: 0, behavior: 'smooth' }); } };
             next.onclick = () => { if (idx < tourList.length - 1) { idx++; renderPage(); window.scrollTo({ top: 0, behavior: 'smooth' }); } };
             renderPage();
+            pane.dataset.hasContent = '1';
         };
 
         const go = (store) => { renderResults(store?.data || store); _resultsLoading = false; _resultsPreloaded = true; trySignalAllReady(); };
@@ -1252,12 +1329,19 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             pane.appendChild(ul);
         };
-        if (details && details.rosters) {
-            renderRoster(homePane, details.rosters.home);
-            renderRoster(awayPane, details.rosters.away);
-        } else {
-            homePane.textContent = 'Нет данных';
-            awayPane.textContent = 'Нет данных';
+        try {
+            const homeList = Array.isArray(details?.rosters?.home) ? details.rosters.home : [];
+            const awayList = Array.isArray(details?.rosters?.away) ? details.rosters.away : [];
+            if (homeList.length || awayList.length) {
+                renderRoster(homePane, homeList);
+                renderRoster(awayPane, awayList);
+            } else {
+                renderRoster(homePane, []);
+                renderRoster(awayPane, []);
+            }
+        } catch(_) {
+            renderRoster(homePane, []);
+            renderRoster(awayPane, []);
         }
 
         // переключение вкладок
