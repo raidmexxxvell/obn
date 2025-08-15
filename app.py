@@ -55,6 +55,10 @@ STATS_TABLE_TTL = 30  # сек
 MATCH_DETAILS_CACHE = {}
 MATCH_DETAILS_TTL = 30  # сек
 
+# Ranks cache for odds models (avoid frequent Sheets reads)
+RANKS_CACHE = {'data': None, 'ts': 0}
+RANKS_TTL = 600  # 10 минут
+
 # Leaderboards caches (обновляются раз в час)
 LEADER_PRED_CACHE = {'data': None, 'ts': 0, 'etag': ''}
 LEADER_RICH_CACHE = {'data': None, 'ts': 0, 'etag': ''}
@@ -175,7 +179,21 @@ def api_betting_place():
         return jsonify({'error': 'Не указан матч'}), 400
 
     # Проверка: матч существует в будущих турах и ещё не начался
-    tours = _load_all_tours_from_sheet()
+    # Сначала читаем туры из снапшота расписания (если есть)
+    tours = []
+    if SessionLocal is not None:
+        try:
+            dbx: Session = get_db()
+            try:
+                snap = _snapshot_get(dbx, 'schedule')
+                payload = snap and snap.get('payload')
+                tours = payload and payload.get('tours') or []
+            finally:
+                dbx.close()
+        except Exception:
+            tours = []
+    if not tours:
+        tours = _load_all_tours_from_sheet()
     match_dt = None
     found = False
     for t in tours:
@@ -460,29 +478,70 @@ def get_table_sheet():
     return doc.worksheet("ТАБЛИЦА")
 
 def _load_league_ranks() -> dict:
-    """Возвращает словарь {нормализованное_имя_команды: позиция} из листа 'ТАБЛИЦА'.
-    Позиция начинается с 1 для первой команды ниже шапки.
+    """Возвращает словарь {нормализованное_имя_команды: позиция}.
+    Источник приоритетов: 1) снапшот БД 'league-table', 2) строки LeagueTableRow, 3) (fallback) чтение из Sheets.
+    Результат кэшируется в памяти на RANKS_TTL.
     """
-    try:
-        ws = get_table_sheet()
-        values = ws.get('A1:H10') or []
-        # строка 0 — заголовки; строки 1.. — данные
-        ranks = {}
-        def norm(s: str) -> str:
-            s = (s or '').strip().lower().replace('\u00A0',' ').replace('ё','е')
-            return ''.join(ch for ch in s if ch.isalnum())
-        for i in range(1, len(values)):
-            row = values[i]
-            if not row or len(row) < 2:
-                continue
-            name = (row[1] or '').strip()
-            if not name:
-                continue
-            ranks[norm(name)] = len(ranks) + 1
-        return ranks
-    except Exception as e:
-        app.logger.warning(f"Не удалось загрузить ранги лиги: {e}")
-        return {}
+    now = time.time()
+    cached = RANKS_CACHE.get('data')
+    if cached and (now - (RANKS_CACHE.get('ts') or 0) < RANKS_TTL):
+        return cached
+
+    def norm(s: str) -> str:
+        s = (s or '').strip().lower().replace('\u00A0',' ').replace('ё','е')
+        return ''.join(ch for ch in s if ch.isalnum())
+
+    ranks = {}
+    # 1) Попробуем из БД снапшота
+    if SessionLocal is not None:
+        db = get_db()
+        try:
+            snap = _snapshot_get(db, 'league-table')
+            payload = snap and snap.get('payload')
+            values = payload and payload.get('values') or None
+            if values:
+                for i in range(1, len(values)):
+                    row = values[i]
+                    if not row or len(row) < 2:
+                        continue
+                    name = (row[1] or '').strip()
+                    if not name:
+                        continue
+                    ranks[norm(name)] = len(ranks) + 1
+            else:
+                # 2) Из реляционной таблицы, если снапшота нет
+                try:
+                    rows = db.query(LeagueTableRow).order_by(LeagueTableRow.row_index.asc()).all()
+                    for r in rows[1:]:  # пропустим шапку при наличии
+                        name = (r.c2 or '').strip()
+                        if not name:
+                            continue
+                        ranks[norm(name)] = len(ranks) + 1
+                except Exception as e:
+                    app.logger.debug(f"LeagueTableRow read failed: {e}")
+        finally:
+            db.close()
+
+    # 3) Fallback к Google Sheets только если БД не настроена
+    if not ranks:
+        try:
+            ws = get_table_sheet()
+            values = ws.get('A1:H10') or []
+            for i in range(1, len(values)):
+                row = values[i]
+                if not row or len(row) < 2:
+                    continue
+                name = (row[1] or '').strip()
+                if not name:
+                    continue
+                ranks[norm(name)] = len(ranks) + 1
+        except Exception as e:
+            app.logger.warning(f"Не удалось загрузить ранги лиги: {e}")
+            ranks = {}
+
+    RANKS_CACHE['data'] = ranks
+    RANKS_CACHE['ts'] = now
+    return ranks
 
 def _compute_match_odds(home: str, away: str) -> dict:
     """Возвращает коэффициенты 1X2 по простейшей модели: преимущество хозяев + разница позиций.
@@ -2245,6 +2304,14 @@ def health():
     """Healthcheck для Render.com"""
     return jsonify(status="healthy"), 200
 
+# Optional: Telegram webhook stub to avoid 404 noise if set to this app accidentally
+@app.route('/<path:maybe_token>', methods=['POST'])
+def telegram_webhook_stub(maybe_token: str):
+    # If someone posts to /<bot_token> path (common webhook pattern), just 200 OK noop to stop 404 spam
+    if ':' in maybe_token and len(maybe_token) >= 40:
+        return jsonify({'status': 'noop'}), 200
+    return jsonify({'error': 'not found'}), 404
+
 @app.route('/api/league-table', methods=['GET'])
 def api_league_table():
     """Возвращает таблицу лиги из снапшота БД; при отсутствии — bootstrap из Sheets. ETag/304 поддерживаются."""
@@ -2548,16 +2615,47 @@ def _winner_from_scores(sh: str, sa: str):
     return 'draw'
 
 def _get_match_result(home: str, away: str):
-    """Ищет матч в расписании и возвращает ('home'|'draw'|'away') если есть счёт, иначе None."""
+    """Возвращает 'home'|'draw'|'away' если найден счёт.
+    Приоритет: снапшот 'results' из БД, затем fallback к листу.
+    """
+    # 1) Snapshot 'results'
+    if SessionLocal is not None:
+        db = get_db()
+        try:
+            snap = _snapshot_get(db, 'results')
+            payload = snap and snap.get('payload')
+            results = payload and payload.get('results') or []
+            for m in results:
+                if m.get('home') == home and m.get('away') == away:
+                    return _winner_from_scores(m.get('score_home',''), m.get('score_away',''))
+        finally:
+            db.close()
+    # 2) Fallback: read from sheet (rare)
     tours = _load_all_tours_from_sheet()
     for t in tours:
         for m in t.get('matches', []):
             if (m.get('home') == home and m.get('away') == away):
-                res = _winner_from_scores(m.get('score_home',''), m.get('score_away',''))
-                return res
+                return _winner_from_scores(m.get('score_home',''), m.get('score_away',''))
     return None
 
 def _get_match_total_goals(home: str, away: str):
+    # 1) Snapshot 'results'
+    if SessionLocal is not None:
+        db = get_db()
+        try:
+            snap = _snapshot_get(db, 'results')
+            payload = snap and snap.get('payload')
+            results = payload and payload.get('results') or []
+            for m in results:
+                if m.get('home') == home and m.get('away') == away:
+                    h = _parse_score(m.get('score_home',''))
+                    a = _parse_score(m.get('score_away',''))
+                    if h is None or a is None:
+                        return None
+                    return h + a
+        finally:
+            db.close()
+    # 2) Fallback to sheet
     tours = _load_all_tours_from_sheet()
     for t in tours:
         for m in t.get('matches', []):
