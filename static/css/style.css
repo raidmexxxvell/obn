@@ -328,6 +328,9 @@ body {
     border-radius: var(--border-radius);
     padding: 10px;
     text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
     width: 100%;
     backdrop-filter: blur(10px);
     border: 1px solid rgba(255, 255, 255, 0.1);
@@ -374,6 +377,7 @@ body {
     height: 6px;
     overflow: hidden;
     margin-top: 6px;
+    width: 100%;
 }
 
 .achv-progress {
@@ -519,7 +523,8 @@ body {
 
 .league-table tbody td {
     padding: 10px 8px;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
+    border-bottom: 1px solid rgba(255,255,255,0.10);
+    border-right: 1px solid rgba(255,255,255,0.06);
     text-align: center; /* центрируем по ширине */
     vertical-align: middle; /* центрируем по высоте */
 }
@@ -556,6 +561,21 @@ body {
     margin-top: 8px;
     color: var(--gray);
     font-size: 12px;
+}
+
+/* Каталог достижений: усилим разграничение и заголовки */
+#achv-catalog-table tbody tr.achv-header td {
+    font-weight: 700;
+    background: rgba(255,255,255,0.05);
+}
+#achv-catalog-table tbody tr.achv-desc td:first-child {
+    color: var(--gray);
+    width: 25%;
+}
+#achv-catalog-table tbody td {
+    border-bottom: 1px solid rgba(255,255,255,0.10);
+    border-right: 1px solid rgba(255,255,255,0.06);
+    padding: 8px;
 }
 
 /* Подсветка ТОП-3: золото, серебро, бронза (по классам) */

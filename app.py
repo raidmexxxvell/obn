@@ -418,7 +418,7 @@ def parse_and_verify_telegram_init_data(init_data: str, max_age_seconds: int = 2
 @app.route('/')
 def index():
     """Главная страница приложения"""
-    return render_template('index.html')
+    return render_template('index.html', admin_user_id=os.environ.get('ADMIN_USER_ID', ''))
 
 @app.route('/api/user', methods=['POST'])
 def get_user():
@@ -965,6 +965,59 @@ def api_league_table():
     except Exception as e:
         app.logger.error(f"Ошибка загрузки таблицы лиги: {str(e)}")
         return jsonify({'error': 'Не удалось загрузить таблицу'}), 500
+
+@app.route('/api/league-table/refresh', methods=['POST'])
+def api_league_table_refresh():
+    """Принудительно обновляет таблицу лиги (только админ)."""
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+
+        # форс-обновление: игнорируем кеш
+        ws = get_table_sheet()
+        values = ws.get('A1:H10') or []
+        normalized = []
+        for i in range(10):
+            row = values[i] if i < len(values) else []
+            row = list(row) + [''] * (8 - len(row))
+            normalized.append(row[:8])
+        payload = {
+            'range': 'A1:H10',
+            'updated_at': datetime.now(timezone.utc).isoformat(),
+            'values': normalized
+        }
+        LEAGUE_TABLE_CACHE['data'] = payload
+        LEAGUE_TABLE_CACHE['ts'] = int(time.time())
+        if SessionLocal is not None:
+            db: Session = get_db()
+            try:
+                for idx, r in enumerate(normalized, start=1):
+                    row = db.get(LeagueTableRow, idx)
+                    when = datetime.now(timezone.utc)
+                    if not row:
+                        row = LeagueTableRow(
+                            row_index=idx,
+                            c1=str(r[0] or ''), c2=str(r[1] or ''), c3=str(r[2] or ''), c4=str(r[3] or ''),
+                            c5=str(r[4] or ''), c6=str(r[5] or ''), c7=str(r[6] or ''), c8=str(r[7] or ''),
+                            updated_at=when
+                        )
+                        db.add(row)
+                    else:
+                        row.c1, row.c2, row.c3, row.c4 = str(r[0] or ''), str(r[1] or ''), str(r[2] or ''), str(r[3] or '')
+                        row.c5, row.c6, row.c7, row.c8 = str(r[4] or ''), str(r[5] or ''), str(r[6] or ''), str(r[7] or '')
+                        row.updated_at = when
+                db.commit()
+            finally:
+                db.close()
+        return jsonify({'status': 'ok', 'updated_at': payload['updated_at']})
+    except Exception as e:
+        app.logger.error(f"Ошибка принудительного обновления лиги: {str(e)}")
+        return jsonify({'error': 'Не удалось обновить таблицу'}), 500
 
 @app.route('/api/stats-table', methods=['GET'])
 def api_stats_table():

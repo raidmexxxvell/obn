@@ -204,6 +204,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 req.textContent = `${a.unlocked ? 'Открыто' : 'Прогресс'}: ${(a.value||0).toLocaleString()}/${(a.target||0).toLocaleString()} кредитов`;
             } else if (a.group === 'level') {
                 req.textContent = `${a.unlocked ? 'Открыто' : 'Прогресс'}: ${a.value}/${a.target} уровень`;
+            } else if (a.group === 'invited') {
+                req.textContent = `${a.unlocked ? 'Открыто' : 'Прогресс'}: ${a.value}/${a.target} приглашений`;
             } else {
                 req.textContent = '';
             }
@@ -365,8 +367,9 @@ document.addEventListener('DOMContentLoaded', () => {
     let _leagueLoading = false;
     function loadLeagueTable() {
         if (_leagueLoading) return;
-        const table = document.getElementById('league-table');
-        const updated = document.getElementById('league-table-updated');
+    const table = document.getElementById('league-table');
+    const updatedWrap = document.getElementById('league-table-updated');
+    const updatedText = document.getElementById('league-updated-text');
         if (!table) return;
         _leagueLoading = true;
         fetch('/api/league-table').then(r => r.json()).then(data => {
@@ -391,9 +394,30 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (idx === 2) rowEl.classList.add('rank-2');
                 if (idx === 3) rowEl.classList.add('rank-3');
             });
-            if (updated && data.updated_at) {
+            if (updatedText && data.updated_at) {
                 const d = new Date(data.updated_at);
-                updated.textContent = `Обновлено: ${d.toLocaleString()}`;
+                updatedText.textContent = `Обновлено: ${d.toLocaleString()}`;
+            }
+            // показать кнопку обновления для админа
+            const refreshBtn = document.getElementById('league-refresh-btn');
+            const adminId = document.body.getAttribute('data-admin');
+            const currentId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : '';
+            if (updatedWrap && refreshBtn && adminId && currentId && String(adminId) === currentId) {
+                refreshBtn.style.display = '';
+                refreshBtn.onclick = () => {
+                    const fd = new FormData();
+                    fd.append('initData', tg?.initData || '');
+                    fetch('/api/league-table/refresh', { method: 'POST', body: fd })
+                        .then(r => r.json())
+                        .then(resp => {
+                            if (resp?.updated_at && updatedText) {
+                                const d2 = new Date(resp.updated_at);
+                                updatedText.textContent = `Обновлено: ${d2.toLocaleString()}`;
+                            }
+                            setTimeout(loadLeagueTable, 100);
+                        })
+                        .catch(err => console.error('league refresh error', err));
+                };
             }
             // после первой успешной загрузки таблицы, если достижения уже готовы — можно сигналить all-ready
             _tableLoaded = true;

@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="stylesheet" href="/static/css/splash.css">
 </head>
-<body>
+<body data-admin="{{ admin_user_id }}">
     <!-- ЗАСТАВКА -->
     <div id="splash">
         <img src="/static/img/logo_liga.png" alt="Логотип" class="splash-logo-img">
@@ -125,7 +125,12 @@
                                 <!-- 10 строк будут заполнены через JS -->
                             </tbody>
                         </table>
-                        <div class="table-updated" id="league-table-updated"></div>
+                        <div class="table-updated" id="league-table-updated">
+                            <span id="league-updated-text"></span>
+                            {% if admin_user_id %}
+                            <button class="refresh-btn" id="league-refresh-btn" style="display:none;">Обновить</button>
+                            {% endif %}
+                        </div>
                     </div>
                 </div>
                 <div id="ufo-stats" class="ufo-pane" style="display:none;">
