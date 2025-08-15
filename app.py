@@ -160,11 +160,23 @@ def get_achievements_sheet():
     try:
         ws = doc.worksheet("achievements")
     except gspread.exceptions.WorksheetNotFound:
-        ws = doc.add_worksheet(title="achievements", rows=1000, cols=8)
-        # user_id | credits_tier | credits_unlocked_at | level_tier | level_unlocked_at | streak_tier | streak_unlocked_at
-        ws.update('A1:G1', [[
-            'user_id', 'credits_tier', 'credits_unlocked_at', 'level_tier', 'level_unlocked_at', 'streak_tier', 'streak_unlocked_at'
+        ws = doc.add_worksheet(title="achievements", rows=1000, cols=10)
+        # user_id | credits_tier | credits_unlocked_at | level_tier | level_unlocked_at | streak_tier | streak_unlocked_at | invited_tier | invited_unlocked_at
+        ws.update('A1:I1', [[
+            'user_id', 'credits_tier', 'credits_unlocked_at', 'level_tier', 'level_unlocked_at', 'streak_tier', 'streak_unlocked_at', 'invited_tier', 'invited_unlocked_at'
         ]])
+    # Убедимся, что колонки для invited присутствуют
+    try:
+        headers = ws.row_values(1)
+        if len(headers) < 9:
+            headers = list(headers) + [''] * (9 - len(headers))
+            headers[0:9] = headers[0:9]
+            if len(headers) >= 7:
+                if len(headers) < 9:
+                    headers += ['invited_tier', 'invited_unlocked_at']
+            ws.update('A1:I1', [headers[:9]])
+    except Exception as e:
+        app.logger.warning(f"Не удалось проверить/обновить заголовки achievements: {e}")
     return ws
 
 def get_table_sheet():
@@ -241,19 +253,21 @@ def get_user_achievements_row(user_id):
         if cell:
             row_vals = ws.row_values(cell.row)
             # Гарантируем длину
-            row_vals = list(row_vals) + [''] * (7 - len(row_vals))
+            row_vals = list(row_vals) + [''] * (9 - len(row_vals))
             return cell.row, {
                 'credits_tier': int(row_vals[1] or 0),
                 'credits_unlocked_at': row_vals[2] or '',
                 'level_tier': int(row_vals[3] or 0),
                 'level_unlocked_at': row_vals[4] or '',
                 'streak_tier': int(row_vals[5] or 0),
-                'streak_unlocked_at': row_vals[6] or ''
+                'streak_unlocked_at': row_vals[6] or '',
+                'invited_tier': int(row_vals[7] or 0),
+                'invited_unlocked_at': row_vals[8] or ''
             }
     except gspread.exceptions.APIError as e:
         app.logger.error(f"Ошибка API при чтении достижений: {e}")
-    # Создаём новую строку
-    ws.append_row([str(user_id), '0', '', '0', '', '0', ''])
+    # Создаём новую строку (включая invited_tier/unlocked_at)
+    ws.append_row([str(user_id), '0', '', '0', '', '0', '', '0', ''])
     # Найдём только что добавленную (последняя строка)
     last_row = len(ws.get_all_values())
     return last_row, {
@@ -262,7 +276,9 @@ def get_user_achievements_row(user_id):
         'level_tier': 0,
         'level_unlocked_at': '',
         'streak_tier': 0,
-        'streak_unlocked_at': ''
+        'streak_unlocked_at': '',
+        'invited_tier': 0,
+        'invited_unlocked_at': ''
     }
 
 def compute_tier(value: int, thresholds) -> int:
@@ -825,11 +841,21 @@ def get_achievements():
         streak_thresholds = [(120, 3), (30, 2), (7, 1)]
         credits_thresholds = [(500000, 3), (50000, 2), (10000, 1)]
         level_thresholds = [(100, 3), (50, 2), (25, 1)]
+        invited_thresholds = [(150, 3), (50, 2), (10, 1)]
 
         # Вычисляем текущие тиры
         streak_tier = compute_tier(user['consecutive_days'], streak_thresholds)
         credits_tier = compute_tier(user['credits'], credits_thresholds)
         level_tier = compute_tier(user['level'], level_thresholds)
+        # Считаем приглашённых
+        invited_count = 0
+        if SessionLocal is not None:
+            db: Session = get_db()
+            try:
+                invited_count = db.query(Referral).filter(Referral.referrer_id == int(user_id)).count()
+            finally:
+                db.close()
+        invited_tier = compute_tier(invited_count, invited_thresholds)
 
         # Обновляем прогресс в отдельной таблице (фиксируем время первого получения каждого тира)
         ach_row, ach = get_user_achievements_row(user_id)
@@ -844,6 +870,9 @@ def get_achievements():
         if streak_tier > ach['streak_tier']:
             updates.append({'range': f'F{ach_row}', 'values': [[str(streak_tier)]]})
             updates.append({'range': f'G{ach_row}', 'values': [[now_iso]]})
+        if invited_tier > ach.get('invited_tier', 0):
+            updates.append({'range': f'H{ach_row}', 'values': [[str(invited_tier)]]})
+            updates.append({'range': f'I{ach_row}', 'values': [[now_iso]]})
         if updates:
             get_achievements_sheet().batch_update(updates)
 
@@ -868,6 +897,11 @@ def get_achievements():
         else:
             achievements.append({ 'group': 'level', 'tier': 1, 'name': 'Новобранец', 'value': user['level'], 'target': 25, 'icon': 'bronze', 'unlocked': False })
 
+        # Приглашённые: 10/50/150
+        if invited_tier:
+            achievements.append({ 'group': 'invited', 'tier': invited_tier, 'name': {1:'Рекрутер',2:'Посол',3:'Легенда'}[invited_tier], 'value': invited_count, 'target': {1:10,2:50,3:150}[invited_tier], 'icon': {1:'bronze',2:'silver',3:'gold'}[invited_tier], 'unlocked': True })
+        else:
+            achievements.append({ 'group': 'invited', 'tier': 1, 'name': 'Рекрутер', 'value': invited_count, 'target': 10, 'icon': 'bronze', 'unlocked': False })
         return jsonify({'achievements': achievements})
 
     except Exception as e:
