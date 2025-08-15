@@ -106,16 +106,27 @@ class StatsTableRow(Base):
 
 @app.route('/api/betting/place', methods=['POST'])
 def api_betting_place():
-    """Размещает ставку 1X2. Тело: initData, tour, home, away, selection in ['home','draw','away'], stake(int)."""
+    """Размещает ставку. Маркеты: 
+    - 1X2: selection in ['home','draw','away']
+    - totals: selection in ['over','under'], требуется поле line (например 3.5)
+    Поля: initData, tour, home, away, market, selection, stake, [line]
+    """
     parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
     if not parsed or not parsed.get('user'):
         return jsonify({'error': 'Недействительные данные'}), 401
     user_id = int(parsed['user'].get('id'))
     if SessionLocal is None:
         return jsonify({'error': 'БД недоступна'}), 500
+    market = (request.form.get('market') or '1x2').strip().lower()
     sel = (request.form.get('selection') or '').strip().lower()
-    if sel not in ('home','draw','away'):
-        return jsonify({'error': 'Неверная ставка'}), 400
+    if market not in ('1x2','totals'):
+        return jsonify({'error': 'Неверный рынок'}), 400
+    if market == '1x2':
+        if sel not in ('home','draw','away'):
+            return jsonify({'error': 'Неверная ставка'}), 400
+    else:
+        if sel not in ('over','under'):
+            return jsonify({'error': 'Неверная ставка'}), 400
     try:
         stake = int(request.form.get('stake') or '0')
     except Exception:
@@ -175,8 +186,23 @@ def api_betting_place():
         if (db_user.credits or 0) < stake:
             return jsonify({'error': 'Недостаточно кредитов'}), 400
         # коэффициенты на момент ставки
-        odds_map = _compute_match_odds(home, away)
-        k = odds_map.get(sel) or 2.00
+        if market == '1x2':
+            odds_map = _compute_match_odds(home, away)
+            k = odds_map.get(sel) or 2.00
+            selection_to_store = sel
+            market_to_store = '1x2'
+        else:
+            # totals требует line
+            try:
+                line = float((request.form.get('line') or '').replace(',', '.'))
+            except Exception:
+                line = None
+            if line not in (3.5, 4.5, 5.5):
+                return jsonify({'error': 'Неверная линия тотала'}), 400
+            odds_map = _compute_totals_odds(home, away, line)
+            k = odds_map.get(sel) or 2.00
+            selection_to_store = f"{sel}_{line}"
+            market_to_store = 'totals'
         # списываем кредиты
         db_user.credits = int(db_user.credits or 0) - stake
         db_user.updated_at = datetime.now(timezone.utc)
@@ -186,8 +212,8 @@ def api_betting_place():
             home=home,
             away=away,
             match_datetime=match_dt,
-            market='1x2',
-            selection=sel,
+            market=market_to_store,
+            selection=selection_to_store,
             odds=f"{k:.2f}",
             stake=stake,
             status='open',
@@ -410,6 +436,52 @@ def _compute_match_odds(home: str, away: str) -> dict:
         except Exception:
             return 1.10
     return { 'home': to_odds(ph), 'draw': to_odds(px), 'away': to_odds(pa) }
+
+def _compute_totals_odds(home: str, away: str, line: float) -> dict:
+    """Грубая модель коэффициентов для тоталов (Over/Under) заданной линии.
+    Базируется на среднем ожидаемом количестве голов mu с поправкой на разницу сил команд.
+    Применяет маржу BET_MARGIN аналогично 1X2. Возвращает {'over': k, 'under': k}.
+    """
+    try:
+        base_mu = float(os.environ.get('BET_BASE_TOTAL', '4.2'))
+    except Exception:
+        base_mu = 4.2
+
+    def to_norm(s: str) -> str:
+        s = (s or '').strip().lower().replace('\u00A0',' ').replace('ё','е')
+        return ''.join(ch for ch in s if ch.isalnum())
+    ranks = _load_league_ranks()
+    r_home = ranks.get(to_norm(home))
+    r_away = ranks.get(to_norm(away))
+    adj = 1.0
+    if r_home and r_away:
+        delta = abs(r_home - r_away)
+        adj += min(0.25, delta * 0.02)
+    mu = max(1.2, base_mu * adj)
+
+    import math
+    try:
+        l = float(line)
+    except Exception:
+        l = 3.5
+    kappa = 1.15
+    x = mu - l
+    p_over = 1.0 / (1.0 + math.exp(-kappa * x))
+    p_over = max(0.05, min(0.95, p_over))
+    p_under = max(0.05, 1.0 - p_over)
+
+    overround = 1.0 + BET_MARGIN
+    denom = p_over + p_under
+    po = (p_over / denom) * overround
+    pu = (p_under / denom) * overround
+
+    def to_odds(p):
+        try:
+            o = 1.0 / p
+            return round(max(1.10, o), 2)
+        except Exception:
+            return 1.10
+    return { 'over': to_odds(po), 'under': to_odds(pu) }
 
 def get_referrals_sheet():
     """Возвращает лист 'referrals', создаёт при отсутствии."""
@@ -1540,6 +1612,17 @@ def api_betting_tours():
                     m['lock'] = bool(lock)
                     # посчитаем коэффициенты для отображения
                     m['odds'] = _compute_match_odds(m.get('home',''), m.get('away',''))
+                    # дополнительные рынки: тоталы (3.5/4.5/5.5)
+                    totals = []
+                    for ln in (3.5, 4.5, 5.5):
+                        totals.append({'line': ln, 'odds': _compute_totals_odds(m.get('home',''), m.get('away',''), ln)})
+                    m['markets'] = {
+                        'totals': totals,
+                        'specials': {
+                            'penalty': { 'available': False },
+                            'redcard': { 'available': False }
+                        }
+                    }
                 except Exception:
                     m['lock'] = True
 
@@ -1619,6 +1702,18 @@ def _get_match_result(home: str, away: str):
                 return res
     return None
 
+def _get_match_total_goals(home: str, away: str):
+    tours = _load_all_tours_from_sheet()
+    for t in tours:
+        for m in t.get('matches', []):
+            if (m.get('home') == home and m.get('away') == away):
+                h = _parse_score(m.get('score_home',''))
+                a = _parse_score(m.get('score_away',''))
+                if h is None or a is None:
+                    return None
+                return h + a
+    return None
+
 def _settle_open_bets():
     if SessionLocal is None:
         return
@@ -1631,11 +1726,30 @@ def _settle_open_bets():
             # матч должен быть уже начат/сыгран
             if b.match_datetime and b.match_datetime > now:
                 continue
-            res = _get_match_result(b.home, b.away)
-            if not res:
+            if b.market == '1x2':
+                res = _get_match_result(b.home, b.away)
+                if not res:
+                    continue
+                won = (res == b.selection)
+            elif b.market == 'totals':
+                # selection вид: 'over_3.5' или 'under_4.5'
+                parts = (b.selection or '').split('_', 1)
+                if len(parts) != 2:
+                    continue
+                side, line_str = parts[0], parts[1]
+                try:
+                    line = float(line_str)
+                except Exception:
+                    continue
+                total = _get_match_total_goals(b.home, b.away)
+                if total is None:
+                    continue
+                won = (total > line) if side == 'over' else (total < line)
+            else:
+                # не поддерживаемый рынок
                 continue
-            # определяем исход
-            if res == b.selection:
+
+            if won:
                 # выигрыш
                 try:
                     odd = float(b.odds or '2.0')

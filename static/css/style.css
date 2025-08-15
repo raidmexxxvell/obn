@@ -693,3 +693,9 @@ body {
 .bet-status.won { color: #10b981; }
 .bet-status.lost { color: #ef4444; }
 .bet-status.void { color: #94a3b8; }
+
+/* Доп.рынки в Прогнозах */
+.extra-markets { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 8px; }
+.totals-table { display: flex; flex-direction: column; gap: 6px; }
+.totals-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 8px; }
+.totals-line { color: var(--light); font-weight: 600; }

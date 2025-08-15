@@ -56,6 +56,34 @@
             const opts = mkOptions(t.tour, m, !!m.lock);
             line.appendChild(opts);
             card.appendChild(line);
+
+            // Кнопка «Больше прогнозов» и скрытая панель с доп.рынками (тоталы)
+            const moreWrap = document.createElement('div'); moreWrap.style.marginTop = '8px'; moreWrap.style.textAlign = 'center';
+            const moreBtn = document.createElement('button'); moreBtn.className = 'details-btn'; moreBtn.textContent = 'Больше прогнозов';
+            const extra = document.createElement('div'); extra.className = 'extra-markets hidden'; extra.style.marginTop = '8px';
+            moreBtn.addEventListener('click', () => { extra.classList.toggle('hidden'); });
+            moreWrap.appendChild(moreBtn);
+
+            // Тоталы: 3.5/4.5/5.5 Over/Under
+            const totals = (m.markets && m.markets.totals) || [];
+            if (totals.length) {
+              const table = document.createElement('div'); table.className = 'totals-table';
+              totals.forEach(row => {
+                const rowEl = document.createElement('div'); rowEl.className = 'totals-row';
+                const lbl = document.createElement('div'); lbl.className = 'totals-line'; lbl.textContent = `Тотал ${row.line.toFixed(1)}`;
+                const btnOver = document.createElement('button'); btnOver.className='bet-btn'; btnOver.textContent = `Больше (${Number(row.odds.over).toFixed(2)})`;
+                const btnUnder = document.createElement('button'); btnUnder.className='bet-btn'; btnUnder.textContent = `Меньше (${Number(row.odds.under).toFixed(2)})`;
+                btnOver.disabled = !!m.lock; btnUnder.disabled = !!m.lock;
+                btnOver.addEventListener('click', ()=> openStakeModal(t.tour, m, 'over', 'totals', row.line));
+                btnUnder.addEventListener('click', ()=> openStakeModal(t.tour, m, 'under', 'totals', row.line));
+                rowEl.append(lbl, btnOver, btnUnder);
+                table.appendChild(rowEl);
+              });
+              extra.appendChild(table);
+            }
+
+            card.appendChild(moreWrap);
+            card.appendChild(extra);
             tourEl.appendChild(card);
           });
           container.appendChild(tourEl);
@@ -125,7 +153,7 @@
       return box;
     }
 
-    function openStakeModal(tour, m, selection) {
+    function openStakeModal(tour, m, selection, market='1x2', line=null) {
       const stake = prompt(`Ставка на ${m.home} vs ${m.away}. Исход: ${selection.toUpperCase()}. Введите сумму:`,'100');
       if (!stake) return;
       const amt = parseInt(String(stake).replace(/[^0-9]/g,''), 10) || 0;
@@ -137,6 +165,8 @@
       fd.append('home', m.home || '');
       fd.append('away', m.away || '');
       fd.append('selection', selection);
+      if (market) fd.append('market', market);
+      if (market === 'totals' && line != null) fd.append('line', String(line));
       fd.append('stake', String(amt));
       fetch('/api/betting/place', { method: 'POST', body: fd })
         .then(r => r.json())
