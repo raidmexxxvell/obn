@@ -341,7 +341,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const pMap = {
             badges: document.getElementById('profile-pane-badges'),
             catalog: document.getElementById('profile-pane-catalog'),
-            referral: document.getElementById('profile-pane-referral'),
         };
         pTabs.forEach(btn => {
             btn.setAttribute('data-throttle', '600');
@@ -353,13 +352,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (pMap[key]) {
                     pMap[key].style.display = '';
                     if (key === 'catalog') loadAchievementsCatalog();
-                    if (key === 'referral') loadReferralInfo();
                 }
             });
         });
 
-        const copyBtn = document.getElementById('copy-ref');
-        if (copyBtn) {
+    const copyBtn = document.getElementById('copy-ref');
+    if (copyBtn) {
             copyBtn.setAttribute('data-throttle', '1200');
             copyBtn.addEventListener('click', async () => {
                 const el = document.getElementById('referral-link');
@@ -544,7 +542,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     loadTeamLogo(hImg, m.home || '');
                     const hName = document.createElement('div'); hName.className = 'team-name'; hName.textContent = m.home || '';
                     home.append(hImg, hName);
-                    const score = document.createElement('div'); score.className = 'score'; score.textContent = '— : —';
+                    const score = document.createElement('div'); score.className = 'score'; score.textContent = 'VS';
                     const away = document.createElement('div'); away.className = 'team away';
                     const aImg = document.createElement('img'); aImg.className = 'logo'; aImg.alt = m.away || '';
                     loadTeamLogo(aImg, m.away || '');
@@ -751,6 +749,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    ; // separator for parser safety
     // Предзагрузка статистики и расписания во время заставки
     let _resultsPreloaded = false;
     let _schedulePreloaded = false;

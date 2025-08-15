@@ -90,6 +90,8 @@ body {
     width: 36px;
     height: 36px;
     object-fit: contain;
+}
+
 .winner-glow:hover {
     box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.9), 0 0 12px rgba(234, 179, 8, 0.9);
     transform: translateY(-2px) scale(1.02);
@@ -104,7 +106,6 @@ body {
     font-weight: 600;
     color: var(--light);
     margin-bottom: 6px;
-}
 }
 
 /* --- СТИЛИ ПРОФИЛЯ --- */
@@ -266,17 +267,8 @@ body {
     min-width: 0;
 }
 
-.checkin-day::after {
-    content: '✓';
-    position: absolute;
-    font-size: 18px;
-    display: none;
-    color: white;
-}
-
-.checkin-day.completed::after {
-    display: block;
-}
+.checkin-day::after { display: none; content: none; }
+.checkin-day.completed::after { display: none; content: none; }
 
 .checkin-day.completed {
     /* совпадает с градиентом активной подвкладки */
@@ -611,10 +603,13 @@ body {
 .tour-block { margin: 12px 10px 20px; }
 .tour-title {
     text-align: center;
-    color: #7CFC9A;
     font-weight: 800;
     font-size: 16px;
     margin: 10px 0 6px;
+    background: linear-gradient(90deg, var(--secondary), var(--primary));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
 }
 .match-card {
     background: var(--card-bg);
@@ -629,11 +624,11 @@ body {
 .team { font-weight: 600; text-align: center; display:flex; flex-direction: column; align-items: center; gap: 6px; }
 .team .logo { width: 44px; height: 44px; object-fit: contain; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4)); }
 .team .team-name { max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.score { color: #8ef0d0; font-weight: 800; font-size: 18px; }
+.score { color: var(--secondary); font-weight: 800; font-size: 18px; }
 .match-footer { margin-top: 10px; display: flex; justify-content: center; }
 .details-btn {
-    background: #7CFCCA;
-    color: #09323A;
+    background: linear-gradient(90deg, var(--secondary), var(--primary));
+    color: #fff;
     border: none;
     padding: 8px 14px;
     border-radius: 10px;
@@ -647,7 +642,7 @@ body {
 .results-pager { display:flex; align-items:center; justify-content: space-between; margin-bottom: 10px; }
 .pager-btn { background: linear-gradient(90deg, var(--primary), var(--secondary)); color: #0b1220; border:none; border-radius: 10px; padding: 6px 10px; font-weight: 800; cursor:pointer; }
 .pager-btn:disabled { opacity: .5; cursor: not-allowed; }
-.pager-title { font-weight: 900; font-size: 16px; letter-spacing: .3px; background: linear-gradient(90deg, #7CFCCA, #1e40af); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.pager-title { font-weight: 900; font-size: 16px; letter-spacing: .3px; background: linear-gradient(90deg, var(--secondary), var(--primary)); -webkit-background-clip: text; background-clip: text; color: transparent; }
 
 .winner-ring { box-shadow: 0 0 0 2px rgba(234,179,8,0.85); border-color: rgba(234,179,8,0.85) !important; }
 .winner-ring:hover { box-shadow: 0 0 0 2px rgba(234,179,8,0.95), 0 0 12px rgba(234,179,8,0.85); transform: translateY(-2px) scale(1.02); }
@@ -662,7 +657,7 @@ body {
 .match-modal-header .logo { width: 56px; height: 56px; object-fit: contain; }
 .match-modal-header .name { font-weight: 700; text-align:center; }
 .match-modal-header .center { display:flex; flex-direction: column; align-items:center; gap:4px; }
-.match-modal-header .score { color:#8ef0d0; font-size:20px; font-weight:800; }
+.match-modal-header .score { color: var(--secondary); font-size:20px; font-weight:800; }
 .match-modal-header .datetime { color: var(--gray); font-size: 12px; }
 .modal-subtabs { margin: 8px 0; }
 .md-pane { min-height: 80px; }
