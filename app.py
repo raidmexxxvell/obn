@@ -132,6 +132,23 @@ class Referral(Base):
     referrer_id = Column(Integer, nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
+class Bet(Base):
+    __tablename__ = 'bets'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, index=True, nullable=False)
+    tour = Column(Integer, nullable=True)
+    home = Column(Text, nullable=False)
+    away = Column(Text, nullable=False)
+    match_datetime = Column(DateTime(timezone=False), nullable=True)
+    market = Column(String(16), default='1x2')
+    selection = Column(String(8), nullable=False)  # 'home' | 'draw' | 'away'
+    odds = Column(String(16), default='')         # храним как строку для простоты (например, '2.20')
+    stake = Column(Integer, nullable=False)
+    payout = Column(Integer, default=0)
+    status = Column(String(16), default='open')   # open | won | lost | void
+    placed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
 if engine is not None:
     try:
         Base.metadata.create_all(engine)
@@ -1202,6 +1219,310 @@ def api_schedule():
     except Exception as e:
         app.logger.error(f"Ошибка загрузки расписания: {str(e)}")
         return jsonify({'error': 'Не удалось загрузить расписание'}), 500
+
+def _load_all_tours_from_sheet():
+    """Читает лист расписания и возвращает список всех туров с матчами.
+    Формат тура: { tour:int, title:str, start_at:iso, matches:[{home,away,date,time,datetime,score_home,score_away}] }
+    """
+    ws = get_schedule_sheet()
+    rows = ws.get_all_values() or []
+
+    def parse_date(d: str):
+        d = (d or '').strip()
+        if not d:
+            return None
+        for fmt in ("%d.%m.%y", "%d.%m.%Y"):
+            try:
+                return datetime.strptime(d, fmt).date()
+            except Exception:
+                continue
+        return None
+
+    def parse_time(t: str):
+        t = (t or '').strip()
+        try:
+            return datetime.strptime(t, "%H:%M").time()
+        except Exception:
+            return None
+
+    tours = []
+    current_tour = None
+    current_title = None
+    current_matches = []
+
+    def close_current():
+        nonlocal current_tour, current_title, current_matches
+        if current_tour is not None and current_matches:
+            start_dts = []
+            for m in current_matches:
+                ds = m.get('datetime')
+                if ds:
+                    try:
+                        start_dts.append(datetime.fromisoformat(ds))
+                    except Exception:
+                        pass
+                elif m.get('date'):
+                    try:
+                        dd = datetime.fromisoformat(m['date']).date()
+                        tt = parse_time(m.get('time','00:00') or '00:00') or datetime.min.time()
+                        start_dts.append(datetime.combine(dd, tt))
+                    except Exception:
+                        pass
+            start_at = start_dts and min(start_dts).isoformat() or ''
+            tours.append({'tour': current_tour, 'title': current_title, 'start_at': start_at, 'matches': current_matches})
+        current_tour = None
+        current_title = None
+        current_matches = []
+
+    for r in rows:
+        a = (r[0] if len(r) > 0 else '').strip()
+        header_num = None
+        if a:
+            parts = a.replace('\u00A0', ' ').strip().split()
+            if len(parts) >= 2 and parts[0].isdigit() and parts[1].lower().startswith('тур'):
+                header_num = int(parts[0])
+        if header_num is not None:
+            # закрыть предыдущий
+            close_current()
+            current_tour = header_num
+            current_title = a
+            current_matches = []
+            continue
+
+        if current_tour is not None:
+            home = (r[0] if len(r) > 0 else '').strip()
+            score_home = (r[1] if len(r) > 1 else '').strip()
+            score_away = (r[3] if len(r) > 3 else '').strip()
+            away = (r[4] if len(r) > 4 else '').strip()
+            date_str = (r[5] if len(r) > 5 else '').strip()
+            time_str = (r[6] if len(r) > 6 else '').strip()
+            if not home and not away:
+                continue
+            d = parse_date(date_str)
+            tm = parse_time(time_str)
+            dt = None
+            if d:
+                try:
+                    dt = datetime.combine(d, tm or datetime.min.time())
+                except Exception:
+                    dt = None
+            current_matches.append({
+                'home': home,
+                'away': away,
+                'score_home': score_home,
+                'score_away': score_away,
+                'date': (d.isoformat() if d else ''),
+                'time': time_str,
+                'datetime': (dt.isoformat() if dt else '')
+            })
+
+    # закрыть последний
+    close_current()
+    return tours
+
+@app.route('/api/betting/tours', methods=['GET'])
+def api_betting_tours():
+    """Возвращает туры для ставок: начиная с текущего дня и ещё два следующих тура.
+    Для матчей в прошлом блокируем ставки (поле lock: true)."""
+    try:
+        all_tours = _load_all_tours_from_sheet()
+        today = datetime.now().date()
+
+        def is_relevant(t):
+            # тур релевантен, если есть матч с датой >= сегодня
+            for m in t.get('matches', []):
+                try:
+                    if m.get('datetime'):
+                        if datetime.fromisoformat(m['datetime']).date() >= today:
+                            return True
+                    elif m.get('date'):
+                        if datetime.fromisoformat(m['date']).date() >= today:
+                            return True
+                except Exception:
+                    continue
+            return False
+
+        tours = [t for t in all_tours if is_relevant(t)]
+
+        def sort_key(t):
+            try:
+                return (datetime.fromisoformat(t.get('start_at') or '2100-01-01T00:00:00'), t.get('tour') or 10**9)
+            except Exception:
+                return (datetime(2100,1,1), t.get('tour') or 10**9)
+        tours.sort(key=sort_key)
+        tours = tours[:3]
+
+        # отметим для каждого матча, можно ли ставить (до начала)
+        now = datetime.now()
+        for t in tours:
+            for m in t.get('matches', []):
+                try:
+                    lock = False
+                    if m.get('datetime'):
+                        lock = datetime.fromisoformat(m['datetime']) <= now
+                    elif m.get('date'):
+                        # если нет времени — считаем до конца дня
+                        d = datetime.fromisoformat(m['date']).date()
+                        lock = datetime.combine(d, datetime.max.time()) <= now
+                    m['lock'] = bool(lock)
+                except Exception:
+                    m['lock'] = True
+
+        return jsonify({ 'tours': tours, 'updated_at': datetime.now(timezone.utc).isoformat() })
+    except Exception as e:
+        app.logger.error(f"Ошибка betting tours: {e}")
+        return jsonify({'error': 'Не удалось загрузить туры для ставок'}), 500
+
+@app.route('/api/betting/place', methods=['POST'])
+def api_betting_place():
+    """Размещает ставку 1X2. Тело: initData, tour, home, away, selection in ['home','draw','away'], stake(int).
+    Простейшая проверка: матч не начался; у пользователя достаточно кредитов; ставка сохраняется.
+    Возвращает обновлённый баланс и ставку."""
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = int(parsed['user'].get('id'))
+        if SessionLocal is None:
+            return jsonify({'error': 'БД недоступна'}), 500
+        sel = (request.form.get('selection') or '').strip().lower()
+        if sel not in ('home','draw','away'):
+            return jsonify({'error': 'Неверная ставка'}), 400
+        try:
+            stake = int(request.form.get('stake') or '0')
+        except Exception:
+            stake = 0
+        if stake <= 0:
+            return jsonify({'error': 'Сумма ставки должна быть > 0'}), 400
+        tour = request.form.get('tour')
+        try:
+            tour = int(tour) if tour is not None and str(tour).strip() != '' else None
+        except Exception:
+            tour = None
+        home = (request.form.get('home') or '').strip()
+        away = (request.form.get('away') or '').strip()
+        if not home or not away:
+            return jsonify({'error': 'Не указан матч'}), 400
+
+        # Проверка: матч существует в будущих турах и ещё не начался
+        tours = _load_all_tours_from_sheet()
+        match_dt = None
+        found = False
+        for t in tours:
+            if tour is not None and t.get('tour') != tour:
+                continue
+            for m in t.get('matches', []):
+                if (m.get('home') == home and m.get('away') == away) or (m.get('home') == home and not away):
+                    # простое сравнение; можно расширить нормализацию
+                    found = True
+                    try:
+                        if m.get('datetime'):
+                            match_dt = datetime.fromisoformat(m['datetime'])
+                        elif m.get('date'):
+                            d = datetime.fromisoformat(m['date']).date()
+                            # если нет времени — полдень
+                            match_dt = datetime.combine(d, datetime.min.time())
+                    except Exception:
+                        match_dt = None
+                    break
+            if found:
+                break
+        if not found:
+            return jsonify({'error': 'Матч не найден'}), 404
+        if match_dt and match_dt <= datetime.now():
+            return jsonify({'error': 'Ставки на начавшийся матч недоступны'}), 400
+
+        db: Session = get_db()
+        try:
+            db_user = db.get(User, user_id)
+            if not db_user:
+                return jsonify({'error': 'Пользователь не найден'}), 404
+            if (db_user.credits or 0) < stake:
+                return jsonify({'error': 'Недостаточно кредитов'}), 400
+            # списываем кредиты
+            db_user.credits = int(db_user.credits or 0) - stake
+            db_user.updated_at = datetime.now(timezone.utc)
+            # простая фиктивная котировка: все исходы 2.00
+            bet = Bet(
+                user_id=user_id,
+                tour=tour,
+                home=home,
+                away=away,
+                match_datetime=match_dt,
+                market='1x2',
+                selection=sel,
+                odds='2.00',
+                stake=stake,
+                status='open',
+                payout=0,
+                updated_at=datetime.now(timezone.utc)
+            )
+            db.add(bet)
+            db.commit()
+            db.refresh(db_user)
+            db.refresh(bet)
+            # зеркалим пользователя в Sheets best-effort
+            try:
+                mirror_user_to_sheets(db_user)
+            except Exception as e:
+                app.logger.warning(f"Mirror after bet failed: {e}")
+            return jsonify({
+                'status': 'success',
+                'balance': int(db_user.credits or 0),
+                'bet': {
+                    'id': bet.id,
+                    'tour': bet.tour,
+                    'home': bet.home,
+                    'away': bet.away,
+                    'datetime': (bet.match_datetime.isoformat() if bet.match_datetime else ''),
+                    'market': bet.market,
+                    'selection': bet.selection,
+                    'odds': bet.odds,
+                    'stake': bet.stake,
+                    'status': bet.status
+                }
+            })
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"Ошибка размещения ставки: {e}")
+        return jsonify({'error': 'Не удалось разместить ставку'}), 500
+
+@app.route('/api/betting/my-bets', methods=['POST'])
+def api_betting_my_bets():
+    """Список ставок пользователя (последние 50)."""
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = int(parsed['user'].get('id'))
+        if SessionLocal is None:
+            return jsonify({'error': 'БД недоступна'}), 500
+        db: Session = get_db()
+        try:
+            rows = db.query(Bet).filter(Bet.user_id == user_id).order_by(Bet.placed_at.desc()).limit(50).all()
+            data = []
+            for b in rows:
+                data.append({
+                    'id': b.id,
+                    'tour': b.tour,
+                    'home': b.home,
+                    'away': b.away,
+                    'datetime': (b.match_datetime.isoformat() if b.match_datetime else ''),
+                    'market': b.market,
+                    'selection': b.selection,
+                    'odds': b.odds,
+                    'stake': b.stake,
+                    'status': b.status,
+                    'payout': b.payout,
+                    'placed_at': (b.placed_at.isoformat() if b.placed_at else '')
+                })
+            return jsonify({ 'bets': data })
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"Ошибка списка ставок: {e}")
+        return jsonify({'error': 'Не удалось загрузить ставки'}), 500
 
 @app.route('/api/results', methods=['GET'])
 def api_results():

@@ -204,8 +204,17 @@
             <div class="league-title">Лига Обнинска</div>
             <img class="league-logo" src="/static/img/logo.png" alt="Логотип лиги">
         </div>
-        <div class="league-table-wrap">
-            <div style="padding:12px; color: var(--gray);">Раздел «Прогнозы» в разработке.</div>
+        <div class="predictions-wrap">
+            <div class="subtabs" id="pred-subtabs">
+                <div class="subtab-item active" data-ptab="place">Сделать прогноз</div>
+                <div class="subtab-item" data-ptab="mybets">Мои ставки</div>
+            </div>
+            <div id="pred-pane-place" class="pred-pane">
+                <div class="pred-tours" id="pred-tours">Загрузка матчей...</div>
+            </div>
+            <div id="pred-pane-mybets" class="pred-pane" style="display:none;">
+                <div class="my-bets" id="my-bets">Загрузка...</div>
+            </div>
         </div>
     </div>
     <div id="tab-leaderboard" style="display:none;">
@@ -220,6 +229,7 @@
 
     <script src="/static/js/splash.js"></script>
     <script src="/static/js/profile.js"></script>
+    <script src="/static/js/predictions.js"></script>
 
     <!-- Удалено модальное окно: теперь детальный экран встроен как ufo-pane -->
 </body>

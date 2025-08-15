@@ -673,3 +673,23 @@ body {
 .roster-list li.empty { opacity: .7; text-align: center; }
 .hidden { display: none !important; }
 .details-btn[disabled] { opacity: 0.7; cursor: progress; }
+
+/* --------- ПРОГНОЗЫ / СТАВКИ --------- */
+.predictions-wrap { margin-top: 8px; }
+.pred-tours-container { margin: 12px 10px 20px; }
+.betting-line { margin-top: 10px; display:flex; justify-content: center; }
+.options-box { display:flex; gap: 8px; }
+.bet-btn { background: linear-gradient(90deg, var(--primary), var(--secondary)); color: #fff; border:none; border-radius: 10px; padding: 8px 12px; font-weight: 800; cursor: pointer; }
+.bet-btn:disabled { opacity: .5; cursor: not-allowed; }
+.my-bets { margin: 12px 10px 20px; }
+.bets-list { display: flex; flex-direction: column; gap: 10px; }
+.bet-card { background: var(--card-bg); border: 1px solid rgba(255,255,255,0.10); border-radius: 12px; padding: 10px; }
+.bet-top { display:flex; align-items:center; justify-content: space-between; margin-bottom: 6px; }
+.bet-title { font-weight: 700; }
+.bet-when { color: var(--gray); font-size: 12px; }
+.bet-mid { color: var(--light); font-size: 13px; margin-bottom: 6px; }
+.bet-status { font-weight: 800; text-transform: uppercase; font-size: 12px; }
+.bet-status.open { color: #fbbf24; }
+.bet-status.won { color: #10b981; }
+.bet-status.lost { color: #ef4444; }
+.bet-status.void { color: #94a3b8; }
