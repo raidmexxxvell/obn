@@ -1242,7 +1242,7 @@ def _build_betting_tours_payload():
             return (datetime.fromisoformat(t.get('start_at') or '2100-01-01T00:00:00'), t.get('tour') or 10**9)
         except Exception:
             return (datetime(2100,1,1), t.get('tour') or 10**9)
-    tours.sort(sort_key)
+    tours.sort(key=sort_key)
     tours = tours[:1]
 
     now_local = datetime.now()
