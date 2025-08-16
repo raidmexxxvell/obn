@@ -104,8 +104,8 @@ document.addEventListener('DOMContentLoaded', () => {
         (_teamCountsCache.teams || []).forEach(t => {
             const opt = document.createElement('option');
             opt.value = t;
-            const cnt = _teamCountsCache.byTeam && _teamCountsCache.byTeam[t] ? ` (${_teamCountsCache.byTeam[t]})` : '';
-            opt.textContent = t + cnt;
+            // В профиле — без числа фанатов
+            opt.textContent = t;
             if (currentFavorite && currentFavorite === t) opt.selected = true;
             favoriteTeamSelect.appendChild(opt);
         });
@@ -523,6 +523,16 @@ document.addEventListener('DOMContentLoaded', () => {
                         fetch('/api/results/refresh', { method: 'POST', body: fd })
                     ];
                     try { await Promise.allSettled(reqs); } catch(_) {}
+                    // Обновим дату "Обновлено" принудительным GET без кэша
+                    try {
+                        const u = `/api/league-table?_=${Date.now()}`;
+                        const r = await fetch(u, { headers: { 'Cache-Control': 'no-cache' } });
+                        const data = await r.json();
+                        const updatedText = document.getElementById('league-updated-text');
+                        if (updatedText && data?.updated_at) {
+                            const d2 = new Date(data.updated_at); updatedText.textContent = `Обновлено: ${d2.toLocaleString()}`;
+                        }
+                    } catch(_) {}
                     // Перерисуем все панели
                     try { await Promise.allSettled([ Promise.resolve(loadLeagueTable()), Promise.resolve(loadStatsTable()) ]); } catch(_) {}
                     try { localStorage.removeItem('schedule:tours'); localStorage.removeItem('results:list'); } catch(_) {}
@@ -1117,52 +1127,111 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     const footer = document.createElement('div');
                     footer.className = 'match-footer';
-                    const btn = document.createElement('button');
-                    btn.className = 'details-btn';
-                    btn.textContent = 'Детали';
-                    btn.setAttribute('data-throttle', '800');
-                    // При клике: используем кэш, затем при необходимости валидируем и открываем детальный экран
-                    btn.addEventListener('click', () => {
-                        const original = btn.textContent;
-                        btn.disabled = true;
-                        btn.textContent = 'Загрузка контента...';
+                    // Кнопка «Детали» (как было)
+                    const btnDetails = document.createElement('button');
+                    btnDetails.className = 'details-btn';
+                    btnDetails.textContent = 'Детали';
+                    btnDetails.setAttribute('data-throttle', '800');
+                    btnDetails.addEventListener('click', () => {
+                        const original = btnDetails.textContent;
+                        btnDetails.disabled = true; btnDetails.textContent = 'Загрузка контента...';
                         const params = new URLSearchParams({ home: m.home || '', away: m.away || '' });
                         const cacheKey = `md:${(m.home||'').toLowerCase()}::${(m.away||'').toLowerCase()}`;
                         const cached = (() => { try { return JSON.parse(localStorage.getItem(cacheKey) || 'null'); } catch(_) { return null; } })();
                         const fetchWithETag = (etag) => fetch(`/api/match-details?${params.toString()}`, { headers: etag ? { 'If-None-Match': etag } : {} })
                             .then(async r => {
-                                if (r.status === 304 && cached) return cached; // валидный кэш
+                                if (r.status === 304 && cached) return cached;
                                 const data = await r.json();
                                 const version = data.version || r.headers.get('ETag') || null;
                                 const toStore = { data, version, ts: Date.now() };
                                 try { localStorage.setItem(cacheKey, JSON.stringify(toStore)); } catch(_) {}
                                 return toStore;
                             });
-
                         const go = (store) => {
                             openMatchScreen({ home: m.home, away: m.away, date: m.date, time: m.time }, store?.data || store);
-                            btn.disabled = false; btn.textContent = original;
+                            btnDetails.disabled = false; btnDetails.textContent = original;
                         };
-
-                        const FRESH_TTL = 10 * 60 * 1000; // 10 минут
-                        if (cached && (Date.now() - (cached.ts||0) < FRESH_TTL)) {
-                            // достаточно свежо — используем сразу без сети
-                            go(cached);
-                        } else if (cached && cached.version) {
-                            // не свежее — мягкая валидация по ETag
-                            fetchWithETag(cached.version).then(go).catch(() => { go(cached); });
-                        } else if (cached) {
-                            // старый формат без версии
-                            go(cached);
-                        } else {
+                        const FRESH_TTL = 10 * 60 * 1000;
+                        if (cached && (Date.now() - (cached.ts||0) < FRESH_TTL)) { go(cached); }
+                        else if (cached && cached.version) { fetchWithETag(cached.version).then(go).catch(() => { go(cached); }); }
+                        else if (cached) { go(cached); }
+                        else {
                             fetchWithETag(null).then(go).catch(err => {
                                 console.error('match details load error', err);
                                 try { window.Telegram?.WebApp?.showAlert?.('Не удалось загрузить данные матча'); } catch(_) {}
-                                btn.disabled = false; btn.textContent = original;
+                                btnDetails.disabled = false; btnDetails.textContent = original;
                             });
                         }
                     });
-                    footer.appendChild(btn);
+                    footer.appendChild(btnDetails);
+                    // Кнопка «Сделать прогноз» показывается, только если матч есть в турах для ставок
+                    const btn = document.createElement('button');
+                    btn.className = 'details-btn';
+                    btn.setAttribute('data-throttle', '800');
+                    // Кнопка «Сделать прогноз» показывается, только если матч есть в турах для ставок
+                    const toursCache = (() => { try { return JSON.parse(localStorage.getItem('betting:tours') || 'null'); } catch(_) { return null; } })();
+                    const tourMatches = new Set();
+                    try {
+                        const tours = toursCache?.data?.tours || toursCache?.tours || [];
+                        tours.forEach(t => (t.matches||[]).forEach(x => {
+                            const key = `${(x.home||'').toLowerCase()}__${(x.away||'').toLowerCase()}`;
+                            tourMatches.add(key);
+                        }));
+                    } catch(_) {}
+                    const thisKey = `${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}`;
+                    const matchHasPrediction = tourMatches.has(thisKey);
+                    if (matchHasPrediction) {
+                        btn.textContent = 'Сделать прогноз';
+                        btn.addEventListener('click', async () => {
+                            // Переключаемся на вкладку Прогнозы
+                            try {
+                                document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+                                const navPred = document.querySelector('.nav-item[data-tab="predictions"]');
+                                if (navPred) navPred.classList.add('active');
+                                const prof = document.getElementById('tab-profile');
+                                const ufo = document.getElementById('tab-ufo');
+                                const preds = document.getElementById('tab-predictions');
+                                const lead = document.getElementById('tab-leaderboard');
+                                const shop = document.getElementById('tab-shop');
+                                const admin = document.getElementById('tab-admin');
+                                [prof, ufo, preds, lead, shop, admin].forEach(el => { if (el) el.style.display = 'none'; });
+                                if (preds) preds.style.display = '';
+                            } catch(_) {}
+                            // Убедимся, что туры загружены
+                            try { window.loadBetTours?.(); } catch(_) {}
+                            // Подождём до 1.5с появления карточек
+                            const waitForCard = () => new Promise((resolve) => {
+                                const started = Date.now();
+                                const tick = () => {
+                                    const host = document.getElementById('pred-tours');
+                                    if (host && host.querySelector('.match-card')) { resolve(); return; }
+                                    if (Date.now() - started > 1500) { resolve(); return; }
+                                    requestAnimationFrame(tick);
+                                };
+                                tick();
+                            });
+                            await waitForCard();
+                            // Прокрутка к нужной карточке и подсветка
+                            try {
+                                const host = document.getElementById('pred-tours');
+                                if (!host) return;
+                                const cards = host.querySelectorAll('.match-card');
+                                const targetH = (m.home||'').toLowerCase();
+                                const targetA = (m.away||'').toLowerCase();
+                                for (const c of cards) {
+                                    const h = (c.getAttribute('data-home') || '').toLowerCase();
+                                    const a = (c.getAttribute('data-away') || '').toLowerCase();
+                                    if (h === targetH && a === targetA) {
+                                        c.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                        c.classList.add('highlight');
+                                        setTimeout(()=> c.classList.remove('highlight'), 1600);
+                                        break;
+                                    }
+                                }
+                            } catch(_) {}
+                        });
+                        footer.appendChild(btn);
+                    }
                     // Админ-кнопка «Спецсобытия» (пенальти/красная)
                     try {
                         const adminId = document.body.getAttribute('data-admin');

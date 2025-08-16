@@ -54,6 +54,7 @@
           const title = document.createElement('div'); title.className = 'tour-title'; title.textContent = t.title || `Тур ${t.tour||''}`; tourEl.appendChild(title);
           (t.matches||[]).forEach(m => {
             const card = document.createElement('div'); card.className = 'match-card';
+            try { card.dataset.home = m.home || ''; card.dataset.away = m.away || ''; } catch(_) {}
             const header = document.createElement('div'); header.className = 'match-header';
             const dtText = formatDateTime(m.date, m.time);
             const span = document.createElement('span'); span.textContent = dtText; header.appendChild(span);

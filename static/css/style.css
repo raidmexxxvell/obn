@@ -716,7 +716,12 @@ body {
 
 /* --------- ПРОГНОЗЫ / СТАВКИ --------- */
 .predictions-wrap { margin-top: 8px; }
-.pred-tours-container { margin: 12px 10px 20px; }
+.pred-tours-container { margin: 0; }
+.predictions-wrap .tour-block { margin: 0; }
+/* Плоские полноширинные карточки только во вкладке Прогнозы */
+#tab-predictions .match-card { background: transparent; border: none; border-radius: 0; box-shadow: none; margin: 0; padding: 12px 8px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+#tab-predictions .match-header { text-align: left; }
+#tab-predictions .match-footer { justify-content: flex-start; }
 .betting-line { margin-top: 10px; display:flex; justify-content: center; }
 .options-box { display:flex; gap: 8px; }
 .bet-btn { background: linear-gradient(90deg, var(--primary), var(--secondary)); color: #fff; border:none; border-radius: 10px; padding: 8px 12px; font-weight: 800; cursor: pointer; }
@@ -734,11 +739,17 @@ body {
 .bet-status.lost { color: #ef4444; }
 .bet-status.void { color: #94a3b8; }
 
-/* Доп.рынки в Прогнозах */
+/* Доп.рынки: уменьшенный шрифт и плотность только в Прогнозах */
 .extra-markets { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 8px; }
 .totals-table { display: flex; flex-direction: column; gap: 6px; }
 .totals-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 8px; }
 .totals-line { color: var(--light); font-weight: 600; }
+#tab-predictions .extra-markets { font-size: 13px; }
+#tab-predictions .totals-row .bet-btn { padding: 6px 10px; font-weight: 700; }
+#tab-predictions .details-btn { font-size: 13px; padding: 6px 10px; border-radius: 8px; }
+
+/* Подсветка карточки при переходе из расписания */
+#tab-predictions .match-card.highlight { background: rgba(255,255,255,0.06); transition: background 600ms ease; }
 
 /* LIVE badge / dot */
 .live-badge { display: inline-flex; align-items: center; gap: 6px; background: rgba(0, 200, 0, 0.12); color: #2de02d; border: 1px solid rgba(0, 200, 0, 0.25); border-radius: 999px; padding: 2px 8px; font-size: 12px; font-weight: 700; margin-left: 8px; }
