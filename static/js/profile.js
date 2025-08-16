@@ -504,7 +504,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (elements.editName) elements.editName.setAttribute('data-throttle', '1500');
     // переключение вкладок нижнего меню
         const navItems = document.querySelectorAll('.nav-item');
-        let _lastUfoTap = 0;
+    let _lastUfoTap = 0;
+    const bottomNav = document.getElementById('bottom-nav');
+    const leagueBtn = document.getElementById('nav-league-switch');
+    const leagueIcon = document.getElementById('nav-league-icon');
+    const leagueText = document.getElementById('nav-league-text');
         navItems.forEach(item => {
             const tab = item.getAttribute('data-tab');
             // На НЛО отключаем троттлинг, иначе двойной тап не сработает
@@ -515,8 +519,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (tab === 'ufo') {
                     const now = Date.now();
                     if (now - _lastUfoTap < 350) {
-                        // двойной тап: показываем компактный оверлей-расширение
-                        showLeagueOverlay();
+                        // двойной тап: раскрыть левую панель у нижнего меню
+                        try { updateNavLeaguePanel(); } catch(_) {}
+                        bottomNav?.classList.toggle('nav--show-league');
                         _lastUfoTap = 0;
                         return;
                     }
@@ -562,7 +567,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (tab === 'ufo') {
                 item.addEventListener('dblclick', (e) => {
                     e.preventDefault(); e.stopPropagation();
-                    showLeagueOverlay();
+                    try { updateNavLeaguePanel(); } catch(_) {}
+                    bottomNav?.classList.toggle('nav--show-league');
                 });
                 // Явная обработка touchend для надёжного двойного тапа
                 let _ufoLastTouch = 0;
@@ -570,13 +576,27 @@ document.addEventListener('DOMContentLoaded', () => {
                     const now = Date.now();
                     if (now - _ufoLastTouch < 350) {
                         e.preventDefault(); e.stopPropagation();
-                        showLeagueOverlay();
+                        try { updateNavLeaguePanel(); } catch(_) {}
+                        bottomNav?.classList.toggle('nav--show-league');
                         _ufoLastTouch = 0;
                     } else {
                         _ufoLastTouch = now;
                     }
                 }, { passive: false });
             }
+        });
+
+        // Наполняем левую панель (иконка/название второй лиги) и кликом переключаем
+        function updateNavLeaguePanel() {
+            const act = getActiveLeague();
+            const other = act === 'BLB' ? 'UFO' : 'BLB';
+            leagueIcon.textContent = other === 'UFO' ? '🛸' : '❔';
+            leagueText.textContent = other === 'UFO' ? 'НЛО' : 'БЛБ';
+        }
+        leagueBtn?.addEventListener('click', () => {
+            const act = getActiveLeague();
+            if (act === 'BLB') selectUFOLeague(false, true); else selectBLBLeague(true);
+            bottomNav?.classList.remove('nav--show-league');
         });
         // Стартовая вкладка: Профиль
         try {
@@ -914,6 +934,13 @@ document.addEventListener('DOMContentLoaded', () => {
             writeCart([]);
             renderCart();
             try { window.Telegram?.WebApp?.showAlert?.(`Заказ оформлен\n№${data.order_id}\nСумма: ${Number(data.total||0).toLocaleString()}`); } catch(_) {}
+            // Обновим баланс, если сервер вернул его
+            try {
+                if (typeof data.balance === 'number') {
+                    const el = document.getElementById('credits');
+                    if (el) el.textContent = Number(data.balance||0).toLocaleString();
+                }
+            } catch(_) {}
             try { renderAdminOrders(); } catch(_) {}
             return;
         } catch (e) {

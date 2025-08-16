@@ -547,6 +547,29 @@ def api_shop_checkout():
                 mirror_user_to_sheets(u)
             except Exception as e:
                 app.logger.warning(f"Mirror after checkout failed: {e}")
+            # Уведомление администратору о новом заказе (best-effort)
+            try:
+                admin_id = os.environ.get('ADMIN_USER_ID', '')
+                bot_token = os.environ.get('BOT_TOKEN', '')
+                if admin_id and bot_token:
+                    # Сводка товаров
+                    items_preview = ', '.join([f"{it['name']}×{it['qty']}" for it in norm_items])
+                    uname = parsed['user'].get('username') or ''
+                    uid = str(user_id)
+                    user_label = f"@{uname}" if uname else f"ID {uid}"
+                    text = (
+                        f"Новый заказ №{order.id}\n"
+                        f"Пользователь: {user_label}\n"
+                        f"Сумма: {total}\n"
+                        f"Товары: {items_preview}"
+                    )
+                    import requests
+                    requests.post(
+                        f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                        json={"chat_id": admin_id, "text": text}, timeout=5
+                    )
+            except Exception as e:
+                app.logger.warning(f"Admin notify failed: {e}")
             return jsonify({'order_id': order.id, 'total': total, 'balance': int(u.credits or 0)})
         finally:
             db.close()
