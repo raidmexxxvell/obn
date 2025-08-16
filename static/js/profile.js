@@ -1615,7 +1615,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const title = other === 'UFO' ? 'НЛО' : 'БЛБ';
         // Рендерим одну иконку как продолжение нижнего меню
         overlay.innerHTML = `
-            <div class="league-icons" style="display:flex; align-items:center; justify-content:center; background: rgba(10,18,40,0.96); padding:6px 0; border-radius: 10px 10px 0 0; box-shadow: 0 4px 16px rgba(0,0,0,0.35);">
+            <div class="league-icons" style="display:flex; align-items:center; justify-content:center; background: rgba(10,18,40,0.96); padding:6px 0; border-radius: 10px 10px 0 0; box-shadow: 0 6px 18px rgba(0,0,0,0.4);">
                 <div class="nav-icon" data-league="${other}" title="${title}" style="font-size:22px; cursor:pointer; line-height:1;">${ico}</div>
             </div>
         `;
@@ -1623,13 +1623,19 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const anchor = document.querySelector('.nav-item[data-tab="ufo"]');
             const nav = document.querySelector('nav.nav');
-            if (anchor) {
+            if (anchor && nav) {
                 const r = anchor.getBoundingClientRect();
-                overlay.style.width = `${Math.max(40, Math.floor(r.width))}px`;
-                overlay.style.left = `${Math.floor(r.left)}px`; // fixed относительно вьюпорта
+                const rn = nav.getBoundingClientRect();
+                // Ширина как у иконки меню
+                const w = Math.max(40, Math.floor(r.width));
+                overlay.style.width = `${w}px`;
+                // Выровнять правый край по правому краю нижнего меню
+                const rightEdge = Math.floor(rn.right);
+                overlay.style.left = `${rightEdge - w}px`;
                 overlay.style.transform = 'none';
-                const gap = 4; // слитно, но с маленьким зазором
-                const navH = nav ? Math.floor(nav.getBoundingClientRect().height) : Math.floor(r.height);
+                // Чуть поднять над меню
+                const gap = 6; // было 4
+                const navH = Math.floor(rn.height);
                 overlay.style.bottom = `${navH + gap}px`;
             }
         } catch(_) {}
@@ -1721,38 +1727,45 @@ document.addEventListener('DOMContentLoaded', () => {
             if (to === 'BLB') {
                 img.src = '/static/img/logoblb.jpg';
                 title.textContent = 'БАЛАБАНОВО';
-                document.body.classList.add('theme-blb');
-                // верхняя панель
-                const t = document.querySelector('.top-bar .league-title');
-                if (t) t.textContent = 'Балабановская лига';
-                const logo = document.querySelector('.top-bar .league-logo');
-                if (logo) logo.src = '/static/img/logoblb.jpg';
                 layer.style.display = 'flex';
-                // Фаза 1: заливка снизу вверх (1.5с)
+                // Фаза 1: заливка снизу вверх (1s)
                 layer.classList.add('lt-fill-bottom');
                 setTimeout(() => {
-                    // Фаза 2: уборка вверх (1.5с)
+                    // Смена темы/топ-бара во время полной заливки (пользователь не видит)
+                    document.body.classList.add('theme-blb');
+                    const t = document.querySelector('.top-bar .league-title');
+                    if (t) t.textContent = 'Балабановская лига';
+                    const logo = document.querySelector('.top-bar .league-logo');
+                    if (logo) logo.src = '/static/img/logoblb.jpg';
+                    // Пауза 1s
                     layer.classList.remove('lt-fill-bottom');
-                    layer.classList.add('lt-unfill-top');
-                    setTimeout(() => { layer.style.display = 'none'; layer.classList.remove('lt-unfill-top'); }, 1500);
-                }, 1500);
+                    setTimeout(() => {
+                        // Фаза 2: уборка вверх (1s)
+                        layer.classList.add('lt-unfill-top');
+                        setTimeout(() => { layer.style.display = 'none'; layer.classList.remove('lt-unfill-top'); }, 1000);
+                    }, 1000);
+                }, 1000);
             } else {
                 img.src = '/static/img/logo.png';
                 title.textContent = 'ОБНИНСК';
-                document.body.classList.remove('theme-blb');
-                const t = document.querySelector('.top-bar .league-title');
-                if (t) t.textContent = 'Лига Обнинска';
-                const logo = document.querySelector('.top-bar .league-logo');
-                if (logo) logo.src = '/static/img/logo.png';
                 layer.style.display = 'flex';
-                // Фаза 1: заливка сверху вниз (1.5с)
+                // Фаза 1: заливка сверху вниз (1s)
                 layer.classList.add('lt-fill-top');
                 setTimeout(() => {
-                    // Фаза 2: уборка вниз (1.5с)
+                    // Смена темы/топ-бара во время полной заливки
+                    document.body.classList.remove('theme-blb');
+                    const t = document.querySelector('.top-bar .league-title');
+                    if (t) t.textContent = 'Лига Обнинска';
+                    const logo = document.querySelector('.top-bar .league-logo');
+                    if (logo) logo.src = '/static/img/logo.png';
+                    // Пауза 1s
                     layer.classList.remove('lt-fill-top');
-                    layer.classList.add('lt-unfill-bottom');
-                    setTimeout(() => { layer.style.display = 'none'; layer.classList.remove('lt-unfill-bottom'); }, 1500);
-                }, 1500);
+                    setTimeout(() => {
+                        // Фаза 2: уборка вниз (1s)
+                        layer.classList.add('lt-unfill-bottom');
+                        setTimeout(() => { layer.style.display = 'none'; layer.classList.remove('lt-unfill-bottom'); }, 1000);
+                    }, 1000);
+                }, 1000);
             }
             content.appendChild(img);
             content.appendChild(title);

@@ -5,7 +5,7 @@ body.theme-blb {
   --dark: #0b0b0b;
   --darker: #000000;
   --light: #f5f3e6;
-  --primary: #d4af37; /* золотой */
+  --primary: #eebb11; /* золотой */
   --secondary: #8d6e2f;
   --gray: #a3a3a3;
   background: linear-gradient(135deg, var(--dark), var(--darker));
@@ -56,6 +56,7 @@ body.theme-blb .nav {
   height: 180px;
   object-fit: contain;
   margin-bottom: 12px;
+  /* 3s: 1s fill, 1s hold, 1s unfill */
   animation: logoZoom 3s ease both;
 }
 #league-transition .lt-title {
@@ -64,7 +65,7 @@ body.theme-blb .nav {
   letter-spacing: 0.08em;
 }
 
-/* Двухфазная анимация заливки (3с: 1.5с заполнение + 1.5с уборка) */
+/* Двухфазная анимация заливки (3с: 1с заполнение + 1с пауза + 1с уборка) */
 @keyframes fillFromBottom {
   0% { clip-path: inset(0 0 100% 0); }
   100% { clip-path: inset(0 0 0 0); }
@@ -83,16 +84,17 @@ body.theme-blb .nav {
 }
 
 /* Классы стадий */
-#league-transition.lt-fill-bottom { animation: fillFromBottom 1.5s ease forwards; }
-#league-transition.lt-fill-top { animation: fillFromTop 1.5s ease forwards; }
-#league-transition.lt-unfill-top { animation: unfillToTop 1.5s ease forwards; }
-#league-transition.lt-unfill-bottom { animation: unfillToBottom 1.5s ease forwards; }
+#league-transition.lt-fill-bottom { animation: fillFromBottom 1s ease forwards; }
+#league-transition.lt-fill-top { animation: fillFromTop 1s ease forwards; }
+#league-transition.lt-unfill-top { animation: unfillToTop 1s ease forwards; }
+#league-transition.lt-unfill-bottom { animation: unfillToBottom 1s ease forwards; }
 
-/* Анимация логотипа: сначала приближается (0-1.5с), потом уходит в ноль (1.5-3с) */
+/* Анимация логотипа: 0-1с — увеличение, 1-2с — пауза, 2-3с — сворачивание */
 @keyframes logoZoom {
-  0% { transform: scale(0.4); opacity: 0.0; }
+  0% { transform: scale(0.4); opacity: 0; }
   10% { opacity: 1; }
-  50% { transform: scale(1.15); opacity: 1; }
+  33% { transform: scale(1.15); opacity: 1; }
+  66% { transform: scale(1.15); opacity: 1; }
   90% { opacity: 1; }
   100% { transform: scale(0); opacity: 0; }
 }
