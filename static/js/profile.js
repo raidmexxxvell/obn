@@ -538,7 +538,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Показ контента по активной лиге (без автопоказа оверлея)
         try {
             const act = getActiveLeague();
-            if (act === 'BLB') selectBLBLeague(); else selectUFOLeague(true);
+            if (act === 'BLB') selectBLBLeague(false); else selectUFOLeague(true, false);
         } catch(_) {}
     }
     if (tab === 'predictions' && preds) {
@@ -1645,12 +1645,13 @@ document.addEventListener('DOMContentLoaded', () => {
         overlay.style.display = 'block';
         if (!overlay.__inited) {
             overlay.__inited = true;
-            overlay.addEventListener('click', (e) => {
+        overlay.addEventListener('click', (e) => {
                 const ico = e.target.closest('.nav-icon[data-league]');
                 if (ico) {
                     const key = ico.getAttribute('data-league');
-                    if (key === 'UFO') selectUFOLeague();
-                    if (key === 'BLB') selectBLBLeague();
+            // Выбор из оверлея: включаем анимацию перехода
+            if (key === 'UFO') selectUFOLeague(false, true);
+            if (key === 'BLB') selectBLBLeague(true);
                     overlay.style.display = 'none';
                     return;
                 }
@@ -1670,13 +1671,13 @@ document.addEventListener('DOMContentLoaded', () => {
         setTimeout(renderLeagueOverlay, 0);
     }
 
-    function selectUFOLeague(_silent) {
+    function selectUFOLeague(_silent, animate=false) {
         const overlay = document.getElementById('league-overlay');
         const ufoTabs = document.getElementById('ufo-subtabs');
         const ufoContent = document.getElementById('ufo-content');
         const blbBlock = document.getElementById('blb-block');
         if (!ufoTabs || !ufoContent || !blbBlock) return;
-    playLeagueTransition('UFO');
+        if (animate) playLeagueTransition('UFO');
     setActiveLeague('UFO');
         if (overlay) overlay.style.display = 'none';
         blbBlock.style.display = 'none';
@@ -1690,13 +1691,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function selectBLBLeague() {
+    function selectBLBLeague(animate=false) {
         const overlay = document.getElementById('league-overlay');
         const ufoTabs = document.getElementById('ufo-subtabs');
         const ufoContent = document.getElementById('ufo-content');
         const blbBlock = document.getElementById('blb-block');
         if (!ufoTabs || !ufoContent || !blbBlock) return;
-        playLeagueTransition('BLB');
+        if (animate) playLeagueTransition('BLB');
         setActiveLeague('BLB');
         if (overlay) overlay.style.display = 'none';
         ufoTabs.style.display = 'none';
