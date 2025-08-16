@@ -73,7 +73,7 @@ body.theme-blb .nav {
   border: 1px solid rgba(255,255,255,0.06);
   border-bottom: none; /* чтобы не было шва с меню */
   border-radius: 16px 16px 16px 16px; /* тот же радиус, что и у .nav */
-  margin-bottom: -1px; /* лёгкое перекрытие бордера меню */
+  margin-bottom: 3px; /* лёгкое перекрытие бордера меню */
   transform-origin: bottom center;
   animation: overlayGrowUp 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }

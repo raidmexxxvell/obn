@@ -599,16 +599,37 @@ def api_admin_orders():
         db: Session = get_db()
         try:
             rows = db.query(ShopOrder).order_by(ShopOrder.created_at.desc()).limit(500).all()
-            core = [
-                {
-                    'id': int(r.id),
+            order_ids = [int(r.id) for r in rows]
+            user_ids = list({int(r.user_id) for r in rows}) if rows else []
+            usernames = {}
+            if user_ids:
+                for u in db.query(User.user_id, User.tg_username).filter(User.user_id.in_(user_ids)).all():
+                    try:
+                        usernames[int(u[0])] = (u[1] or '').lstrip('@')
+                    except Exception:
+                        pass
+            items_by_order = {}
+            if order_ids:
+                for it in db.query(ShopOrderItem).filter(ShopOrderItem.order_id.in_(order_ids)).all():
+                    oid = int(it.order_id)
+                    arr = items_by_order.setdefault(oid, [])
+                    arr.append({'name': it.product_name, 'qty': int(it.qty or 0)})
+            core = []
+            for r in rows:
+                oid = int(r.id)
+                arr = items_by_order.get(oid, [])
+                items_preview = ', '.join([f"{x['name']}×{x['qty']}" for x in arr]) if arr else ''
+                items_qty = sum([int(x['qty'] or 0) for x in arr]) if arr else 0
+                core.append({
+                    'id': oid,
                     'user_id': int(r.user_id),
+                    'username': usernames.get(int(r.user_id), ''),
                     'total': int(r.total or 0),
                     'status': r.status or 'new',
-                    'created_at': (r.created_at or datetime.now(timezone.utc)).isoformat()
-                }
-                for r in rows
-            ]
+                    'created_at': (r.created_at or datetime.now(timezone.utc)).isoformat(),
+                    'items_preview': items_preview,
+                    'items_qty': items_qty
+                })
             etag = _etag_for_payload({'orders': core})
             inm = request.headers.get('If-None-Match')
             if inm and inm == etag:

@@ -952,7 +952,18 @@ document.addEventListener('DOMContentLoaded', () => {
             orders.forEach((o, idx) => {
                 const tr = document.createElement('tr');
                 const when = (()=>{ try { return new Date(o.created_at).toLocaleString(); } catch(_) { return o.created_at || ''; } })();
-                tr.innerHTML = `<td>${escapeHtml(String(o.id||String(idx+1)))}</td><td>${escapeHtml(String(o.user_id||''))}</td><td>${Number(o.total||0).toLocaleString()}</td><td>${when}</td>`;
+                const userId = String(o.user_id||'');
+                const uname = (o.username||'').replace(/^@+/, '');
+                const userLabel = uname ? `@${uname}` : `ID ${userId}`;
+                const userHref = uname ? `https://t.me/${encodeURIComponent(uname)}` : `https://t.me/user?id=${encodeURIComponent(userId)}`;
+                const items = String(o.items_preview || '');
+                const qty = Number(o.items_qty || 0);
+                tr.innerHTML = `<td>${escapeHtml(String(o.id||String(idx+1)))}</td>`+
+                               `<td><a href="${userHref}" target="_blank" rel="noopener noreferrer" class="user-link">${escapeHtml(userLabel)}</a></td>`+
+                               `<td>${escapeHtml(items)}</td>`+
+                               `<td>${qty}</td>`+
+                               `<td>${Number(o.total||0).toLocaleString()}</td>`+
+                               `<td>${when}</td>`;
                 tbody.appendChild(tr);
             });
             const upd = document.getElementById('admin-orders-updated');
@@ -964,7 +975,18 @@ document.addEventListener('DOMContentLoaded', () => {
             orders.forEach((o, idx) => {
                 const tr = document.createElement('tr');
                 const when = (()=>{ try { return new Date(o.created_at).toLocaleString(); } catch(_) { return o.created_at || ''; } })();
-                tr.innerHTML = `<td>${escapeHtml(o.id||String(idx+1))}</td><td>${escapeHtml(o.user_id||'')}</td><td>${Number(o.total||0).toLocaleString()}</td><td>${when}</td>`;
+                // Сводим локальные позиции в preview и qty
+                const itemsArr = Array.isArray(o.items) ? o.items : [];
+                const itemsPreview = itemsArr.map(it => `${(it.name||it.id||'Товар')}×${Number(it.qty||it.quantity||1)}`).join(', ');
+                const itemsQty = itemsArr.reduce((s,it)=> s + Number(it.qty||it.quantity||1), 0);
+                const userId = String(o.user_id||'');
+                const userLabel = `ID ${userId}`;
+                tr.innerHTML = `<td>${escapeHtml(o.id||String(idx+1))}</td>`+
+                               `<td><a href="https://t.me/user?id=${encodeURIComponent(userId)}" target="_blank" rel="noopener noreferrer" class="user-link">${escapeHtml(userLabel)}</a></td>`+
+                               `<td>${escapeHtml(itemsPreview)}</td>`+
+                               `<td>${itemsQty}</td>`+
+                               `<td>${Number(o.total||0).toLocaleString()}</td>`+
+                               `<td>${when}</td>`;
                 tbody.appendChild(tr);
             });
             const upd = document.getElementById('admin-orders-updated');
@@ -1818,7 +1840,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!overlay) return;
         const act = getActiveLeague();
         const other = act === 'BLB' ? 'UFO' : 'BLB';
-        const ico = other === 'UFO' ? '🛸' : '🅱️';
+        const ico = other === 'UFO' ? '🛸' : '❔';
         const title = other === 'UFO' ? 'НЛО' : 'БЛБ';
         // Рендерим одну иконку как продолжение нижнего меню
         overlay.innerHTML = `
@@ -1961,10 +1983,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 title.textContent = 'ОБНИНСКСКАЯ ЛИГА';
                 layer.style.display = 'flex';
                 // Используем палитру стартовой заставки (splash): var(--dark)->var(--darker)
-                // Читаем переменные с дефолтами на случай отсутствия
-                const cs = getComputedStyle(document.body);
-                const dark = cs.getPropertyValue('--dark')?.trim() || '#0f172a';
-                const darker = cs.getPropertyValue('--darker')?.trim() || '#020617';
+                // Берём переменные с :root (а не body), чтобы не подмешивалась тема BLB
+                const cs = getComputedStyle(document.documentElement);
+                const dark = (cs.getPropertyValue('--dark') || '#0f172a').trim();
+                const darker = (cs.getPropertyValue('--darker') || '#020617').trim();
                 layer.style.background = `linear-gradient(135deg, ${dark}, ${darker})`;
                 // Фаза 1: заливка сверху вниз (1s)
                 layer.classList.add('lt-fill-top');
