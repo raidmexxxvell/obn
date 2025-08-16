@@ -410,6 +410,23 @@ class MatchStream(Base):
     confirmed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
+# Комментарии под матчем (временные, TTL ~10 минут)
+class MatchComment(Base):
+    __tablename__ = 'match_comments'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    home = Column(Text, nullable=False)
+    away = Column(Text, nullable=False)
+    date = Column(String(10), nullable=True)  # YYYY-MM-DD
+    user_id = Column(Integer, index=True, nullable=False)
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+
+class CommentCounter(Base):
+    __tablename__ = 'comment_counters'
+    user_id = Column(Integer, primary_key=True)
+    comments_total = Column(Integer, default=0)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
 class WeeklyCreditBaseline(Base):
     __tablename__ = 'weekly_credit_baselines'
     user_id = Column(Integer, primary_key=True)
@@ -4085,8 +4102,7 @@ def api_streams_get():
             win = int(request.args.get('window') or '60')
         except Exception:
             win = 60
-        # минимум 10 минут, максимум 240
-        win = max(10, min(240, win))
+        win = max(15, min(240, win))
         # найдём матч и время старта
         start_ts = None
         try:
@@ -4116,12 +4132,6 @@ def api_streams_get():
         except StopIteration:
             pass
         now = int(time.time()*1000)
-        # TEMP test override for match "дождь — звезда": показать всегда (для проверки вида)
-        try:
-            if (home.lower().strip() == 'дождь' and away.lower().strip() == 'звезда'):
-                return jsonify({'available': True, 'vkVideoId': '-211669815_456249825', 'vkPostUrl': ''})
-        except Exception:
-            pass
         if not start_ts or (start_ts - now) > win*60*1000:
             return jsonify({'available': False})
         # найдём подтверждение
@@ -4136,6 +4146,132 @@ def api_streams_get():
     except Exception as e:
         app.logger.error(f"streams/get error: {e}")
         return jsonify({'available': False})
+
+COMMENT_TTL_MINUTES = 10
+COMMENT_RATE_MINUTES = 5
+
+@app.route('/api/match/comments/list', methods=['GET'])
+def api_match_comments_list():
+    """Комментарии за последние COMMENT_TTL_MINUTES минут для матча. Параметры: home, away, date?"""
+    try:
+        if SessionLocal is None:
+            return jsonify({'items': []})
+        home = (request.args.get('home') or '').strip()
+        away = (request.args.get('away') or '').strip()
+        date_str = (request.args.get('date') or '').strip()
+        if not home or not away:
+            return jsonify({'items': []})
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=COMMENT_TTL_MINUTES)
+        db: Session = get_db()
+        try:
+            # Берём максимум 100 последних, затем переворачиваем в хронологический порядок
+            q = db.query(MatchComment).filter(
+                MatchComment.home==home,
+                MatchComment.away==away,
+                MatchComment.date==(date_str or None),
+                MatchComment.created_at >= cutoff
+            ).order_by(MatchComment.created_at.desc()).limit(100)
+            rows_desc = q.all()
+            rows = list(reversed(rows_desc))
+            items = [
+                {
+                    'user_id': int(r.user_id),
+                    'name': (db.get(User, int(r.user_id)).display_name if db.get(User, int(r.user_id)) else 'User'),
+                    'content': r.content,
+                    'created_at': r.created_at.isoformat()
+                } for r in rows
+            ]
+            # ETag и Last-Modified
+            last_ts = rows[-1].created_at if rows else None
+            # Версия как md5 по (last_ts + count)
+            version_seed = f"{last_ts.isoformat() if last_ts else ''}:{len(rows)}"
+            etag = hashlib.md5(version_seed.encode('utf-8')).hexdigest()
+            inm = request.headers.get('If-None-Match')
+            ims = request.headers.get('If-Modified-Since')
+            # Сравнение If-None-Match
+            if inm and inm == etag:
+                resp = app.response_class(status=304)
+                resp.headers['ETag'] = etag
+                if last_ts:
+                    resp.headers['Last-Modified'] = last_ts.strftime('%a, %d %b %Y %H:%M:%S GMT')
+                resp.headers['Cache-Control'] = 'no-cache'
+                return resp
+            # Сравнение If-Modified-Since
+            if ims and last_ts:
+                try:
+                    # Разбор RFC1123
+                    from email.utils import parsedate_to_datetime
+                    ims_dt = parsedate_to_datetime(ims)
+                    # Приводим к aware UTC
+                    if ims_dt.tzinfo is None:
+                        ims_dt = ims_dt.replace(tzinfo=timezone.utc)
+                    if last_ts <= ims_dt:
+                        resp = app.response_class(status=304)
+                        resp.headers['ETag'] = etag
+                        resp.headers['Last-Modified'] = last_ts.strftime('%a, %d %b %Y %H:%M:%S GMT')
+                        resp.headers['Cache-Control'] = 'no-cache'
+                        return resp
+                except Exception:
+                    pass
+            resp = jsonify({'items': items, 'version': etag})
+            resp.headers['ETag'] = etag
+            if last_ts:
+                resp.headers['Last-Modified'] = last_ts.strftime('%a, %d %b %Y %H:%M:%S GMT')
+            resp.headers['Cache-Control'] = 'no-cache'
+            return resp
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"comments/list error: {e}")
+        return jsonify({'items': []})
+
+@app.route('/api/match/comments/add', methods=['POST'])
+def api_match_comments_add():
+    """Добавляет комментарий (rate limit: 1 комментарий в 5 минут на пользователя/матч/дату)."""
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData',''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = int(parsed['user'].get('id'))
+        home = (request.form.get('home') or '').strip()
+        away = (request.form.get('away') or '').strip()
+        date_str = (request.form.get('date') or '').strip()
+        content = (request.form.get('content') or '').strip()
+        if not home or not away or not content:
+            return jsonify({'error': 'Пустой комментарий'}), 400
+        if len(content) > 280:
+            return jsonify({'error': 'Слишком длинный комментарий'}), 400
+        if SessionLocal is None:
+            return jsonify({'error': 'БД недоступна'}), 500
+        db: Session = get_db()
+        try:
+            # rate limit: ищем последний комментарий этого пользователя под этим матчем
+            window_start = datetime.now(timezone.utc) - timedelta(minutes=COMMENT_RATE_MINUTES)
+            recent = db.query(MatchComment).filter(
+                MatchComment.user_id==user_id,
+                MatchComment.home==home,
+                MatchComment.away==away,
+                MatchComment.date==(date_str or None),
+                MatchComment.created_at >= window_start
+            ).order_by(MatchComment.created_at.desc()).first()
+            if recent:
+                return jsonify({'error': f'Можно комментировать раз в {COMMENT_RATE_MINUTES} минут'}), 429
+            row = MatchComment(home=home, away=away, date=(date_str or None), user_id=user_id, content=content)
+            db.add(row)
+            # счетчик достижений
+            cc = db.get(CommentCounter, user_id)
+            if not cc:
+                cc = CommentCounter(user_id=user_id, comments_total=0, updated_at=datetime.now(timezone.utc))
+                db.add(cc)
+            cc.comments_total = int(cc.comments_total or 0) + 1
+            cc.updated_at = datetime.now(timezone.utc)
+            db.commit()
+            return jsonify({'status':'ok', 'created_at': row.created_at.isoformat(), 'comments_total': int(cc.comments_total or 0)})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"comments/add error: {e}")
+        return jsonify({'error': 'Не удалось сохранить комментарий'}), 500
 
 @app.route('/api/admin/users-stats', methods=['POST'])
 def api_admin_users_stats():

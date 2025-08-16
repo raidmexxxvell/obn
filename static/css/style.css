@@ -27,6 +27,13 @@ body {
     touch-action: manipulation; /* отключаем pinch-zoom на поддерживаемых браузерах */
 }
 
+/* Блокировка ландшафтной ориентации: показываем полу-прозрачный оверлей в landscape */
+.orientation-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); color:#fff; display:none; z-index: 2000; }
+.orientation-overlay .orientation-inner { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); text-align:center; padding:16px 20px; border:1px solid rgba(255,255,255,0.15); border-radius:12px; background: rgba(15,23,42,0.95); font-weight:800; }
+@media (orientation: landscape) and (max-width: 1024px) {
+    .orientation-overlay { display: block; }
+}
+
 .container {
     max-width: 600px;
     margin: 0 auto;
@@ -140,6 +147,18 @@ body {
 }
 .stream-aspect iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
 .stream-skeleton { display:flex; align-items:center; justify-content:center; color: var(--gray); font-size: 12px; height: 220px; }
+
+/* Комментарии под трансляцией */
+.comments-box { margin-top: 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 8px; }
+.comments-title { font-weight: 800; font-size: 14px; margin-bottom: 6px; }
+.comments-list { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 4px; }
+.comment-item { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 6px 8px; }
+.comment-meta { font-size: 11px; color: var(--gray); margin-bottom: 2px; }
+.comment-text { font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+.cm-empty { color: var(--gray); font-size: 12px; text-align: center; padding: 8px 0; }
+.comments-form { display: grid; grid-template-columns: 1fr auto; gap: 6px; margin-top: 8px; }
+.comments-input { padding: 8px 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.12); background: rgba(2,6,23,0.6); color: #fff; outline: none; }
+.comments-hint { color: var(--gray); font-size: 11px; margin-top: 6px; }
 
 /* --- Админ: трансляции --- */
 .stream-row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
@@ -815,6 +834,13 @@ body.theme-blb .share-btn {
 .match-modal-header .datetime { color: var(--gray); font-size: 12px; }
 .modal-subtabs { margin: 8px 0; }
 .md-pane { min-height: 80px; }
+/* Детали матча: подкладки внутри модального экрана не должны выходить за границы */
+.match-details-topbar, .match-modal-header, .modal-subtabs, .modal-body, #ufo-match-details {
+    max-width: 100%;
+    overflow: hidden;
+}
+.modal-subtabs .subtab-item { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+.match-modal-header .name { max-width: 42vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Match details screen */
 .match-details-topbar { display: flex; align-items: center; gap: 8px; margin: 6px 6px 10px; }
 .match-details-topbar .md-title { font-weight: 700; }

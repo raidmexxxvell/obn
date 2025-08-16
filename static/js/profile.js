@@ -54,6 +54,13 @@ document.addEventListener('DOMContentLoaded', () => {
     try { tg?.expand?.(); } catch (e) { console.warn('tg.expand failed', e); }
     try { tg?.ready?.(); } catch (e) { console.warn('tg.ready failed', e); }
 
+    // Попытка зафиксировать портретную ориентацию (где поддерживается)
+    try {
+        if (screen?.orientation?.lock) {
+            screen.orientation.lock('portrait').catch(()=>{});
+        }
+    } catch(_) {}
+
     const elements = {
         userName: document.getElementById('user-name'),
         userAvatarImg: document.querySelector('#user-avatar img'),
@@ -2184,9 +2191,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const schedulePane = document.getElementById('ufo-schedule');
         const mdPane = document.getElementById('ufo-match-details');
         if (!schedulePane || !mdPane) return;
-        // показать экран деталей
-        schedulePane.style.display = 'none';
-        mdPane.style.display = '';
+    // показать экран деталей
+    schedulePane.style.display = 'none';
+    mdPane.style.display = '';
+    // Скрыть верхние подвкладки лиги в деталях, чтобы не мешали (таблица/статистика/расписание/результаты)
+    try { document.getElementById('ufo-subtabs').style.display = 'none'; } catch(_) {}
 
         const hLogo = document.getElementById('md-home-logo');
         const aLogo = document.getElementById('md-away-logo');
@@ -2289,48 +2298,10 @@ document.addEventListener('DOMContentLoaded', () => {
             fetch(url).then(r=>r.json()).then(ans => {
                 const existing = subtabs?.querySelector('[data-mdtab="stream"]');
                 if (ans?.available) {
-                    let tabEl = existing;
-                    if (!tabEl) {
-                        tabEl = document.createElement('div');
-                        tabEl.className='subtab-item';
-                        tabEl.setAttribute('data-mdtab','stream');
-                        tabEl.textContent='Трансляция';
-                        // Навешиваем обработчик клика сразу, т.к. элемент добавляется динамически
-                        tabEl.onclick = () => {
-                            mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach((x)=>x.classList.remove('active'));
-                            tabEl.classList.add('active');
-                            homePane.style.display = 'none';
-                            awayPane.style.display = 'none';
-                            specialsPane.style.display = 'none';
-                            streamPane.style.display = '';
-                            // Лениво вставляем VK iframe только при первом показе
-                            if (!streamPane.__inited) {
-                                try {
-                                    const st = streamPane.__streamInfo || null;
-                                    if (st && (st.vkVideoId || st.vkPostUrl)) {
-                                        const host = document.createElement('div'); host.className = 'stream-wrap';
-                                        const ratio = document.createElement('div'); ratio.className = 'stream-aspect';
-                                        let src = '';
-                                        if (st.vkVideoId) {
-                                            src = `https://vk.com/video_ext.php?oid=${encodeURIComponent(st.vkVideoId.split('_')[0])}&id=${encodeURIComponent(st.vkVideoId.split('_')[1])}&hd=2&autoplay=${st.autoplay?1:0}`;
-                                        } else if (st.vkPostUrl) {
-                                            src = st.vkPostUrl;
-                                        }
-                                        const ifr = document.createElement('iframe');
-                                        ifr.src = src;
-                                        ifr.allow = 'autoplay; fullscreen; encrypted-media;';
-                                        ifr.referrerPolicy = 'strict-origin-when-cross-origin';
-                                        ratio.appendChild(ifr); host.appendChild(ratio); streamPane.innerHTML=''; streamPane.appendChild(host);
-                                        streamPane.__inited = true;
-                                    } else {
-                                        streamPane.querySelector('.stream-skeleton')?.replaceChildren(document.createTextNode('Трансляция недоступна'));
-                                    }
-                                } catch(_) {}
-                            }
-                        };
-                        subtabs.appendChild(tabEl);
+                    if (!existing) {
+                        const tab = document.createElement('div'); tab.className='subtab-item'; tab.setAttribute('data-mdtab','stream'); tab.textContent='Трансляция';
+                        subtabs.appendChild(tab);
                     }
-                    // сохраняем информацию о трансляции (используется при ленивой инициализации)
                     streamPane.__streamInfo = ans;
                 } else if (existing) {
                     existing.remove();
@@ -2390,7 +2361,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch(_) {}
 
         // переключение вкладок
-        mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach((btn) => {
+    mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach((btn) => {
             btn.onclick = () => {
                 mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach((x)=>x.classList.remove('active'));
                 btn.classList.add('active');
@@ -2422,16 +2393,25 @@ document.addEventListener('DOMContentLoaded', () => {
                                 }
                                 const ifr = document.createElement('iframe');
                                 ifr.src = src;
-                                ifr.allow = 'autoplay; fullscreen; encrypted-media;';
+                                // Разрешаем полноэкранный режим и управление медиа
+                                ifr.setAttribute('allowfullscreen','true');
+                                ifr.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture; screen-wake-lock;';
                                 ifr.referrerPolicy = 'strict-origin-when-cross-origin';
                                 ratio.appendChild(ifr); host.appendChild(ratio); streamPane.innerHTML=''; streamPane.appendChild(host);
                                 streamPane.__inited = true;
+                                // Инициализируем комментарии под плеером
+                                initStreamComments(streamPane, match);
                             } else {
                                 streamPane.querySelector('.stream-skeleton')?.replaceChildren(document.createTextNode('Трансляция недоступна'));
                             }
                         } catch(_) {}
+                    } else {
+                        // Если уже инициализирован — убедимся, что поллинг комментариев активен
+                        if (typeof streamPane.__startCommentsPoll === 'function') {
+                            try { streamPane.__startCommentsPoll(); } catch(_) {}
+                        }
                     }
-                }
+                    }
             };
         });
 
@@ -2441,12 +2421,118 @@ document.addEventListener('DOMContentLoaded', () => {
             // очистка
             homePane.innerHTML = '';
             awayPane.innerHTML = '';
+            // останов поллинга комментариев, если был
+            try { if (typeof streamPane.__stopCommentsPoll === 'function') streamPane.__stopCommentsPoll(); } catch(_) {}
+            // Поставить видео на паузу (VK iframe не управляем напрямую, делаем reset src)
+            try {
+                const ifr = streamPane.querySelector('iframe');
+                if (ifr) { const src = ifr.src; ifr.src = src; }
+            } catch(_) {}
             // вернуть расписание
             mdPane.style.display = 'none';
             schedulePane.style.display = '';
             // прокрутка к верху для UX
             window.scrollTo({ top: 0, behavior: 'smooth' });
+            // Вернуть подвкладки лиги
+            try { document.getElementById('ufo-subtabs').style.display = ''; } catch(_) {}
         };
+
+        // --- Вспом: Комментарии под трансляцией ---
+        function initStreamComments(hostPane, m) {
+            // Корневой контейнер
+            const box = document.createElement('div'); box.className = 'comments-box';
+            box.innerHTML = `
+                <div class="comments-title">Комментарии</div>
+                <div class="comments-list" id="cm-list"></div>
+                <div class="comments-form">
+                    <input type="text" class="comments-input" id="cm-input" placeholder="Написать комментарий..." maxlength="280" />
+                    <button class="details-btn" id="cm-send">Отправить</button>
+                </div>
+                <div class="comments-hint">Сообщения хранятся 10 минут. Не чаще 1 комментария в 5 минут.</div>
+            `;
+            hostPane.appendChild(box);
+            const listEl = box.querySelector('#cm-list');
+            const inputEl = box.querySelector('#cm-input');
+            const sendBtn = box.querySelector('#cm-send');
+            const tg = window.Telegram?.WebApp || null;
+            // Если не Telegram — запретим отправку
+            if (!tg || !tg.initDataUnsafe?.user) {
+                inputEl.disabled = true; sendBtn.disabled = true;
+                inputEl.placeholder = 'Комментарии доступны в Telegram-приложении';
+            }
+            const dateStr = (m?.datetime || m?.date || '').toString().slice(0,10);
+            let polling = null;
+        const fetchComments = async () => {
+                try {
+            const url = `/api/match/comments/list?home=${encodeURIComponent(m.home||'')}&away=${encodeURIComponent(m.away||'')}&date=${encodeURIComponent(dateStr)}`;
+            const hdrs = {};
+            if (box.__cmEtag) hdrs['If-None-Match'] = box.__cmEtag;
+            if (box.__cmLastMod) hdrs['If-Modified-Since'] = box.__cmLastMod;
+            const r = await fetch(url, { headers: hdrs });
+            if (r.status === 304) return; // без изменений
+                    const d = await r.json();
+            const et = r.headers.get('ETag'); if (et) box.__cmEtag = et;
+            const lm = r.headers.get('Last-Modified'); if (lm) box.__cmLastMod = lm;
+                    const items = Array.isArray(d?.items) ? d.items : [];
+                    renderComments(items);
+                } catch(e) { /* noop */ }
+            };
+            const renderComments = (items) => {
+                if (!listEl) return;
+                if (!items.length) { listEl.innerHTML = '<div class="cm-empty">Пока нет комментариев</div>'; return; }
+                listEl.innerHTML = '';
+                items.forEach(it => {
+                    const row = document.createElement('div'); row.className = 'comment-item';
+                    const meta = document.createElement('div'); meta.className = 'comment-meta';
+                    const ts = (()=>{ try { const d = new Date(it.created_at); return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); } catch(_) { return ''; } })();
+                    meta.textContent = `${escapeHtml(it.name || 'User')} • ${ts}`;
+                    const body = document.createElement('div'); body.className = 'comment-text'; body.textContent = it.content || '';
+                    row.append(meta, body); listEl.appendChild(row);
+                });
+                // автопрокрутка вниз
+                try { listEl.scrollTop = listEl.scrollHeight; } catch(_) {}
+            };
+            const postComment = async () => {
+                const text = (inputEl.value || '').trim();
+                if (!text) return;
+                sendBtn.disabled = true;
+                try {
+                    const fd = new FormData();
+                    fd.append('initData', tg?.initData || '');
+                    fd.append('home', m.home || '');
+                    fd.append('away', m.away || '');
+                    fd.append('date', dateStr || '');
+                    fd.append('content', text);
+                    const r = await fetch('/api/match/comments/add', { method: 'POST', body: fd });
+                    const d = await r.json().catch(()=>({}));
+                    if (!r.ok) {
+                        const msg = d?.error || 'Не удалось отправить';
+                        try { tg?.showAlert?.(msg); } catch(_) { alert(msg); }
+                        // при лимите — заблокируем на 5 минут
+                        if (r.status === 429) {
+                            inputEl.disabled = true; sendBtn.disabled = true;
+                            setTimeout(() => { inputEl.disabled = false; sendBtn.disabled = false; }, 5*60*1000);
+                        }
+                        return;
+                    }
+                    inputEl.value = '';
+                    // Мгновенно подтянем ленту
+                    fetchComments();
+                } catch(e) {
+                    try { tg?.showAlert?.('Ошибка сети'); } catch(_) {}
+                } finally {
+                    if (!inputEl.disabled) sendBtn.disabled = false;
+                }
+            };
+            sendBtn.addEventListener('click', postComment);
+            inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') postComment(); });
+            // Поллинг
+            const start = () => { if (polling) return; fetchComments(); polling = setInterval(fetchComments, 12000); };
+            const stop = () => { if (polling) { clearInterval(polling); polling = null; } };
+            hostPane.__startCommentsPoll = start;
+            hostPane.__stopCommentsPoll = stop;
+            start();
+        }
     }
 
     // Рендер спецсобытий (внутри деталей матча)
