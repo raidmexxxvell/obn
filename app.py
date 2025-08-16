@@ -4085,10 +4085,11 @@ def api_streams_get():
             win = int(request.args.get('window') or '60')
         except Exception:
             win = 60
-        win = max(15, min(240, win))
+        # минимум 10 минут, максимум 240
+        win = max(10, min(240, win))
         # найдём матч и время старта
         start_ts = None
-    try:
+        try:
             tours = []
             if SessionLocal is not None:
                 dbx = get_db()
