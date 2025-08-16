@@ -200,6 +200,12 @@
             <div class="nav-icon">🛒</div>
             <div class="nav-label">Магазин</div>
         </div>
+        {% if admin_user_id %}
+        <div class="nav-item" data-tab="admin" id="nav-admin" style="display:none;">
+            <div class="nav-icon">🛠️</div>
+            <div class="nav-label">Админ</div>
+        </div>
+        {% endif %}
         <div class="nav-item active" data-tab="profile">
             <div class="nav-icon">👤</div>
             <div class="nav-label">Профиль</div>
@@ -271,6 +277,36 @@
             </div>
         </div>
     </div>
+
+    {% if admin_user_id %}
+    <!-- Вкладка Админ (только владелец; показывается через JS при совпадении ID) -->
+    <div id="tab-admin" style="display:none;">
+        <div class="predictions-wrap">
+            <div class="subtabs">
+                <div class="subtab-item active">Сервис</div>
+            </div>
+            <div class="pred-pane">
+                <div class="store-grid" style="grid-template-columns: repeat(2, minmax(0,1fr));">
+                    <div class="store-item">
+                        <div class="store-name">Обновить все таблицы</div>
+                        <div class="store-price" style="opacity:.8">Лига, статистика, расписание, результаты</div>
+                        <button class="details-btn" id="admin-refresh-all">Обновить</button>
+                    </div>
+                    <div class="store-item">
+                        <div class="store-name">Статистика онлайн</div>
+                        <div class="store-price" id="admin-users-stats">—</div>
+                        <button class="details-btn" id="admin-users-refresh">Обновить</button>
+                    </div>
+                    <div class="store-item">
+                        <div class="store-name">Синхронизация</div>
+                        <div class="store-price" id="admin-sync-summary">—</div>
+                        <button class="details-btn" id="admin-sync-refresh">Показать</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
 
     <!-- Вкладка Магазин -->
     <div id="tab-shop" style="display:none;">

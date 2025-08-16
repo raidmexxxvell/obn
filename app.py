@@ -591,128 +591,195 @@ def _load_league_ranks() -> dict:
     RANKS_CACHE['ts'] = now
     return ranks
 
-def _compute_match_odds(home: str, away: str) -> dict:
-    """Возвращает коэффициенты 1X2 по простейшей модели: преимущество хозяев + разница позиций.
-    Формат: {'home': 2.15, 'draw': 3.10, 'away': 2.75}.
+def _dc_poisson(k: int, lam: float) -> float:
+    try:
+        import math
+        return (lam ** k) * math.exp(-lam) / math.factorial(k)
+    except Exception:
+        return 0.0
+
+def _dc_tau(x: int, y: int, lam: float, mu: float, rho: float) -> float:
+    # Dixon–Coles low-score correction
+    if x == 0 and y == 0:
+        return 1.0 - (lam * mu * rho)
+    elif x == 0 and y == 1:
+        return 1.0 + (lam * rho)
+    elif x == 1 and y == 0:
+        return 1.0 + (mu * rho)
+    elif x == 1 and y == 1:
+        return 1.0 - rho
+    return 1.0
+
+def _estimate_goal_rates(home: str, away: str) -> tuple[float, float]:
+    """Грубая оценка ожидаемых голов (lam, mu) на основе средней тотал-результативности, домашнего преимущества и разницы сил по таблице.
+    Настройка через env:
+    - BET_BASE_TOTAL (средний тотал, по умолчанию 4.2)
+    - BET_HOME_ADV (доля в пользу дома, по умолчанию 0.10)
+    - BET_RANK_SHARE_SCALE (склоняет долю в пользу более сильной команды, 0.03)
+    - BET_RANK_TOTAL_SCALE (увеличивает общий тотал при большой разнице, 0.015)
+    - BET_MIN_RATE (минимум для lam/mu), BET_MAX_RATE
     """
+    try:
+        base_total = float(os.environ.get('BET_BASE_TOTAL', '4.2'))
+    except Exception:
+        base_total = 4.2
+    try:
+        home_adv = float(os.environ.get('BET_HOME_ADV', '0.10'))
+    except Exception:
+        home_adv = 0.10
+    try:
+        share_scale = float(os.environ.get('BET_RANK_SHARE_SCALE', '0.03'))
+    except Exception:
+        share_scale = 0.03
+    try:
+        total_scale = float(os.environ.get('BET_RANK_TOTAL_SCALE', '0.015'))
+    except Exception:
+        total_scale = 0.015
+    try:
+        min_rate = float(os.environ.get('BET_MIN_RATE', '0.15'))
+        max_rate = float(os.environ.get('BET_MAX_RATE', '5.0'))
+    except Exception:
+        min_rate, max_rate = 0.15, 5.0
+
     def clamp(x, a, b):
         return max(a, min(b, x))
-    def to_norm(s: str) -> str:
+    def norm(s: str) -> str:
         s = (s or '').strip().lower().replace('\u00A0',' ').replace('ё','е')
         return ''.join(ch for ch in s if ch.isalnum())
+
     ranks = _load_league_ranks()
-    r_home = ranks.get(to_norm(home))
-    r_away = ranks.get(to_norm(away))
-    # базовые вероятности
-    p_home = 0.45
-    p_draw = 0.26
-    p_away = 0.29
-    # если есть позиции — скорректируем
-    if r_home and r_away:
-        delta = r_away - r_home  # >0 если хозяева выше в таблице
-        p_home += clamp(delta * 0.02, -0.15, 0.15)
-        p_draw = clamp(0.26 - abs(delta) * 0.01, 0.16, 0.30)
-        # нормализуем
-        p_home = clamp(p_home, 0.10, 0.80)
-        p_away = max(0.05, 1.0 - p_home - p_draw)
-    else:
-        # нет данных — оставляем базовые
-        pass
-    # применяем маржу и считаем кэфы
+    rh = ranks.get(norm(home))
+    ra = ranks.get(norm(away))
+    nteams = max(8, len(ranks) or 10)
+
+    # Сила: лучше ранг -> выше сила
+    def rank_strength(r):
+        if not r:
+            return 0.5
+        return (nteams - (r - 1)) / nteams  # 1.0 для лидера, ~0.1 для последнего
+
+    sh = rank_strength(rh)
+    sa = rank_strength(ra)
+    # Разница сил
+    diff = sh - sa
+    # Общий тотал — чуть выше при неравных командах
+    mu_total = base_total * (1.0 + clamp(abs(diff) * total_scale, 0.0, 0.30))
+    # Доля голов хозяев
+    share_home = clamp(0.5 + home_adv + diff * share_scale, 0.15, 0.85)
+    lam = clamp(mu_total * share_home, min_rate, max_rate)
+    mu = clamp(mu_total * (1.0 - share_home), min_rate, max_rate)
+    return lam, mu
+
+def _dc_outcome_probs(lam: float, mu: float, rho: float, max_goals: int = 8) -> tuple[dict, list[list[float]]]:
+    """Считает вероятности исходов 1X2 и матрицу вероятностей счётов (для тоталов)."""
+    from itertools import product
+    P = {'H': 0.0, 'D': 0.0, 'A': 0.0}
+    mat = [[0.0]*(max_goals+1) for _ in range(max_goals+1)]
+    for x, y in product(range(max_goals+1), repeat=2):
+        p = _dc_tau(x, y, lam, mu, rho) * _dc_poisson(x, lam) * _dc_poisson(y, mu)
+        mat[x][y] = p
+        if x > y: P['H'] += p
+        elif x == y: P['D'] += p
+        else: P['A'] += p
+    # нормализуем, если из-за усечения немного не 1.0
+    s = P['H'] + P['D'] + P['A']
+    if s > 0:
+        P = {k: v/s for k, v in P.items()}
+        # и матрицу
+        for i in range(max_goals+1):
+            for j in range(max_goals+1):
+                mat[i][j] = mat[i][j] / s
+    return P, mat
+
+def _compute_match_odds(home: str, away: str) -> dict:
+    """Коэффициенты 1X2 по Dixon–Coles (Поассоны с коррекцией)."""
+    try:
+        rho = float(os.environ.get('BET_DC_RHO', '-0.05'))
+    except Exception:
+        rho = -0.05
+    try:
+        max_goals = int(os.environ.get('BET_MAX_GOALS', '8'))
+    except Exception:
+        max_goals = 8
+
+    lam, mu = _estimate_goal_rates(home, away)
+    probs, _mat = _dc_outcome_probs(lam, mu, rho=rho, max_goals=max_goals)
     overround = 1.0 + BET_MARGIN
-    # распределим маржу пропорционально вероятностям
-    denom = p_home + p_draw + p_away
-    ph = p_home / denom; px = p_draw / denom; pa = p_away / denom
-    ph *= overround; px *= overround; pa *= overround
     def to_odds(p):
         try:
-            o = 1.0 / p
-            return round(max(1.10, o), 2)
+            return round(max(1.10, 1.0 / (p * overround)), 2)
         except Exception:
             return 1.10
-    return { 'home': to_odds(ph), 'draw': to_odds(px), 'away': to_odds(pa) }
+    return {
+        'home': to_odds(probs['H']),
+        'draw': to_odds(probs['D']),
+        'away': to_odds(probs['A'])
+    }
 
 def _compute_totals_odds(home: str, away: str, line: float) -> dict:
-    """Грубая модель коэффициентов для тоталов (Over/Under) заданной линии.
-    Базируется на среднем ожидаемом количестве голов mu с поправкой на разницу сил команд.
-    Применяет маржу BET_MARGIN аналогично 1X2. Возвращает {'over': k, 'under': k}.
-    """
+    """Коэффициенты тотала (Over/Under) по Dixon–Coles. Возвращает {'over': k, 'under': k}."""
     try:
-        base_mu = float(os.environ.get('BET_BASE_TOTAL', '4.2'))
+        rho = float(os.environ.get('BET_DC_RHO', '-0.05'))
     except Exception:
-        base_mu = 4.2
-
-    def to_norm(s: str) -> str:
-        s = (s or '').strip().lower().replace('\u00A0',' ').replace('ё','е')
-        return ''.join(ch for ch in s if ch.isalnum())
-    ranks = _load_league_ranks()
-    r_home = ranks.get(to_norm(home))
-    r_away = ranks.get(to_norm(away))
-    adj = 1.0
-    if r_home and r_away:
-        delta = abs(r_home - r_away)
-        adj += min(0.25, delta * 0.02)
-    mu = max(1.2, base_mu * adj)
-
+        rho = -0.05
+    try:
+        max_goals = int(os.environ.get('BET_MAX_GOALS', '8'))
+    except Exception:
+        max_goals = 8
+    lam, mu = _estimate_goal_rates(home, away)
+    _probs, mat = _dc_outcome_probs(lam, mu, rho=rho, max_goals=max_goals)
+    try:
+        threshold = float(line)
+    except Exception:
+        threshold = 3.5
+    # Для 3.5 -> >=4; для 4.5 -> >=5 и т.п.
     import math
-    try:
-        l = float(line)
-    except Exception:
-        l = 3.5
-    kappa = 1.15
-    x = mu - l
-    p_over = 1.0 / (1.0 + math.exp(-kappa * x))
-    p_over = max(0.05, min(0.95, p_over))
-    p_under = max(0.05, 1.0 - p_over)
-
+    need = int(math.floor(threshold + 1.0))
+    p_over = 0.0
+    total_sum = 0.0
+    for x in range(max_goals+1):
+        for y in range(max_goals+1):
+            p = mat[x][y]
+            total_sum += p
+            if (x + y) >= need:
+                p_over += p
+    p_over = min(max(p_over, 0.0001), 0.9999)
+    p_under = max(0.0001, min(0.9999, 1.0 - p_over))
     overround = 1.0 + BET_MARGIN
-    denom = p_over + p_under
-    po = (p_over / denom) * overround
-    pu = (p_under / denom) * overround
-
     def to_odds(p):
         try:
-            o = 1.0 / p
-            return round(max(1.10, o), 2)
+            return round(max(1.10, 1.0 / (p * overround)), 2)
         except Exception:
             return 1.10
-    return { 'over': to_odds(po), 'under': to_odds(pu) }
+    return {'over': to_odds(p_over), 'under': to_odds(p_under) }
 
 def _compute_specials_odds(home: str, away: str, market: str) -> dict:
-    """Модель коэффициентов для спецрынков Да/Нет:
-    - market in {'penalty','redcard'} => возвращаем {'yes': k, 'no': k}
-    Базовые вероятности (эвристика): penalty_yes≈0.35, redcard_yes≈0.22.
-    Усиливаем вероятность для неравных команд на пару пунктов, затем применяем маржу.
-    """
+    """Да/Нет события: биномиальная модель с базовой вероятностью и лёгкой поправкой по разнице сил."""
     base_yes = 0.30
     if market == 'penalty':
         base_yes = float(os.environ.get('BET_BASE_PENALTY', '0.35'))
     elif market == 'redcard':
         base_yes = float(os.environ.get('BET_BASE_REDCARD', '0.22'))
-    # корректировка по разнице сил
-    def to_norm(s: str) -> str:
+    def norm(s: str) -> str:
         s = (s or '').strip().lower().replace('\u00A0',' ').replace('ё','е')
         return ''.join(ch for ch in s if ch.isalnum())
     ranks = _load_league_ranks()
-    rh = ranks.get(to_norm(home))
-    ra = ranks.get(to_norm(away))
+    rh = ranks.get(norm(home))
+    ra = ranks.get(norm(away))
     adj = 0.0
     if rh and ra:
+        # Небольшая прибавка вероятности в дерби/неравных матчах
         delta = abs(rh - ra)
-        adj = min(0.05, delta * 0.005)  # до +5 п.п. к вероятности события в напряжённых матчах
-    p_yes = max(0.02, min(0.95, base_yes + adj))
+        adj = min(0.06, delta * 0.004)
+    p_yes = max(0.02, min(0.97, base_yes + adj))
     p_no = max(0.02, 1.0 - p_yes)
     overround = 1.0 + BET_MARGIN
-    denom = p_yes + p_no
-    py = (p_yes / denom) * overround
-    pn = (p_no / denom) * overround
     def to_odds(p):
         try:
-            o = 1.0 / p
-            return round(max(1.10, o), 2)
+            return round(max(1.10, 1.0 / (p * overround)), 2)
         except Exception:
             return 1.10
-    return { 'yes': to_odds(py), 'no': to_odds(pn) }
+    return { 'yes': to_odds(p_yes), 'no': to_odds(p_no) }
 
 def get_referrals_sheet():
     """Возвращает лист 'referrals', создаёт при отсутствии."""
@@ -3118,6 +3185,11 @@ def api_league_table_refresh():
         if SessionLocal is not None:
             db: Session = get_db()
             try:
+                # Запишем снапшот, чтобы GET /api/league-table сразу отдавал обновлённые данные
+                try:
+                    _snapshot_set(db, 'league-table', payload)
+                except Exception as _e:
+                    app.logger.warning(f"snapshot set failed (league-table refresh): {_e}")
                 for idx, r in enumerate(normalized, start=1):
                     row = db.get(LeagueTableRow, idx)
                     when = datetime.now(timezone.utc)
@@ -3140,6 +3212,122 @@ def api_league_table_refresh():
     except Exception as e:
         app.logger.error(f"Ошибка принудительного обновления лиги: {str(e)}")
         return jsonify({'error': 'Не удалось обновить таблицу'}), 500
+
+@app.route('/api/stats-table/refresh', methods=['POST'])
+def api_stats_table_refresh():
+    """Принудительно обновляет таблицу статистики (только админ)."""
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+        payload = _build_stats_payload_from_sheet()
+        if SessionLocal is not None:
+            db: Session = get_db()
+            try:
+                # снапшот
+                _snapshot_set(db, 'stats-table', payload)
+                # и реляционная таблица
+                normalized = payload.get('values') or []
+                when = datetime.now(timezone.utc)
+                for idx, r in enumerate(normalized, start=1):
+                    row = db.get(StatsTableRow, idx)
+                    if not row:
+                        row = StatsTableRow(
+                            row_index=idx,
+                            c1=str(r[0] or ''), c2=str(r[1] or ''), c3=str(r[2] or ''), c4=str(r[3] or ''),
+                            c5=str(r[4] or ''), c6=str(r[5] or ''), c7=str(r[6] or ''),
+                            updated_at=when
+                        )
+                        db.add(row)
+                    else:
+                        row.c1, row.c2, row.c3, row.c4 = str(r[0] or ''), str(r[1] or ''), str(r[2] or ''), str(r[3] or '')
+                        row.c5, row.c6, row.c7 = str(r[4] or ''), str(r[5] or ''), str(r[6] or '')
+                        row.updated_at = when
+                db.commit()
+            finally:
+                db.close()
+        return jsonify({'status': 'ok', 'updated_at': payload.get('updated_at')})
+    except Exception as e:
+        app.logger.error(f"Ошибка принудительного обновления статистики: {e}")
+        return jsonify({'error': 'Не удалось обновить статистику'}), 500
+
+@app.route('/api/schedule/refresh', methods=['POST'])
+def api_schedule_refresh():
+    """Принудительно обновляет расписание (только админ)."""
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+        payload = _build_schedule_payload_from_sheet()
+        if SessionLocal is not None:
+            db: Session = get_db()
+            try:
+                _snapshot_set(db, 'schedule', payload)
+            finally:
+                db.close()
+        return jsonify({'status': 'ok', 'updated_at': payload.get('updated_at')})
+    except Exception as e:
+        app.logger.error(f"Ошибка принудительного обновления расписания: {e}")
+        return jsonify({'error': 'Не удалось обновить расписание'}), 500
+
+@app.route('/api/results/refresh', methods=['POST'])
+def api_results_refresh():
+    """Принудительно обновляет результаты (только админ)."""
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+        payload = _build_results_payload_from_sheet()
+        if SessionLocal is not None:
+            db: Session = get_db()
+            try:
+                _snapshot_set(db, 'results', payload)
+            finally:
+                db.close()
+        return jsonify({'status': 'ok', 'updated_at': payload.get('updated_at')})
+    except Exception as e:
+        app.logger.error(f"Ошибка принудительного обновления результатов: {e}")
+        return jsonify({'error': 'Не удалось обновить результаты'}), 500
+
+@app.route('/api/admin/users-stats', methods=['POST'])
+def api_admin_users_stats():
+    """Статистика пользователей: онлайн за 5/15 минут и всего пользователей. Только админ по initData."""
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+        if SessionLocal is None:
+            return jsonify({'total_users': 0, 'online_5m': 0, 'online_15m': 0})
+        db: Session = get_db()
+        try:
+            total = db.query(func.count(User.user_id)).scalar() or 0
+            now = datetime.now(timezone.utc)
+            dt5 = now - timedelta(minutes=5)
+            dt15 = now - timedelta(minutes=15)
+            online5 = db.query(func.count(User.user_id)).filter(User.updated_at >= dt5).scalar() or 0
+            online15 = db.query(func.count(User.user_id)).filter(User.updated_at >= dt15).scalar() or 0
+            return jsonify({'total_users': int(total), 'online_5m': int(online5), 'online_15m': int(online15), 'ts': now.isoformat()})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"Ошибка admin users stats: {e}")
+        return jsonify({'error': 'Не удалось получить статистику'}), 500
 
 @app.route('/api/stats-table', methods=['GET'])
 def api_stats_table():

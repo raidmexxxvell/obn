@@ -94,6 +94,8 @@ document.addEventListener('DOMContentLoaded', () => {
             return cnt ? `${n} (${cnt})` : n;
         } catch(_) { return n; }
     }
+    // Сделаем доступной глобально для других модулей (predictions.js)
+    try { window.withTeamCount = withTeamCount; } catch(_) {}
     function renderFavoriteSelect(currentFavorite) {
         if (!favoriteTeamSelect) return;
         favoriteTeamSelect.innerHTML = '';
@@ -189,6 +191,16 @@ document.addEventListener('DOMContentLoaded', () => {
         setInterval(() => {
             fetch(`/health?_=${Date.now()}`, { cache: 'no-store' }).catch(() => {});
         }, 5 * 60 * 1000);
+
+        // Если текущий пользователь — владелец, показываем вкладку Админ
+        try {
+            const adminId = document.body.getAttribute('data-admin');
+            const currentId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : '';
+            const navAdmin = document.getElementById('nav-admin');
+            if (adminId && currentId && adminId === currentId && navAdmin) {
+                navAdmin.style.display = '';
+            }
+        } catch(_) {}
     }
 
     // Загрузка достижений
@@ -441,12 +453,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const preds = document.getElementById('tab-predictions');
         const lead = document.getElementById('tab-leaderboard');
     const shop = document.getElementById('tab-shop');
-    [prof, ufo, preds, lead, shop].forEach(el => { if (el) el.style.display = 'none'; });
+    const admin = document.getElementById('tab-admin');
+    [prof, ufo, preds, lead, shop, admin].forEach(el => { if (el) el.style.display = 'none'; });
     if (tab === 'profile' && prof) prof.style.display = '';
     if (tab === 'ufo' && ufo) { ufo.style.display = ''; loadLeagueTable(); }
     if (tab === 'predictions' && preds) preds.style.display = '';
     if (tab === 'leaderboard' && lead) { lead.style.display = ''; ensureLeaderboardInit(); }
     if (tab === 'shop' && shop) { shop.style.display = ''; }
+    if (tab === 'admin' && admin) { admin.style.display = ''; ensureAdminInit(); }
                 // прокрутка к верху при смене вкладки
                 window.scrollTo({ top: 0, behavior: 'smooth' });
             });
@@ -461,12 +475,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const preds = document.getElementById('tab-predictions');
             const lead = document.getElementById('tab-leaderboard');
             const shop = document.getElementById('tab-shop');
-            [prof, ufo, preds, lead, shop].forEach(el => { if (el) el.style.display = 'none'; });
+            const admin = document.getElementById('tab-admin');
+            [prof, ufo, preds, lead, shop, admin].forEach(el => { if (el) el.style.display = 'none'; });
             if (prof) prof.style.display = '';
         } catch(_) {}
 
         // подвкладки НЛО
-        const subtabItems = document.querySelectorAll('#ufo-subtabs .subtab-item');
+    const subtabItems = document.querySelectorAll('#ufo-subtabs .subtab-item');
         const subtabMap = {
             table: document.getElementById('ufo-table'),
             stats: document.getElementById('ufo-stats'),
@@ -494,6 +509,31 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
         });
+
+        // Кнопка «Обновить» на вкладке Таблица (для админа): обновляет ВСЕ панели НЛО
+        try {
+            const refreshBtn = document.getElementById('league-refresh-btn');
+            if (refreshBtn) {
+                refreshBtn.addEventListener('click', async () => {
+                    const original = refreshBtn.textContent;
+                    refreshBtn.disabled = true; refreshBtn.textContent = 'Обновляю...';
+                    const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
+                    const reqs = [
+                        fetch('/api/league-table/refresh', { method: 'POST', body: fd }),
+                        fetch('/api/stats-table/refresh', { method: 'POST', body: fd }),
+                        fetch('/api/schedule/refresh', { method: 'POST', body: fd }),
+                        fetch('/api/results/refresh', { method: 'POST', body: fd })
+                    ];
+                    try { await Promise.allSettled(reqs); } catch(_) {}
+                    // Перерисуем все панели
+                    try { await Promise.allSettled([ Promise.resolve(loadLeagueTable()), Promise.resolve(loadStatsTable()) ]); } catch(_) {}
+                    try { localStorage.removeItem('schedule:tours'); localStorage.removeItem('results:list'); } catch(_) {}
+                    try { loadSchedule(); } catch(_) {}
+                    try { loadResults(); } catch(_) {}
+                    refreshBtn.disabled = false; refreshBtn.textContent = original;
+                });
+            }
+        } catch(_) {}
 
     // подвкладки Профиля (Достижения/Список/Реферал)
         const pTabs = document.querySelectorAll('#profile-subtabs .subtab-item');
@@ -527,6 +567,49 @@ document.addEventListener('DOMContentLoaded', () => {
                 try { await navigator.clipboard.writeText(txt); tg?.showAlert?.('Ссылка скопирована'); } catch(_) {}
             });
         }
+    }
+
+    // ---------- ADMIN TAB ----------
+    let _adminInited = false;
+    function ensureAdminInit() {
+        if (_adminInited) return; _adminInited = true;
+        const btnAll = document.getElementById('admin-refresh-all');
+        const btnUsers = document.getElementById('admin-users-refresh');
+        const btnSync = document.getElementById('admin-sync-refresh');
+        const lblUsers = document.getElementById('admin-users-stats');
+        const lblSync = document.getElementById('admin-sync-summary');
+        // Обновить все
+        if (btnAll) btnAll.addEventListener('click', () => {
+            const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
+            btnAll.disabled = true; const orig = btnAll.textContent; btnAll.textContent = 'Обновляю...';
+            Promise.allSettled([
+                fetch('/api/league-table/refresh', { method: 'POST', body: fd }),
+                fetch('/api/stats-table/refresh', { method: 'POST', body: fd }),
+                fetch('/api/schedule/refresh', { method: 'POST', body: fd }),
+                fetch('/api/results/refresh', { method: 'POST', body: fd })
+            ]).finally(() => { btnAll.disabled = false; btnAll.textContent = orig; });
+        });
+        // Онлайн/уникальные
+        if (btnUsers && lblUsers) btnUsers.addEventListener('click', () => {
+            const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
+            btnUsers.disabled = true; const o = btnUsers.textContent; btnUsers.textContent = '...';
+            fetch('/api/admin/users-stats', { method: 'POST', body: fd })
+                .then(r => r.json()).then(d => {
+                    const s = `Всего: ${d.total_users||0} • Онлайн: ${d.online_5m||0} (5м) / ${d.online_15m||0} (15м)`;
+                    lblUsers.textContent = s;
+                })
+                .finally(()=>{ btnUsers.disabled=false; btnUsers.textContent=o; });
+        });
+        // Метрики синка
+        if (btnSync && lblSync) btnSync.addEventListener('click', () => {
+            btnSync.disabled = true; const o = btnSync.textContent; btnSync.textContent='...';
+            fetch('/health/sync').then(r=>r.json()).then(m => {
+                const last = m.last_sync || {}; const st = m.last_sync_status || {}; const dur = m.last_sync_duration_ms || {};
+                const keys = ['league-table','stats-table','schedule','results','betting-tours','leaderboards'];
+                const lines = keys.map(k => `${k}: ${st[k]||'—'}, ${dur[k]||0}мс, at ${last[k]||'—'}`);
+                lblSync.textContent = lines.join(' | ');
+            }).finally(()=>{ btnSync.disabled=false; btnSync.textContent=o; });
+        });
     }
 
     // Подвкладки Магазина — инициализация сразу (без вложенного DOMContentLoaded)
@@ -650,26 +733,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 const d = new Date(data.updated_at);
                 updatedText.textContent = `Обновлено: ${d.toLocaleString()}`;
             }
-            // показать кнопку обновления для админа
+            // показать кнопку обновления для админа (обработчик навешивается один раз выше)
             const refreshBtn = document.getElementById('league-refresh-btn');
             const adminId = document.body.getAttribute('data-admin');
             const currentId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : '';
             if (updatedWrap && refreshBtn && adminId && currentId && String(adminId) === currentId) {
                 refreshBtn.style.display = '';
-                refreshBtn.onclick = () => {
-                    const fd = new FormData();
-                    fd.append('initData', tg?.initData || '');
-                    fetch('/api/league-table/refresh', { method: 'POST', body: fd })
-                        .then(r => r.json())
-                        .then(resp => {
-                            if (resp?.updated_at && updatedText) {
-                                const d2 = new Date(resp.updated_at);
-                                updatedText.textContent = `Обновлено: ${d2.toLocaleString()}`;
-                            }
-                            setTimeout(loadLeagueTable, 100);
-                        })
-                        .catch(err => console.error('league refresh error', err));
-                };
             }
             // после первой успешной загрузки таблицы, если достижения уже готовы — можно сигналить all-ready
             _tableLoaded = true;
