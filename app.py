@@ -411,6 +411,15 @@ class Snapshot(Base):
     payload = Column(Text, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
+# Ограничения на изменения профиля (одноразовые действия)
+class UserLimits(Base):
+    __tablename__ = 'user_limits'
+    user_id = Column(Integer, primary_key=True)
+    name_changes_left = Column(Integer, default=1)
+    favorite_changes_left = Column(Integer, default=1)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
 # ---------------------- SHOP: ORDERS MODELS ----------------------
 class ShopOrder(Base):
     __tablename__ = 'shop_orders'
@@ -1392,13 +1401,26 @@ def api_set_favorite_team():
             if team is None:
                 return jsonify({'error': 'Некорректная команда'}), 400
             pref = db.get(UserPref, user_id)
+            # Лимиты
+            lim = db.get(UserLimits, user_id)
+            if not lim:
+                lim = UserLimits(user_id=user_id, name_changes_left=1, favorite_changes_left=1)
+                db.add(lim)
+                db.flush()
+            if pref and (pref.favorite_team is not None) and (lim.favorite_changes_left or 0) <= 0 and team != (pref.favorite_team or ''):
+                return jsonify({'error': 'limit', 'message': 'Сменить любимый клуб можно только один раз'}), 429
             when = datetime.now(timezone.utc)
+            prev_team = (pref.favorite_team or '') if pref else ''
             if not pref:
                 pref = UserPref(user_id=user_id, favorite_team=(team or None), updated_at=when)
                 db.add(pref)
             else:
                 pref.favorite_team = (team or None)
                 pref.updated_at = when
+            # уменьшить лимит при установке/смене на непустое значение, если реально меняем
+            if team != '' and prev_team != team:
+                lim.favorite_changes_left = max(0, (lim.favorite_changes_left or 0) - 1)
+                lim.updated_at = when
             db.commit()
             return jsonify({'status': 'ok', 'favorite_team': (team or '')})
         finally:
@@ -2819,11 +2841,22 @@ def update_name():
 
         db: Session = get_db()
         try:
+            # Проверим лимиты
+            lim = db.get(UserLimits, int(user_id))
+            if not lim:
+                lim = UserLimits(user_id=int(user_id), name_changes_left=1, favorite_changes_left=1)
+                db.add(lim)
+                db.flush()
+            if (lim.name_changes_left or 0) <= 0:
+                return jsonify({'error': 'limit', 'message': 'Сменить имя можно только один раз'}), 429
             db_user = db.get(User, int(user_id))
             if not db_user:
                 return jsonify({'error': 'Пользователь не найден'}), 404
             db_user.display_name = new_name
             db_user.updated_at = datetime.now(timezone.utc)
+            # уменьшаем лимит
+            lim.name_changes_left = max(0, (lim.name_changes_left or 0) - 1)
+            lim.updated_at = datetime.now(timezone.utc)
             db.commit()
             db.refresh(db_user)
         finally:

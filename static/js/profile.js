@@ -116,11 +116,20 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     async function saveFavoriteTeam(value) {
         try {
+            if (value) {
+                const ok = confirm('Сменить любимый клуб можно только один раз. Подтвердить выбор?');
+                if (!ok) return false;
+            }
             const fd = new FormData();
             fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
             fd.append('team', value || '');
             const res = await fetch('/api/user/favorite-team', { method: 'POST', body: fd });
-            if (!res.ok) return false;
+            const data = await res.json().catch(()=>({}));
+            if (!res.ok) {
+                const msg = data?.message || (data?.error === 'limit' ? 'Сменить любимый клуб можно только один раз' : 'Не удалось сохранить клуб');
+                try { window.Telegram?.WebApp?.showAlert?.(msg); } catch(_) { try { alert(msg); } catch(_) {} }
+                return false;
+            }
             await fetchTeamsAndCounts(true);
             renderFavoriteSelect(value);
             return true;
@@ -472,8 +481,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function handleNameChange() {
         if (!elements.userName) return;
-        const newName = prompt('Введите новое имя:', elements.userName.textContent);
+    const newName = prompt('Введите новое имя (внимание: изменить имя можно только 1 раз):', elements.userName.textContent);
         if (!newName || !newName.trim() || newName === elements.userName.textContent) return;
+    if (!confirm('Подтвердите смену имени. Изменить можно только один раз. Продолжить?')) return;
         const original = elements.userName.textContent;
         elements.userName.textContent = 'Сохранение...';
         if (!tg || !tg.initDataUnsafe?.user) { elements.userName.textContent = original; return; }
@@ -483,12 +493,13 @@ document.addEventListener('DOMContentLoaded', () => {
     formData.append('new_name', newName.trim());
 
         fetch('/api/update-name', { method:'POST', body: formData })
-        .then(res => { if (res.status === 401) throw new Error('Unauthorized'); return res.json(); })
+        .then(async res => { const d = await res.json().catch(()=>({})); if (!res.ok) { const msg = d?.message || 'Не удалось изменить имя'; throw new Error(msg); } return d; })
         .then(data => { if (elements.userName) elements.userName.textContent = data.display_name; })
         .catch(err => {
             console.error('update name err', err);
             if (elements.userName) elements.userName.textContent = original;
-            try { tg?.showAlert?.('Не удалось изменить имя'); } catch (_) { try { alert('Не удалось изменить имя'); } catch(_){} }
+            const m = err?.message || 'Не удалось изменить имя';
+            try { tg?.showAlert?.(m); } catch (_) { try { alert(m); } catch(_){} }
         });
     }
 
