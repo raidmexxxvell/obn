@@ -98,9 +98,9 @@
             
             <div id="profile-pane-ref" class="profile-pane" style="display:none;">
                 <div class="referral-box wide full">
-                    <div class="ref-link" id="referral-link">—</div>
-                    <button class="checkin-button" id="copy-ref">Скопировать ссылку</button>
+                    <button class="share-btn" id="share-ref">Поделиться ссылкой</button>
                     <div class="ref-stats">Приглашено: <span id="ref-count">0</span></div>
+                    <div class="ref-note" id="ref-note">Зачёт происходит, когда приглашённый достигнет 2 уровня аккаунта.</div>
                 </div>
             </div>
         </div>
@@ -302,10 +302,11 @@
     <!-- Вкладка Админ (только владелец; показывается через JS при совпадении ID) -->
     <div id="tab-admin" style="display:none;">
         <div class="predictions-wrap">
-            <div class="subtabs">
-                <div class="subtab-item active">Сервис</div>
+            <div class="subtabs" id="admin-subtabs">
+                <div class="subtab-item active" data-atab="service">Сервис</div>
+                <div class="subtab-item" data-atab="orders">Заказы</div>
             </div>
-            <div class="pred-pane">
+            <div id="admin-pane-service" class="pred-pane">
                 <div class="store-grid" style="grid-template-columns: repeat(2, minmax(0,1fr));">
                     <div class="store-item">
                         <div class="store-name">Обновить все таблицы</div>
@@ -324,6 +325,17 @@
                     </div>
                 </div>
             </div>
+            <div id="admin-pane-orders" class="pred-pane" style="display:none;">
+                <div class="league-table-wrap">
+                    <table class="league-table" id="admin-orders-table">
+                        <thead>
+                            <tr><th>№</th><th>ID пользователя</th><th>Сумма</th><th>Создан</th></tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                    <div class="table-updated" id="admin-orders-updated"></div>
+                </div>
+            </div>
         </div>
     </div>
     {% endif %}
@@ -334,37 +346,41 @@
             <div class="subtabs" id="shop-subtabs">
                 <div class="subtab-item active" data-stab="store">Магазин</div>
                 <div class="subtab-item" data-stab="cart">Корзина</div>
+                <div class="subtab-item" data-stab="myorders">Мои заказы</div>
             </div>
             <div id="shop-pane-store" class="pred-pane">
                 <div class="store-grid">
-                    <div class="store-item" data-id="stickerpack" data-name="Стикерпак" data-price="500">
+                    <div class="store-item" data-id="boots" data-name="Бутсы" data-price="20000">
                         <div class="store-img"></div>
-                        <div class="store-name">Стикерпак</div>
-                        <div class="store-price">500 кредитов</div>
-                        <button class="details-btn">В корзину</button>
+                        <div class="store-name">Бутсы</div>
+                        <div class="store-price">20 000 кредитов</div>
+                        <button class="details-btn">Купить</button>
+                    </div>
+                    <div class="store-item" data-id="ball" data-name="Мяч" data-price="8000">
+                        <div class="store-img"></div>
+                        <div class="store-name">Мяч</div>
+                        <div class="store-price">8 000 кредитов</div>
+                        <button class="details-btn">Купить</button>
                     </div>
                     <div class="store-item" data-id="tshirt" data-name="Футболка" data-price="5000">
                         <div class="store-img"></div>
                         <div class="store-name">Футболка</div>
                         <div class="store-price">5 000 кредитов</div>
-                        <button class="details-btn">В корзину</button>
+                        <button class="details-btn">Купить</button>
                     </div>
-                    <div class="store-item" data-id="badge_pro" data-name="Бейдж PRO" data-price="2500">
+                    <div class="store-item" data-id="cap" data-name="Кепка" data-price="3000">
                         <div class="store-img"></div>
-                        <div class="store-name">Бейдж PRO</div>
-                        <div class="store-price">2 500 кредитов</div>
-                        <button class="details-btn">В корзину</button>
-                    </div>
-                    <div class="store-item" data-id="vip_role" data-name="VIP-роль" data-price="10000">
-                        <div class="store-img"></div>
-                        <div class="store-name">VIP-роль</div>
-                        <div class="store-price">10 000 кредитов</div>
-                        <button class="details-btn">В корзину</button>
+                        <div class="store-name">Кепка</div>
+                        <div class="store-price">3 000 кредитов</div>
+                        <button class="details-btn">Купить</button>
                     </div>
                 </div>
             </div>
             <div id="shop-pane-cart" class="pred-pane" style="display:none;">
                 <div style="padding:12px; color: var(--gray);">Корзина пуста.</div>
+            </div>
+            <div id="shop-pane-myorders" class="pred-pane" style="display:none;">
+                <div style="padding:12px; color: var(--gray);">Загрузка...</div>
             </div>
         </div>
     </div>
@@ -373,6 +389,5 @@
     <script src="/static/js/profile.js"></script>
     <script src="/static/js/predictions.js"></script>
 
-    <!-- Удалено модальное окно: теперь детальный экран встроен как ufo-pane -->
 </body>
 </html>

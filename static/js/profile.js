@@ -553,7 +553,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     if (tab === 'leaderboard' && lead) { lead.style.display = ''; ensureLeaderboardInit(); }
-    if (tab === 'shop' && shop) { shop.style.display = ''; }
+    if (tab === 'shop' && shop) { shop.style.display = ''; try { initShopUI(); } catch(_) {} }
     if (tab === 'admin' && admin) { admin.style.display = ''; ensureAdminInit(); }
                 // прокрутка к верху при смене вкладки
                 window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -689,14 +689,25 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
 
-        const copyBtn = document.getElementById('copy-ref');
-        if (copyBtn) {
-            copyBtn.setAttribute('data-throttle', '1200');
-            copyBtn.addEventListener('click', async () => {
-                const el = document.getElementById('referral-link');
-                const txt = el?.textContent?.trim();
-                if (!txt) return;
-                try { await navigator.clipboard.writeText(txt); tg?.showAlert?.('Ссылка скопирована'); } catch(_) {}
+        const shareBtn = document.getElementById('share-ref');
+        if (shareBtn) {
+            shareBtn.setAttribute('data-throttle', '1200');
+            shareBtn.addEventListener('click', async () => {
+                try {
+                    // гарантируем, что реф. данные подгружены
+                    if (!_referralCache) await loadReferralInfo();
+                    const link = _referralCache?.referral_link || '';
+                    if (!link) return;
+                    const text = encodeURIComponent(`Присоединяйся к лиге: ${link}`);
+                    // Telegram рекомендует использовать openTelegramLink для deeplink в чат выбора
+                    if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.openTelegramLink) {
+                        window.Telegram.WebApp.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${text}`);
+                    } else if (navigator.share) {
+                        try { await navigator.share({ title: 'Приглашение', text: 'Присоединяйся к лиге', url: link }); } catch(_) {}
+                    } else {
+                        window.open(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${text}`, '_blank');
+                    }
+                } catch (e) { console.warn('share failed', e); }
             });
         }
     }
@@ -710,6 +721,25 @@ document.addEventListener('DOMContentLoaded', () => {
         const btnSync = document.getElementById('admin-sync-refresh');
         const lblUsers = document.getElementById('admin-users-stats');
         const lblSync = document.getElementById('admin-sync-summary');
+        // Подвкладки Админа
+        try {
+            const tabs = document.querySelectorAll('#admin-subtabs .subtab-item');
+            const panes = {
+                service: document.getElementById('admin-pane-service'),
+                orders: document.getElementById('admin-pane-orders')
+            };
+            tabs.forEach(btn => {
+                btn.setAttribute('data-throttle', '600');
+                btn.addEventListener('click', () => {
+                    const key = btn.getAttribute('data-atab');
+                    tabs.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    Object.values(panes).forEach(p => { if (p) p.style.display = 'none'; });
+                    if (panes[key]) panes[key].style.display = '';
+                    if (key === 'orders') renderAdminOrders();
+                });
+            });
+        } catch(_) {}
         // Обновить все
         if (btnAll) btnAll.addEventListener('click', () => {
             const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
@@ -745,9 +775,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Подвкладки Магазина — инициализация сразу (без вложенного DOMContentLoaded)
+    let _shopInited = false;
     function initShopUI() {
+        if (_shopInited) { try { updateCartBadge(); } catch(_) {}; return; }
         const tabs = document.querySelectorAll('#shop-subtabs .subtab-item');
-        const panes = { store: document.getElementById('shop-pane-store'), cart: document.getElementById('shop-pane-cart') };
+    const panes = { store: document.getElementById('shop-pane-store'), cart: document.getElementById('shop-pane-cart'), myorders: document.getElementById('shop-pane-myorders') };
         tabs.forEach(btn => {
             btn.setAttribute('data-throttle', '600');
             btn.addEventListener('click', () => {
@@ -756,10 +788,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 btn.classList.add('active');
                 Object.values(panes).forEach(p => { if (p) p.style.display = 'none'; });
                 if (panes[key]) panes[key].style.display = '';
-                if (key === 'cart') renderCart();
+        if (key === 'cart') renderCart();
+        if (key === 'myorders') renderMyOrders();
             });
         });
         initShop();
+        updateCartBadge();
+        _shopInited = true;
     }
 
     // ---------- МАГАЗИН ----------
@@ -768,6 +803,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     function writeCart(items) {
         try { localStorage.setItem('shop:cart', JSON.stringify(items)); } catch(_) {}
+        try { updateCartBadge(); } catch(_) {}
     }
     function addToCart(item) {
         const cart = readCart();
@@ -775,8 +811,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (idx >= 0) { cart[idx].qty = (cart[idx].qty || 1) + 1; }
         else { cart.push({ ...item, qty: 1 }); }
         writeCart(cart);
-        try { window.Telegram?.WebApp?.showAlert?.('Товар добавлен в корзину'); } catch(_) {}
-        renderCart();
+    try { window.Telegram?.WebApp?.showAlert?.('Товар добавлен в корзину'); } catch(_) {}
+    renderCart();
     }
     function removeFromCart(id) {
         let cart = readCart();
@@ -797,20 +833,42 @@ document.addEventListener('DOMContentLoaded', () => {
         let total = 0;
         cart.forEach(it => {
             total += (it.price || 0) * (it.qty || 1);
-            const row = document.createElement('div');
-            row.className = 'cart-row';
-            const left = document.createElement('div'); left.className = 'cart-left'; left.textContent = `${it.name} × ${it.qty || 1}`;
-            const right = document.createElement('div'); right.className = 'cart-right'; right.textContent = `${(it.price* (it.qty||1)).toLocaleString()} кр.`;
+            const qty = Math.max(1, it.qty || 1);
+            const name = document.createElement('div'); name.className = 'cart-left'; name.textContent = it.name;
+            const qtyWrap = document.createElement('div'); qtyWrap.style.display='flex'; qtyWrap.style.alignItems='center'; qtyWrap.style.gap='6px';
+            const minus = document.createElement('button'); minus.className = 'details-btn'; minus.textContent = '−'; minus.style.minWidth='28px'; minus.setAttribute('data-throttle','400');
+            const qlbl = document.createElement('div'); qlbl.textContent = String(qty);
+            const plus = document.createElement('button'); plus.className = 'details-btn'; plus.textContent = '+'; plus.style.minWidth='28px'; plus.setAttribute('data-throttle','400');
+            qtyWrap.append(minus, qlbl, plus);
+            const sum = document.createElement('div'); sum.className = 'cart-right'; sum.textContent = `${(it.price * qty).toLocaleString()} кр.`;
             const del = document.createElement('button'); del.className = 'details-btn'; del.textContent = 'Убрать'; del.style.marginLeft = '8px'; del.setAttribute('data-throttle','600');
             del.addEventListener('click', () => removeFromCart(it.id));
+            // handlers
+            minus.addEventListener('click', () => {
+                const items = readCart();
+                const idx = items.findIndex(x => x.id === it.id);
+                if (idx >= 0) {
+                    items[idx].qty = Math.max(0, (items[idx].qty || 1) - 1);
+                    if (items[idx].qty === 0) items.splice(idx,1);
+                    writeCart(items); renderCart();
+                }
+            });
+            plus.addEventListener('click', () => {
+                const items = readCart();
+                const idx = items.findIndex(x => x.id === it.id);
+                if (idx >= 0) { items[idx].qty = (items[idx].qty || 1) + 1; writeCart(items); renderCart(); }
+            });
             const line = document.createElement('div'); line.className = 'cart-line';
-            line.append(left, right, del);
+            line.append(name, qtyWrap, sum, del);
             wrap.appendChild(line);
         });
         const totalEl = document.createElement('div'); totalEl.className = 'cart-total'; totalEl.textContent = `Итого: ${total.toLocaleString()} кредитов`;
+        const checkout = document.createElement('button'); checkout.className = 'details-btn'; checkout.textContent = 'Оформить заказ'; checkout.style.marginTop='8px'; checkout.setAttribute('data-throttle','1200');
+        checkout.addEventListener('click', () => placeOrder());
         pane.innerHTML = '';
         pane.appendChild(wrap);
         pane.appendChild(totalEl);
+        pane.appendChild(checkout);
     }
     function initShop() {
         // Подвяжем кнопки «В корзину» и метаданные товаров
@@ -829,6 +887,155 @@ document.addEventListener('DOMContentLoaded', () => {
                 btn.addEventListener('click', () => addToCart({ id, name, price }));
             }
         });
+    }
+
+    // -------------- ЗАКАЗЫ (LocalStorage) --------------
+    function readOrders() {
+        try { return JSON.parse(localStorage.getItem('shop:orders') || '[]'); } catch(_) { return []; }
+    }
+    function writeOrders(items) {
+        try { localStorage.setItem('shop:orders', JSON.stringify(items)); } catch(_) {}
+    }
+    async function placeOrder() {
+        const cart = readCart();
+        if (!cart.length) { try { window.Telegram?.WebApp?.showAlert?.('Корзина пуста'); } catch(_) {}; return; }
+        const totalLocal = cart.reduce((s, it) => s + (it.price||0) * (it.qty||1), 0);
+        const initData = window.Telegram?.WebApp?.initData || '';
+        const items = cart.map(it => ({ code: it.id, qty: it.qty||1 }));
+        try {
+            if (!initData) throw new Error('no-telegram');
+            const form = new FormData();
+            form.append('initData', initData);
+            form.append('items', JSON.stringify(items));
+            const resp = await fetch('/api/shop/checkout', { method: 'POST', body: form });
+            if (resp.status === 401) throw new Error('unauthorized');
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data && data.error || 'Ошибка оформления');
+            writeCart([]);
+            renderCart();
+            try { window.Telegram?.WebApp?.showAlert?.(`Заказ оформлен\n№${data.order_id}\nСумма: ${Number(data.total||0).toLocaleString()}`); } catch(_) {}
+            try { renderAdminOrders(); } catch(_) {}
+            return;
+        } catch (e) {
+            console.warn('Checkout fallback to local', e);
+            const userId = (window.Telegram?.WebApp?.initDataUnsafe?.user?.id) ? String(window.Telegram.WebApp.initDataUnsafe.user.id) : '0';
+            const order = {
+                id: 'O' + Date.now(),
+                user_id: userId,
+                total: totalLocal,
+                items: cart.slice(),
+                created_at: new Date().toISOString(),
+                status: 'local'
+            };
+            const orders = readOrders(); orders.push(order); writeOrders(orders);
+            writeCart([]);
+            renderCart();
+            try { window.Telegram?.WebApp?.showAlert?.('Заказ оформлен (локально)'); } catch(_) {}
+            try { renderAdminOrders(); } catch(_) {}
+        }
+    }
+    async function renderAdminOrders() {
+        const tbody = document.querySelector('#admin-orders-table tbody');
+        if (!tbody) return;
+        const initData = window.Telegram?.WebApp?.initData || '';
+        try {
+            if (!initData) throw new Error('no-telegram');
+            const form = new FormData(); form.append('initData', initData);
+            const resp = await fetch('/api/admin/orders', { method: 'POST', body: form, headers: { 'If-None-Match': window._adminOrdersETag || '' } });
+            if (resp.status === 304) return; // unchanged
+            const et = resp.headers.get('ETag'); if (et) window._adminOrdersETag = et;
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data && data.error || 'Ошибка загрузки заказов');
+            const orders = (data && data.orders) ? data.orders.slice() : [];
+            orders.sort((a,b) => String(b.created_at||'').localeCompare(String(a.created_at||'')));
+            tbody.innerHTML = '';
+            orders.forEach((o, idx) => {
+                const tr = document.createElement('tr');
+                const when = (()=>{ try { return new Date(o.created_at).toLocaleString(); } catch(_) { return o.created_at || ''; } })();
+                tr.innerHTML = `<td>${escapeHtml(String(o.id||String(idx+1)))}</td><td>${escapeHtml(String(o.user_id||''))}</td><td>${Number(o.total||0).toLocaleString()}</td><td>${when}</td>`;
+                tbody.appendChild(tr);
+            });
+            const upd = document.getElementById('admin-orders-updated');
+            if (upd) { try { upd.textContent = `Обновлено: ${new Date().toLocaleString()}`; } catch(_) {} }
+        } catch (e) {
+            console.warn('Admin orders fallback to local', e);
+            const orders = readOrders().slice().sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
+            tbody.innerHTML = '';
+            orders.forEach((o, idx) => {
+                const tr = document.createElement('tr');
+                const when = (()=>{ try { return new Date(o.created_at).toLocaleString(); } catch(_) { return o.created_at || ''; } })();
+                tr.innerHTML = `<td>${escapeHtml(o.id||String(idx+1))}</td><td>${escapeHtml(o.user_id||'')}</td><td>${Number(o.total||0).toLocaleString()}</td><td>${when}</td>`;
+                tbody.appendChild(tr);
+            });
+            const upd = document.getElementById('admin-orders-updated');
+            if (upd) { try { upd.textContent = `Обновлено: ${new Date().toLocaleString()}`; } catch(_) {} }
+        }
+    }
+
+    // ---------- Мои заказы ----------
+    async function renderMyOrders() {
+        const pane = document.getElementById('shop-pane-myorders');
+        if (!pane) return;
+        pane.innerHTML = '<div style="padding:12px; color: var(--gray);">Загрузка...</div>';
+        const initData = window.Telegram?.WebApp?.initData || '';
+        try {
+            if (!initData) throw new Error('no-telegram');
+            const form = new FormData(); form.append('initData', initData);
+            const resp = await fetch('/api/shop/my-orders', { method: 'POST', body: form });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data && data.error || 'Ошибка загрузки');
+            const orders = (data && data.orders) ? data.orders.slice() : [];
+            if (!orders.length) { pane.innerHTML = '<div style="padding:12px; color: var(--gray);">Заказов пока нет.</div>'; return; }
+            const wrap = document.createElement('div');
+            wrap.className = 'cart-list';
+            orders.forEach(o => {
+                const line = document.createElement('div'); line.className = 'cart-line';
+                const id = document.createElement('div'); id.className = 'cart-left'; id.textContent = `Заказ №${o.id}`;
+                const sum = document.createElement('div'); sum.className = 'cart-right'; sum.textContent = `${Number(o.total||0).toLocaleString()} кр.`;
+                const when = document.createElement('div'); when.style.flex='1'; when.style.textAlign='center'; when.style.color='var(--gray)'; when.textContent = (()=>{ try { return new Date(o.created_at).toLocaleString(); } catch(_) { return o.created_at || ''; } })();
+                line.append(id, when, sum);
+                wrap.appendChild(line);
+            });
+            pane.innerHTML = '';
+            pane.appendChild(wrap);
+        } catch (e) {
+            console.warn('My orders fallback to local', e);
+            const orders = readOrders().slice().sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
+            if (!orders.length) { pane.innerHTML = '<div style="padding:12px; color: var(--gray);">Заказов пока нет.</div>'; return; }
+            const wrap = document.createElement('div');
+            wrap.className = 'cart-list';
+            orders.forEach(o => {
+                const line = document.createElement('div'); line.className = 'cart-line';
+                const id = document.createElement('div'); id.className = 'cart-left'; id.textContent = `${o.id}`;
+                const sum = document.createElement('div'); sum.className = 'cart-right'; sum.textContent = `${Number(o.total||0).toLocaleString()} кр.`;
+                const when = document.createElement('div'); when.style.flex='1'; when.style.textAlign='center'; when.style.color='var(--gray)'; when.textContent = (()=>{ try { return new Date(o.created_at).toLocaleString(); } catch(_) { return o.created_at || ''; } })();
+                line.append(id, when, sum);
+                wrap.appendChild(line);
+            });
+            pane.innerHTML = '';
+            pane.appendChild(wrap);
+        }
+    }
+
+    // -------------- Бейдж корзины --------------
+    function updateCartBadge() {
+        try {
+            const navItem = document.querySelector('.nav-item[data-tab="shop"]');
+            if (!navItem) return;
+            const cart = readCart();
+            const count = cart.reduce((s, it) => s + (it.qty||1), 0);
+            // Fallback: update label text for accessibility
+            const label = navItem.querySelector('.nav-label');
+            if (label) label.textContent = count > 0 ? `Магазин (${count})` : 'Магазин';
+            // Badge element
+            let badge = navItem.querySelector('.nav-badge');
+            if (count > 0) {
+                if (!badge) { badge = document.createElement('div'); badge.className = 'nav-badge'; navItem.appendChild(badge); }
+                badge.textContent = String(count);
+            } else if (badge) {
+                badge.remove();
+            }
+        } catch(_) {}
     }
 
     let _leagueLoading = false;
@@ -1646,6 +1853,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const ufoContent = document.getElementById('ufo-content');
         const blbBlock = document.getElementById('blb-block');
         if (!overlay || !ufoTabs || !ufoContent || !blbBlock) return;
+    // если уже открыт — не дублируем
+    if (overlay.style.display === 'block') return;
         // Обновим содержимое оверлея и покажем
         renderLeagueOverlay();
         overlay.style.display = 'block';
@@ -1725,18 +1934,20 @@ document.addEventListener('DOMContentLoaded', () => {
             // Очистим классы стадий
             layer.classList.remove('lt-fill-bottom','lt-fill-top','lt-unfill-top','lt-unfill-bottom');
             if (to === 'BLB') {
-                img.src = '/static/img/logoblb.jpg';
-                title.textContent = 'БАЛАБАНОВО';
+                img.src = '/static/img/placeholderlogo.png';
+                title.textContent = 'Здесь может быть ваша лига';
                 layer.style.display = 'flex';
+                // Используем золотисто-черную палитру BLB
+                layer.style.background = 'linear-gradient(135deg, #0b0b0b, #000000)';
                 // Фаза 1: заливка снизу вверх (1s)
                 layer.classList.add('lt-fill-bottom');
                 setTimeout(() => {
                     // Смена темы/топ-бара во время полной заливки (пользователь не видит)
                     document.body.classList.add('theme-blb');
                     const t = document.querySelector('.top-bar .league-title');
-                    if (t) t.textContent = 'Балабановская лига';
+                    if (t) t.textContent = 'Название лиги';
                     const logo = document.querySelector('.top-bar .league-logo');
-                    if (logo) logo.src = '/static/img/logoblb.jpg';
+                    if (logo) logo.src = '/static/img/placeholderlogo.png';
                     // Пауза 1s
                     layer.classList.remove('lt-fill-bottom');
                     setTimeout(() => {
@@ -1747,8 +1958,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 }, 1000);
             } else {
                 img.src = '/static/img/logo.png';
-                title.textContent = 'ОБНИНСК';
+                title.textContent = 'ОБНИНСКСКАЯ ЛИГА';
                 layer.style.display = 'flex';
+                // Используем палитру стартовой заставки (splash): var(--dark)->var(--darker)
+                // Читаем переменные с дефолтами на случай отсутствия
+                const cs = getComputedStyle(document.body);
+                const dark = cs.getPropertyValue('--dark')?.trim() || '#0f172a';
+                const darker = cs.getPropertyValue('--darker')?.trim() || '#020617';
+                layer.style.background = `linear-gradient(135deg, ${dark}, ${darker})`;
                 // Фаза 1: заливка сверху вниз (1s)
                 layer.classList.add('lt-fill-top');
                 setTimeout(() => {
@@ -2069,32 +2286,26 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function loadReferralInfo() {
-        const linkEl = document.getElementById('referral-link');
         const countEl = document.getElementById('ref-count');
-        const linkEl2 = document.getElementById('referral-link-2');
         const countEl2 = document.getElementById('ref-count-2');
-        if (!linkEl || !countEl) return;
-        if (!tg || !tg.initDataUnsafe?.user) return;
+        if (!tg || !tg.initDataUnsafe?.user) return Promise.resolve();
         // Мгновенный рендер из кэша, если есть
         if (_referralCache) {
-            linkEl.textContent = _referralCache.referral_link || _referralCache.code || '—';
-            countEl.textContent = (_referralCache.invited_count ?? 0).toString();
-            if (linkEl2) linkEl2.textContent = linkEl.textContent;
-            if (countEl2) countEl2.textContent = countEl.textContent;
+            if (countEl) countEl.textContent = (_referralCache.invited_count ?? 0).toString();
+            if (countEl2) countEl2.textContent = (_referralCache.invited_count ?? 0).toString();
         }
         // Актуализируем в фоне
         const formData = new FormData();
         formData.append('initData', tg.initData || '');
-        fetch('/api/referral', { method: 'POST', body: formData })
+        return fetch('/api/referral', { method: 'POST', body: formData })
             .then(r => r.json())
             .then(data => {
                 _referralCache = data;
-                linkEl.textContent = data.referral_link || data.code || '—';
-                countEl.textContent = (data.invited_count ?? 0).toString();
-                if (linkEl2) linkEl2.textContent = linkEl.textContent;
-                if (countEl2) countEl2.textContent = countEl.textContent;
+                if (countEl) countEl.textContent = (data.invited_count ?? 0).toString();
+                if (countEl2) countEl2.textContent = (data.invited_count ?? 0).toString();
+                return data;
             })
-            .catch(err => console.error('referral load error', err));
+            .catch(err => { console.error('referral load error', err); });
     }
 
     let _achLoaded = false;
@@ -2118,8 +2329,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const labelEl = item.querySelector('.nav-label');
             const act = getActiveLeague();
             if (act === 'BLB') {
-                if (iconEl) iconEl.textContent = '🅱️';
-                if (labelEl) labelEl.textContent = 'БЛБ';
+                if (iconEl) iconEl.textContent = '❔';
+                if (labelEl) labelEl.textContent = 'Лига';
             } else {
                 if (iconEl) iconEl.textContent = '🛸';
                 if (labelEl) labelEl.textContent = 'НЛО';

@@ -411,6 +411,265 @@ class Snapshot(Base):
     payload = Column(Text, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
+# ---------------------- SHOP: ORDERS MODELS ----------------------
+class ShopOrder(Base):
+    __tablename__ = 'shop_orders'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, index=True, nullable=False)
+    total = Column(Integer, nullable=False)
+    status = Column(String(16), default='new')  # new | cancelled | paid (на будущее)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+class ShopOrderItem(Base):
+    __tablename__ = 'shop_order_items'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    order_id = Column(Integer, index=True, nullable=False)
+    product_code = Column(String(32), nullable=False)
+    product_name = Column(String(255), nullable=False)
+    unit_price = Column(Integer, nullable=False)
+    qty = Column(Integer, nullable=False)
+    subtotal = Column(Integer, nullable=False)
+
+# ---------------------- SHOP: HELPERS & API ----------------------
+def _shop_catalog() -> dict:
+    """Серверный каталог товаров: { code: {name, price} }.
+    Цены могут быть переопределены через переменные окружения SHOP_PRICE_*.
+    """
+    def p(env_key: str, default: int) -> int:
+        try:
+            return int(os.environ.get(env_key, str(default)))
+        except Exception:
+            return default
+    return {
+        'boots': { 'name': 'Бутсы', 'price': p('SHOP_PRICE_BOOTS', 20000) },
+        'ball': { 'name': 'Мяч', 'price': p('SHOP_PRICE_BALL', 8000) },
+        'tshirt': { 'name': 'Футболка', 'price': p('SHOP_PRICE_TSHIRT', 5000) },
+        'cap': { 'name': 'Кепка', 'price': p('SHOP_PRICE_CAP', 3000) },
+    }
+
+def _normalize_order_items(raw_items) -> list[dict]:
+    """Приводит массив позиций к [{code, qty}] с валидными qty>=1. Игнорирует неизвестные коды."""
+    out = []
+    if not isinstance(raw_items, list):
+        return out
+    for it in raw_items:
+        code = (it.get('id') or it.get('code') or '').strip()
+        try:
+            qty = int(it.get('qty') or it.get('quantity') or 0)
+        except Exception:
+            qty = 0
+        if not code:
+            continue
+        qty = max(1, min(99, qty))
+        out.append({'code': code, 'qty': qty})
+    return out
+
+@app.route('/api/shop/checkout', methods=['POST'])
+def api_shop_checkout():
+    """
+    Оформление заказа в магазине. Поля: initData (Telegram), items (JSON-массив [{id|code, qty}]).
+    Цены и названия берутся с сервера. При успехе списывает кредиты, создаёт ShopOrder и ShopOrderItems.
+    Ответ: { order_id, total, balance }.
+    """
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        if SessionLocal is None:
+            return jsonify({'error': 'БД недоступна'}), 500
+        user_id = int(parsed['user'].get('id'))
+
+        # Читаем items: либо из form['items'] (JSON-строка), либо из JSON-тела
+        items = []
+        try:
+            if request.form.get('items'):
+                items = json.loads(request.form.get('items'))
+            elif request.is_json:
+                body = request.get_json(silent=True) or {}
+                items = body.get('items') or []
+        except Exception:
+            items = []
+        items = _normalize_order_items(items)
+        if not items:
+            return jsonify({'error': 'Пустая корзина'}), 400
+
+        catalog = _shop_catalog()
+        # Нормализуем по каталогу и считаем сумму
+        norm_items = []
+        total = 0
+        for it in items:
+            code = it['code']
+            if code not in catalog:
+                continue
+            unit = int(catalog[code]['price'])
+            qty = int(it['qty'])
+            subtotal = unit * qty
+            total += subtotal
+            norm_items.append({
+                'code': code,
+                'name': catalog[code]['name'],
+                'unit_price': unit,
+                'qty': qty,
+                'subtotal': subtotal
+            })
+        if not norm_items:
+            return jsonify({'error': 'Нет валидных товаров'}), 400
+        if total <= 0:
+            return jsonify({'error': 'Нулевая сумма заказа'}), 400
+
+        db: Session = get_db()
+        try:
+            u = db.get(User, user_id)
+            if not u:
+                return jsonify({'error': 'Пользователь не найден'}), 404
+            if int(u.credits or 0) < total:
+                return jsonify({'error': 'Недостаточно кредитов'}), 400
+            # Списание и создание заказа
+            u.credits = int(u.credits or 0) - total
+            u.updated_at = datetime.now(timezone.utc)
+            order = ShopOrder(user_id=user_id, total=total, status='new', created_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc))
+            db.add(order)
+            db.flush()  # получить order.id
+            for it in norm_items:
+                db.add(ShopOrderItem(
+                    order_id=order.id,
+                    product_code=it['code'],
+                    product_name=it['name'],
+                    unit_price=it['unit_price'],
+                    qty=it['qty'],
+                    subtotal=it['subtotal']
+                ))
+            db.commit()
+            db.refresh(u)
+            # Зеркалирование пользователя в Sheets best-effort
+            try:
+                mirror_user_to_sheets(u)
+            except Exception as e:
+                app.logger.warning(f"Mirror after checkout failed: {e}")
+            return jsonify({'order_id': order.id, 'total': total, 'balance': int(u.credits or 0)})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"Shop checkout error: {e}")
+        return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
+
+@app.route('/api/shop/my-orders', methods=['POST'])
+def api_shop_my_orders():
+    """Возвращает последние 50 заказов текущего пользователя. Требует initData."""
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        if SessionLocal is None:
+            return jsonify({'error': 'БД недоступна'}), 500
+        user_id = int(parsed['user'].get('id'))
+        db: Session = get_db()
+        try:
+            rows = db.query(ShopOrder).filter(ShopOrder.user_id == user_id).order_by(ShopOrder.created_at.desc()).limit(50).all()
+            out = []
+            for r in rows:
+                out.append({
+                    'id': int(r.id),
+                    'user_id': int(r.user_id),
+                    'total': int(r.total or 0),
+                    'status': r.status or 'new',
+                    'created_at': (r.created_at or datetime.now(timezone.utc)).isoformat()
+                })
+            return jsonify({'orders': out})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"Shop my-orders error: {e}")
+        return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
+
+@app.route('/api/admin/orders', methods=['POST'])
+def api_admin_orders():
+    """Админ: список заказов (ETag поддерживается). Поля: initData."""
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Unauthorized'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+        if SessionLocal is None:
+            return jsonify({'orders': []})
+        db: Session = get_db()
+        try:
+            rows = db.query(ShopOrder).order_by(ShopOrder.created_at.desc()).limit(500).all()
+            core = [
+                {
+                    'id': int(r.id),
+                    'user_id': int(r.user_id),
+                    'total': int(r.total or 0),
+                    'status': r.status or 'new',
+                    'created_at': (r.created_at or datetime.now(timezone.utc)).isoformat()
+                }
+                for r in rows
+            ]
+            etag = _etag_for_payload({'orders': core})
+            inm = request.headers.get('If-None-Match')
+            if inm and inm == etag:
+                resp = app.response_class(status=304)
+                resp.headers['ETag'] = etag
+                resp.headers['Cache-Control'] = 'private, max-age=60'
+                return resp
+            resp = jsonify({'orders': core, 'updated_at': datetime.now(timezone.utc).isoformat(), 'version': etag})
+            resp.headers['ETag'] = etag
+            resp.headers['Cache-Control'] = 'private, max-age=60'
+            return resp
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"Admin orders error: {e}")
+        return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
+
+@app.route('/api/admin/orders/<int:order_id>', methods=['POST'])
+def api_admin_order_details(order_id: int):
+    """Админ: детали заказа + позиции. Поля: initData."""
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Unauthorized'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+        if SessionLocal is None:
+            return jsonify({'error': 'БД недоступна'}), 500
+        db: Session = get_db()
+        try:
+            r = db.get(ShopOrder, int(order_id))
+            if not r:
+                return jsonify({'error': 'Заказ не найден'}), 404
+            items = db.query(ShopOrderItem).filter(ShopOrderItem.order_id == int(order_id)).all()
+            out_items = [
+                {
+                    'product_code': it.product_code,
+                    'product_name': it.product_name,
+                    'unit_price': int(it.unit_price or 0),
+                    'qty': int(it.qty or 0),
+                    'subtotal': int(it.subtotal or 0)
+                } for it in items
+            ]
+            return jsonify({
+                'order': {
+                    'id': int(r.id),
+                    'user_id': int(r.user_id),
+                    'total': int(r.total or 0),
+                    'status': r.status or 'new',
+                    'created_at': (r.created_at or datetime.now(timezone.utc)).isoformat()
+                },
+                'items': out_items
+            })
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"Admin order details error: {e}")
+        return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
+
 def ensure_weekly_baselines(db: Session, period_start: datetime):
     """Создаёт снимок credits для всех пользователей в начале недели (если ещё не создан).
     Также добавляет недостающие снимки для новых пользователей, появившихся в середине недели.
@@ -2365,8 +2624,11 @@ def api_referral():
                 db.add(ref)
                 db.commit()
                 db.refresh(ref)
-            # посчитаем приглашённых
-            invited_count = db.query(Referral).filter(Referral.referrer_id == user_id).count()
+            # посчитаем приглашённых: засчитываются только те, кто достиг уровня >= 2
+            invited_count = db.query(func.count(Referral.user_id)) \
+                .join(User, User.user_id == Referral.user_id) \
+                .filter(Referral.referrer_id == user_id, (User.level >= 2)) \
+                .scalar() or 0
         finally:
             db.close()
         bot_username = os.environ.get('BOT_USERNAME', '').lstrip('@')
@@ -2703,12 +2965,15 @@ def get_achievements():
         streak_tier = compute_tier(user['consecutive_days'], streak_thresholds)
         credits_tier = compute_tier(user['credits'], credits_thresholds)
         level_tier = compute_tier(user['level'], level_thresholds)
-        # Считаем приглашённых
+        # Считаем приглашённых (засчитываются только с уровнем >=2)
         invited_count = 0
         if SessionLocal is not None:
             db: Session = get_db()
             try:
-                invited_count = db.query(Referral).filter(Referral.referrer_id == int(user_id)).count()
+                invited_count = db.query(func.count(Referral.user_id)) \
+                    .join(User, User.user_id == Referral.user_id) \
+                    .filter(Referral.referrer_id == int(user_id), (User.level >= 2)) \
+                    .scalar() or 0
             finally:
                 db.close()
         invited_tier = compute_tier(invited_count, invited_thresholds)
