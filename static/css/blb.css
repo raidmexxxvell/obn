@@ -1,0 +1,74 @@
+/* static/css/blb.css */
+
+/* Тема Балабановской лиги (BLB): черно-золотистая */
+body.theme-blb {
+  --dark: #0b0b0b;
+  --darker: #000000;
+  --light: #f5f3e6;
+  --primary: #d4af37; /* золотой */
+  --secondary: #8d6e2f;
+  --gray: #a3a3a3;
+  background: linear-gradient(135deg, var(--dark), var(--darker));
+  color: var(--light);
+}
+
+/* Верхняя панель под BLB */
+body.theme-blb .top-bar {
+  background: rgba(0,0,0,0.4);
+  border-bottom: 1px solid rgba(212,175,55,0.25);
+}
+body.theme-blb .top-bar .league-title {
+  color: var(--primary);
+  font-weight: 800;
+}
+
+/* Кнопки и акценты */
+body.theme-blb .details-btn,
+body.theme-blb .checkin-button,
+body.theme-blb .refresh-btn {
+  background: linear-gradient(180deg, #e5c45a, #c7a22c);
+  color: #1a1a1a;
+  border: none;
+}
+
+/* Навигация снизу: легкий золотистый контур */
+body.theme-blb .nav {
+  background: rgba(0,0,0,0.6);
+  border: 1px solid rgba(212,175,55,0.25);
+}
+
+/* Экран перехода между лигами */
+#league-transition {
+  position: fixed;
+  inset: 0;
+  background: #000; /* будет анимироваться JS */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1200;
+}
+#league-transition .lt-content {
+  text-align: center;
+  color: #f9f9f9;
+}
+#league-transition .lt-logo {
+  width: 180px;
+  height: 180px;
+  object-fit: contain;
+  margin-bottom: 12px;
+}
+#league-transition .lt-title {
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+/* Мягкая анимация заливки */
+@keyframes fillUp {
+  0% { clip-path: inset(100% 0 0 0); }
+  100% { clip-path: inset(0 0 0 0); }
+}
+@keyframes fillDown {
+  0% { clip-path: inset(0 0 0 0); }
+  100% { clip-path: inset(0 0 100% 0); }
+}

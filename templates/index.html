@@ -8,6 +8,7 @@
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="stylesheet" href="/static/css/splash.css">
+    <link rel="stylesheet" href="/static/css/blb.css">
 </head>
 <body data-admin="{{ admin_user_id }}">
     <!-- ЗАСТАВКА -->
@@ -222,17 +223,13 @@
     </nav>
 
     <!-- Оверлей выбора лиг над нижним меню -->
-    <div id="league-overlay" style="display:none; position: fixed; left: 50%; transform: translateX(-50%); bottom: 72px; width: min(300px, calc(100% - 24px)); z-index: 1100;">
-        <div class="league-list" style="display: grid; gap: 8px;">
-            <div class="league-card" data-league="UFO" style="display:flex; align-items:center; gap:10px; padding:10px; border:1px solid rgba(255,255,255,0.1); border-radius:10px; cursor:pointer; background: rgba(10,18,40,0.96);">
-                <div class="league-ico" style="font-size:20px;">🛸</div>
-                <div class="league-name" style="font-weight:600;">НЛО — Лига Обнинска</div>
-            </div>
-            <div class="league-card" data-league="BLB" style="display:flex; align-items:center; gap:10px; padding:10px; border:1px solid rgba(255,255,255,0.1); border-radius:10px; cursor:pointer; background: rgba(10,18,40,0.96);">
-                <div class="league-ico" style="font-size:20px;">🅱️</div>
-                <div class="league-name" style="font-weight:600;">БЛБ — другая лига</div>
-            </div>
-        </div>
+    <div id="league-overlay" style="display:none; position: fixed; left: 0; bottom: 0; z-index: 1100;">
+        <!-- Контент плашки подставляет JS -->
+    </div>
+
+    <!-- Экран перехода между лигами (анимация заливки и логотип) -->
+    <div id="league-transition" style="display:none;">
+        <!-- наполняется через JS -->
     </div>
 
     <!-- Экраны-заглушки для новых вкладок -->

@@ -1676,7 +1676,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const ufoContent = document.getElementById('ufo-content');
         const blbBlock = document.getElementById('blb-block');
         if (!ufoTabs || !ufoContent || !blbBlock) return;
-        setActiveLeague('UFO');
+    playLeagueTransition('UFO');
+    setActiveLeague('UFO');
         if (overlay) overlay.style.display = 'none';
         blbBlock.style.display = 'none';
         ufoTabs.style.display = '';
@@ -1695,12 +1696,53 @@ document.addEventListener('DOMContentLoaded', () => {
         const ufoContent = document.getElementById('ufo-content');
         const blbBlock = document.getElementById('blb-block');
         if (!ufoTabs || !ufoContent || !blbBlock) return;
+        playLeagueTransition('BLB');
         setActiveLeague('BLB');
         if (overlay) overlay.style.display = 'none';
         ufoTabs.style.display = 'none';
         ufoContent.style.display = 'none';
         blbBlock.style.display = '';
         initBLBSubtabs();
+    }
+
+    function playLeagueTransition(to) {
+        try {
+            const layer = document.getElementById('league-transition');
+            if (!layer) return;
+            const content = document.createElement('div');
+            content.className = 'lt-content';
+            const img = document.createElement('img');
+            img.className = 'lt-logo';
+            const title = document.createElement('div');
+            title.className = 'lt-title';
+            if (to === 'BLB') {
+                img.src = '/static/img/logoblb.jpg';
+                title.textContent = 'БАЛАБАНОВО';
+                document.body.classList.add('theme-blb');
+                // верхняя панель
+                const t = document.querySelector('.top-bar .league-title');
+                if (t) t.textContent = 'Балабановская лига';
+                const logo = document.querySelector('.top-bar .league-logo');
+                if (logo) logo.src = '/static/img/logoblb.jpg';
+                layer.style.display = 'flex';
+                layer.style.animation = 'fillUp 380ms ease forwards';
+            } else {
+                img.src = '/static/img/logo.png';
+                title.textContent = 'ОБНИНСК';
+                document.body.classList.remove('theme-blb');
+                const t = document.querySelector('.top-bar .league-title');
+                if (t) t.textContent = 'Лига Обнинска';
+                const logo = document.querySelector('.top-bar .league-logo');
+                if (logo) logo.src = '/static/img/logo.png';
+                layer.style.display = 'flex';
+                layer.style.animation = 'fillDown 380ms ease forwards';
+            }
+            content.appendChild(img);
+            content.appendChild(title);
+            layer.innerHTML = '';
+            layer.appendChild(content);
+            setTimeout(() => { layer.style.display = 'none'; layer.style.animation = ''; }, 420);
+        } catch(_) {}
     }
 
     function initBLBSubtabs() {
