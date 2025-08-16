@@ -523,7 +523,15 @@ document.addEventListener('DOMContentLoaded', () => {
                         fetch('/api/results/refresh', { method: 'POST', body: fd })
                     ];
                     try { await Promise.allSettled(reqs); } catch(_) {}
-                    // Обновим дату "Обновлено" принудительным GET без кэша
+                    // Мгновенно обновим дату локальным временем
+                    try {
+                        const updatedText = document.getElementById('league-updated-text');
+                        if (updatedText) {
+                            const now = new Date();
+                            updatedText.textContent = `Обновлено: ${now.toLocaleString()}`;
+                        }
+                    } catch(_) {}
+                    // И параллельно актуализируем по серверу принудительным GET без кэша
                     try {
                         const u = `/api/league-table?_=${Date.now()}`;
                         const r = await fetch(u, { headers: { 'Cache-Control': 'no-cache' } });
@@ -1024,16 +1032,16 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!cached) pane.innerHTML = '<div class="schedule-loading">Загрузка расписания...</div>';
 
         // Хелпер: загрузка логотипа команды с фолбэками по названию
-        const loadTeamLogo = (imgEl, teamName) => {
+    const loadTeamLogo = (imgEl, teamName) => {
             const base = '/static/img/team-logos/';
             const name = (teamName || '').trim();
             const candidates = [];
             if (name) {
-                // 1) точное совпадение: "Название команды.png"
-                candidates.push(base + encodeURIComponent(name + '.png'));
-                // 2) нормализованное: нижний регистр, без пробелов
-                const norm = name.toLowerCase().replace(/\s+/g, '').replace(/ё/g, 'е');
-                candidates.push(base + encodeURIComponent(norm + '.png'));
+        // 1) нормализованное: нижний регистр, без пробелов/ё->е
+        const norm = name.toLowerCase().replace(/\s+/g, '').replace(/ё/g, 'е');
+        candidates.push(base + encodeURIComponent(norm + '.png'));
+        // 2) при желании можно попытаться точным именем (закомментировано для избежания 404-спама)
+        // candidates.push(base + encodeURIComponent(name + '.png'));
             }
             // 3) дефолт
             candidates.push(base + 'default.png');
@@ -1232,16 +1240,6 @@ document.addEventListener('DOMContentLoaded', () => {
                         });
                         footer.appendChild(btn);
                     }
-                    // Админ-кнопка «Спецсобытия» (пенальти/красная)
-                    try {
-                        const adminId = document.body.getAttribute('data-admin');
-                        const currentId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id ? String(window.Telegram.WebApp.initDataUnsafe.user.id) : '';
-                        if (adminId && currentId && String(adminId) === currentId) {
-                            const spBtn = document.createElement('button'); spBtn.className = 'details-btn'; spBtn.textContent = 'Спесобытия'; spBtn.style.marginLeft = '8px'; spBtn.setAttribute('data-throttle','1000');
-                            spBtn.addEventListener('click', () => openSpecialsPanel(m));
-                            footer.appendChild(spBtn);
-                        }
-                    } catch(_) {}
                     card.appendChild(footer);
 
                     tourEl.appendChild(card);
@@ -1478,9 +1476,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const base = '/static/img/team-logos/';
             const candidates = [];
             if (name) {
-                candidates.push(base + encodeURIComponent(name + '.png'));
                 const norm = name.toLowerCase().replace(/\s+/g, '').replace(/ё/g, 'е');
                 candidates.push(base + encodeURIComponent(norm + '.png'));
+                // candidates.push(base + encodeURIComponent(name + '.png'));
             }
             candidates.push(base + 'default.png');
             let i = 0;
@@ -1504,11 +1502,39 @@ document.addEventListener('DOMContentLoaded', () => {
             } else { dt.textContent = ''; }
         } catch(_) { dt.textContent = match.time || ''; }
 
-        // вкладки
+        // вкладки (добавим «Спецсобытия» для админа)
+        const subtabs = mdPane.querySelector('.modal-subtabs');
         mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach((el) => el.classList.remove('active'));
+        // создаём/находим панель спецсобытий
+        let specialsPane = document.getElementById('md-pane-specials');
+        if (!specialsPane) {
+            specialsPane = document.createElement('div');
+            specialsPane.id = 'md-pane-specials';
+            specialsPane.className = 'md-pane';
+            specialsPane.style.display = 'none';
+            mdPane.querySelector('.modal-body')?.appendChild(specialsPane);
+        }
+        // Если админ — добавим вкладку, если её нет
+        try {
+            const adminId = document.body.getAttribute('data-admin');
+            const currentId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id ? String(window.Telegram.WebApp.initDataUnsafe.user.id) : '';
+            if (adminId && currentId && String(adminId) === currentId && subtabs) {
+                if (!subtabs.querySelector('[data-mdtab="specials"]')) {
+                    const sp = document.createElement('div');
+                    sp.className = 'subtab-item'; sp.setAttribute('data-mdtab','specials'); sp.textContent = 'Спецсобытия';
+                    subtabs.appendChild(sp);
+                }
+            } else {
+                // если не админ, убедимся, что вкладки нет
+                const exist = subtabs?.querySelector('[data-mdtab="specials"]');
+                if (exist) exist.remove();
+            }
+        } catch(_) {}
+        // по умолчанию активируем «Команда 1»
         mdPane.querySelector('.modal-subtabs .subtab-item[data-mdtab="home"]').classList.add('active');
         homePane.style.display = '';
         awayPane.style.display = 'none';
+        specialsPane.style.display = 'none';
 
         // заполнение составов
         const renderRoster = (pane, players) => {
@@ -1546,8 +1572,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach((x)=>x.classList.remove('active'));
                 btn.classList.add('active');
                 const key = btn.getAttribute('data-mdtab');
-                if (key === 'home') { homePane.style.display = ''; awayPane.style.display = 'none'; }
-                else { homePane.style.display = 'none'; awayPane.style.display = ''; }
+                if (key === 'home') { homePane.style.display = ''; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; }
+                else if (key === 'away') { homePane.style.display = 'none'; awayPane.style.display = ''; specialsPane.style.display = 'none'; }
+                else if (key === 'specials') {
+                    homePane.style.display = 'none'; awayPane.style.display = 'none'; specialsPane.style.display = '';
+                    // отрисуем спецпанель внутри specialsPane
+                    renderSpecialsPane(specialsPane, match);
+                }
             };
         });
 
@@ -1565,12 +1596,13 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
-    // Панель админа для фиксации пенальти/красной
-    function openSpecialsPanel(m) {
+    // Рендер спецсобытий (внутри деталей матча)
+    function renderSpecialsPane(host, m) {
         const tg = window.Telegram?.WebApp || null;
-        const host = document.createElement('div');
-        host.className = 'admin-panel';
-        host.style.marginTop = '8px'; host.style.padding = '8px'; host.style.border = '1px solid rgba(255,255,255,0.1)'; host.style.borderRadius = '10px';
+        host.innerHTML = '';
+        const shell = document.createElement('div');
+        shell.className = 'admin-panel';
+        shell.style.marginTop = '8px'; shell.style.padding = '8px'; shell.style.border = '1px solid rgba(255,255,255,0.1)'; shell.style.borderRadius = '10px';
         const title = document.createElement('div'); title.style.marginBottom = '6px'; title.textContent = 'Спецсобытия матча';
         const row1 = document.createElement('div'); row1.style.display='flex'; row1.style.gap='8px'; row1.style.alignItems='center';
         const lab1 = document.createElement('div'); lab1.textContent = 'Пенальти:';
@@ -1583,22 +1615,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const actions = document.createElement('div'); actions.style.marginTop='8px';
         const save = document.createElement('button'); save.className = 'details-btn'; save.textContent = 'Сохранить и рассчитать';
         actions.append(save);
-        host.append(title, row1, row2, actions);
-
-        // Вставим панель рядом с карточкой матча
-        const schedPane = document.getElementById('ufo-schedule');
-        const cards = schedPane?.querySelectorAll('.match-card') || [];
-        let placeAfter = null;
-        cards.forEach(c => {
-            const teamEls = c.querySelectorAll('.team-name');
-            const h = teamEls[0]?.getAttribute('data-team-name') || teamEls[0]?.textContent || '';
-            const a = teamEls[1]?.getAttribute('data-team-name') || teamEls[1]?.textContent || '';
-            if (h === (m.home||'') && a === (m.away||'')) placeAfter = c;
-        });
-        if (!placeAfter) return;
-        // Удалим старые панели
-        placeAfter.parentElement.querySelectorAll('.admin-panel').forEach(el => el.remove());
-        placeAfter.after(host);
+        shell.append(title, row1, row2, actions);
+        host.appendChild(shell);
 
         // Загрузим текущее состояние
         fetch(`/api/specials/get?home=${encodeURIComponent(m.home||'')}&away=${encodeURIComponent(m.away||'')}`)

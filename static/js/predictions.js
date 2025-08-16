@@ -135,13 +135,13 @@
             };
             if (specials.penalty?.available) {
               const block = document.createElement('div'); block.className = 'totals-table';
-              const row = mkYN('Пенальти (Да/Нет)', specials.penalty.odds, 'penalty');
+              const row = mkYN('Пенальти', specials.penalty.odds, 'penalty');
               if (row) block.appendChild(row);
               extra.appendChild(block);
             }
             if (specials.redcard?.available) {
               const block = document.createElement('div'); block.className = 'totals-table';
-              const row = mkYN('Красная карточка (Да/Нет)', specials.redcard.odds, 'redcard');
+              const row = mkYN('Красная карточка', specials.redcard.odds, 'redcard');
               if (row) block.appendChild(row);
               extra.appendChild(block);
             }
@@ -209,9 +209,9 @@
       const name = (teamName || '').trim();
       const candidates = [];
       if (name) {
-        candidates.push(base + encodeURIComponent(name + '.png'));
         const norm = name.toLowerCase().replace(/\s+/g,'').replace(/ё/g,'е');
         candidates.push(base + encodeURIComponent(norm + '.png'));
+        // candidates.push(base + encodeURIComponent(name + '.png'));
       }
       candidates.push(base + 'default.png');
       let i = 0; const next = () => { if (i>=candidates.length) return; imgEl.onerror = () => { i++; next(); }; imgEl.src = candidates[i]; };
