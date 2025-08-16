@@ -229,6 +229,21 @@
         </div>
     </nav>
 
+    <!-- Модальное окно смены имени (кастомное, чтобы не показывать системный prompt с доменом) -->
+    <div id="name-modal" class="modal" style="display:none;">
+        <div class="modal-backdrop" data-close="true"></div>
+        <div class="modal-dialog" role="dialog" aria-labelledby="name-modal-title" aria-modal="true">
+            <div class="modal-title" id="name-modal-title">Смена имени</div>
+            <div class="modal-desc">Внимание: изменить имя можно только один раз.</div>
+            <input id="name-input" class="modal-input" type="text" maxlength="40" placeholder="Введите новое имя">
+            <div class="modal-error" id="name-modal-error" aria-live="polite"></div>
+            <div class="modal-actions">
+                <button id="name-cancel" class="btn btn-secondary" type="button">Отмена</button>
+                <button id="name-save" class="btn btn-primary" type="button">Сохранить</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Оверлей выбора лиг над нижним меню -->
     <div id="league-overlay" style="display:none; position: fixed; left: 0; bottom: 0; z-index: 1100;">
         <!-- Контент плашки подставляет JS -->
@@ -251,24 +266,6 @@
             </div>
             <div id="pred-pane-mybets" class="pred-pane" style="display:none;">
                 <div class="my-bets" id="my-bets">Загрузка...</div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Кастомная модалка смены имени (без системного заголовка домена) -->
-    <div id="name-modal" style="display:none;">
-        <div class="modal-backdrop" data-close="1"></div>
-        <div class="modal-card">
-            <div class="modal-title">НЛО</div>
-            <div class="modal-body">
-                <label for="name-input" class="modal-label">Введите новое имя</label>
-                <input id="name-input" type="text" maxlength="32" class="modal-input" />
-                <div class="modal-note">Внимание: изменить имя можно только 1 раз.</div>
-                <label class="modal-check"><input type="checkbox" id="name-confirm"/> Я подтверждаю смену имени</label>
-            </div>
-            <div class="modal-actions">
-                <button id="name-cancel" class="btn btn-secondary">Отмена</button>
-                <button id="name-ok" class="btn btn-primary" disabled>OK</button>
             </div>
         </div>
     </div>

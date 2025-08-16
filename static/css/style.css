@@ -118,22 +118,20 @@ body {
 .nav-label { display: none; }
 .nav-item .nav-badge { position: absolute; top: -2px; right: 2px; background: #ef4444; color: #fff; border-radius: 999px; padding: 1px 5px; font-size: 10px; font-weight: 800; line-height: 1; border: 1px solid rgba(255,255,255,0.6); box-shadow: 0 0 0 1px rgba(0,0,0,0.4); }
 
-/* --- Модалка смены имени --- */
-#name-modal { position: fixed; inset: 0; z-index: 1200; }
-#name-modal .modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(2px); }
-#name-modal .modal-card { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: min(94%, 380px); background: rgba(17, 24, 39, 0.96); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; box-shadow: 0 12px 28px rgba(0,0,0,0.45); color: #fff; }
-#name-modal .modal-title { padding: 12px 16px; font-weight: 800; border-bottom: 1px solid rgba(255,255,255,0.08); }
-#name-modal .modal-body { padding: 12px 16px 0 16px; }
-#name-modal .modal-label { font-size: 13px; color: var(--gray); display:block; margin-bottom: 6px; }
-#name-modal .modal-input { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.12); background: rgba(2, 6, 23, 0.7); color: #fff; font-size: 14px; outline: none; }
-#name-modal .modal-input:focus { border-color: rgba(255,255,255,0.3); box-shadow: 0 0 0 2px rgba(255,255,255,0.06) inset; }
-#name-modal .modal-note { margin: 8px 0 2px; font-size: 12px; color: var(--gray); }
-#name-modal .modal-check { font-size: 12px; color: var(--gray); display:flex; gap:8px; align-items:center; margin: 8px 0 0; }
-#name-modal .modal-actions { display:flex; gap: 8px; justify-content: flex-end; padding: 12px 16px 14px; }
-#name-modal .btn { border: 0; border-radius: 10px; padding: 8px 12px; font-weight: 800; cursor: pointer; }
-#name-modal .btn-primary { background: var(--primary-dark); color: #fff; opacity: 0.9; }
-#name-modal .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-#name-modal .btn-secondary { background: rgba(255,255,255,0.08); color: #fff; }
+/* --- МОдалка --- */
+.modal { position: fixed; inset: 0; z-index: 1200; display: none; }
+.modal.show { display: block; }
+.modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); }
+.modal-dialog { position: relative; margin: 0 auto; top: 20vh; width: min(480px, calc(100% - 32px)); background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 16px; box-shadow: 0 12px 28px rgba(0,0,0,0.5); }
+.modal-title { font-weight: 800; font-size: 16px; margin-bottom: 6px; }
+.modal-desc { font-size: 12px; color: var(--gray); margin-bottom: 10px; }
+.modal-input { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); background: rgba(2,6,23,0.6); color: #fff; outline: none; }
+.modal-error { color: var(--danger); font-size: 12px; min-height: 16px; margin-top: 6px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.btn { padding: 8px 12px; border-radius: 10px; font-weight: 700; border: 1px solid transparent; cursor: pointer; }
+.btn-primary { background: var(--primary-dark); color: #fff; border-color: rgba(255,255,255,0.06); }
+.btn-secondary { background: transparent; color: var(--light); border-color: rgba(255,255,255,0.2); }
+.btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
 
 /* --- ВЕРХНЯЯ ПАНЕЛЬ --- */

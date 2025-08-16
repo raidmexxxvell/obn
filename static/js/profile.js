@@ -480,71 +480,57 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function handleNameChange() {
         if (!elements.userName) return;
+        // Открываем модалку
         const modal = document.getElementById('name-modal');
-        if (!modal) {
-            // fallback на prompt если по какой-то причине модалки нет
-            const newName = prompt('Введите новое имя (внимание: изменить имя можно только 1 раз):', elements.userName.textContent);
-            if (!newName || !newName.trim() || newName === elements.userName.textContent) return;
-            if (!confirm('Подтвердите смену имени. Изменить можно только один раз. Продолжить?')) return;
-            return submitNameChange(newName.trim());
-        }
-
         const input = document.getElementById('name-input');
-        const ok = document.getElementById('name-ok');
-        const cancel = document.getElementById('name-cancel');
-        const confirmChk = document.getElementById('name-confirm');
-
+        const btnSave = document.getElementById('name-save');
+        const btnCancel = document.getElementById('name-cancel');
+        const errBox = document.getElementById('name-modal-error');
+        if (!modal || !input || !btnSave || !btnCancel) return;
         input.value = elements.userName.textContent || '';
-        confirmChk.checked = false;
-        ok.disabled = true;
-        modal.style.display = '';
+        errBox.textContent = '';
+        modal.classList.add('show');
+        modal.style.display = 'block';
+        setTimeout(()=>{ try { input.focus(); input.select(); } catch(_){} }, 0);
 
-        const updateState = () => {
-            const v = (input.value || '').trim();
-            ok.disabled = !(v && v !== elements.userName.textContent && confirmChk.checked);
+        const close = () => { modal.classList.remove('show'); modal.style.display = 'none'; btnSave.disabled = false; };
+        const cleanup = () => {
+            modal.querySelector('.modal-backdrop')?.removeEventListener('click', onBackdrop);
+            btnCancel.removeEventListener('click', onCancel);
+            btnSave.removeEventListener('click', onSave);
+            input.removeEventListener('keydown', onKey);
         };
-        input.oninput = updateState; confirmChk.onchange = updateState; updateState();
-
-        const close = () => { modal.style.display = 'none'; };
+        const onBackdrop = (e) => { if (e.target?.dataset?.close) { close(); cleanup(); } };
         const onCancel = () => { close(); cleanup(); };
-        const onOk = () => {
-            const v = (input.value || '').trim();
-            if (!v || v === elements.userName.textContent) return;
-            close(); cleanup();
-            submitNameChange(v);
-        };
-        const onBackdrop = (e) => { if (e.target?.dataset?.close) { onCancel(); } };
-
-        const backdrop = modal.querySelector('.modal-backdrop');
-        backdrop && (backdrop.onclick = onBackdrop);
-        cancel && (cancel.onclick = onCancel);
-        ok && (ok.onclick = onOk);
-
-        function cleanup() {
-            if (backdrop) backdrop.onclick = null;
-            if (cancel) cancel.onclick = null;
-            if (ok) ok.onclick = null;
-        }
-    }
-
-    function submitNameChange(newName) {
-        const original = elements.userName.textContent;
-        elements.userName.textContent = 'Сохранение...';
-        if (!tg || !tg.initDataUnsafe?.user) { elements.userName.textContent = original; return; }
-
-        const formData = new FormData();
-        formData.append('initData', tg.initData || '');
-        formData.append('new_name', newName);
-
-        fetch('/api/update-name', { method:'POST', body: formData })
-            .then(async res => { const d = await res.json().catch(()=>({})); if (!res.ok) { const msg = d?.message || 'Не удалось изменить имя'; throw new Error(msg); } return d; })
-            .then(data => { if (elements.userName) elements.userName.textContent = data.display_name; })
-            .catch(err => {
+        const onKey = (e) => { if (e.key === 'Enter') { onSave(); } if (e.key === 'Escape') { onCancel(); } };
+        const onSave = async () => {
+            const newName = (input.value || '').trim();
+            errBox.textContent = '';
+            if (!newName) { errBox.textContent = 'Введите имя.'; return; }
+            if (newName === elements.userName.textContent) { errBox.textContent = 'Имя не изменилось.'; return; }
+            if (!tg || !tg.initDataUnsafe?.user) { errBox.textContent = 'Нет авторизации Telegram.'; return; }
+            btnSave.disabled = true;
+            try {
+                const formData = new FormData();
+                formData.append('initData', tg.initData || '');
+                formData.append('new_name', newName);
+                const res = await fetch('/api/update-name', { method:'POST', body: formData });
+                const d = await res.json().catch(()=>({}));
+                if (!res.ok) { const msg = d?.message || 'Не удалось изменить имя'; throw new Error(msg); }
+                elements.userName.textContent = d.display_name || newName;
+                close(); cleanup();
+            } catch (err) {
                 console.error('update name err', err);
-                if (elements.userName) elements.userName.textContent = original;
                 const m = err?.message || 'Не удалось изменить имя';
-                try { tg?.showAlert?.(m); } catch (_) { try { alert(m); } catch(_){} }
-            });
+                errBox.textContent = m;
+                btnSave.disabled = false;
+            }
+        };
+
+        modal.querySelector('.modal-backdrop')?.addEventListener('click', onBackdrop);
+        btnCancel.addEventListener('click', onCancel);
+        btnSave.addEventListener('click', onSave);
+        input.addEventListener('keydown', onKey);
     }
 
     function showError(msg) { if (elements.checkinStatus) { elements.checkinStatus.textContent = msg; elements.checkinStatus.style.color = 'var(--danger)'; setTimeout(()=>{ elements.checkinStatus.textContent=''; elements.checkinStatus.style.color=''; },3000);} else console.warn(msg); }
@@ -1740,9 +1726,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 candidates.push(base + encodeURIComponent(norm + '.png'));
             }
             candidates.push(base + 'default.png');
-            let i = 0;
-            const next = () => { if (i >= candidates.length) return; imgEl.onerror = () => { i++; next(); }; imgEl.src = candidates[i]; };
-            next();
+            let idx = 0;
+            const tryNext = () => { if (idx >= candidates.length) return; imgEl.onerror = () => { idx++; tryNext(); }; imgEl.src = candidates[idx]; };
+            tryNext();
         };
 
         // ETag-кэш для /api/results
@@ -1850,6 +1836,593 @@ document.addEventListener('DOMContentLoaded', () => {
     if (cached && cached.version) fetchWithETag(cached.version).then(go).catch(()=>{});
     else fetchWithETag(null).then(go).catch(err => { console.error('results load error', err); if (!cached) pane.innerHTML = '<div class="schedule-error">Не удалось загрузить результаты</div>'; _resultsLoading = false; _resultsPreloaded = true; trySignalAllReady(); });
     }
+
+    ; // separator for parser safety
+    // Предзагрузка статистики и расписания во время заставки
+    let _resultsPreloaded = false;
+    let _schedulePreloaded = false;
+    let _statsPreloaded = false;
+    function preloadUfoData() {
+        // Статистика
+        fetch('/api/stats-table', { headers: { 'Cache-Control': 'no-cache' } })
+            .then(r => r.json()).then(() => { _statsPreloaded = true; trySignalAllReady(); })
+            .catch(() => { _statsPreloaded = true; trySignalAllReady(); });
+        // Расписание — сохраним в кэш с версией
+        fetch('/api/schedule', { headers: { 'Cache-Control': 'no-cache' } })
+            .then(async r => { const data = await r.json(); const version = data.version || r.headers.get('ETag') || null; try { localStorage.setItem('schedule:tours', JSON.stringify({ data, version, ts: Date.now() })); } catch(_) {} })
+            .finally(() => { _schedulePreloaded = true; trySignalAllReady(); });
+        // Результаты — сохраним в кэш с версией
+        fetch('/api/results', { headers: { 'Cache-Control': 'no-cache' } })
+            .then(async r => { const data = await r.json(); const version = data.version || r.headers.get('ETag') || null; try { localStorage.setItem('results:list', JSON.stringify({ data, version, ts: Date.now() })); } catch(_) {} })
+            .finally(() => { _resultsPreloaded = true; trySignalAllReady(); });
+
+        // Прогнозы/Ставки: предзагрузка ближайшего тура и моих ставок (если в Telegram)
+        try {
+            const tg = window.Telegram?.WebApp || null;
+            const FRESH_TTL = 5 * 60 * 1000; // 5 минут
+            // Туры для ставок (публично, GET)
+            fetch('/api/betting/tours', { headers: { 'Cache-Control': 'no-cache' } })
+                .then(async r => {
+                    const data = await r.json();
+                    const version = data.version || r.headers.get('ETag') || null;
+                    const store = { data, version, ts: Date.now() };
+                    try { localStorage.setItem('betting:tours', JSON.stringify(store)); } catch(_) {}
+                })
+                .catch(()=>{});
+            // Мои ставки (только в Telegram)
+            if (tg?.initDataUnsafe?.user) {
+                const fd = new FormData(); fd.append('initData', tg.initData || '');
+                fetch('/api/betting/my-bets', { method: 'POST', body: fd })
+                    .then(r => r.json())
+                    .then(data => { try { localStorage.setItem('betting:mybets', JSON.stringify({ data, ts: Date.now() })); } catch(_) {} })
+                    .catch(()=>{});
+            }
+        } catch(_) {}
+    }
+
+    // ---------- ЛИГИ: НЛО / БЛБ (оверлей над нижним меню) ----------
+    function getActiveLeague() {
+        try {
+            const mem = sessionStorage.getItem('activeLeague');
+            if (mem === 'BLB' || mem === 'UFO') return mem;
+        } catch(_) {}
+        return window.__ACTIVE_LEAGUE__ || 'UFO';
+    }
+    function setActiveLeague(code) {
+        window.__ACTIVE_LEAGUE__ = code;
+        try { sessionStorage.setItem('activeLeague', code || 'UFO'); } catch(_) {}
+        try { updateNavLeagueIcon(); } catch(_) {}
+    }
+    function renderLeagueOverlay() {
+        const overlay = document.getElementById('league-overlay');
+        if (!overlay) return;
+        const act = getActiveLeague();
+        const other = act === 'BLB' ? 'UFO' : 'BLB';
+        const ico = other === 'UFO' ? '🛸' : '❔';
+        const title = other === 'UFO' ? 'НЛО' : 'БЛБ';
+        // Рендерим одну иконку как продолжение нижнего меню
+        overlay.innerHTML = `
+            <div class="league-icons" style="display:flex; align-items:center; justify-content:center; background: rgba(10,18,40,0.96); padding:6px 0; border-radius: 10px 10px 0 0; box-shadow: 0 6px 18px rgba(0,0,0,0.4);">
+                <div class="nav-icon" data-league="${other}" title="${title}" style="font-size:22px; cursor:pointer; line-height:1;">${ico}</div>
+            </div>
+        `;
+        // Подгонка позиции/размера под иконку меню
+        try {
+            const anchor = document.querySelector('.nav-item[data-tab="ufo"]');
+            const nav = document.querySelector('nav.nav');
+            if (anchor && nav) {
+                const r = anchor.getBoundingClientRect();
+                const rn = nav.getBoundingClientRect();
+                // Ширина как у иконки меню
+                const w = Math.max(40, Math.floor(r.width));
+                overlay.style.width = `${w}px`;
+                // Привязать левый край плашки к левому краю нижнего меню
+                const leftEdge = Math.floor(rn.left);
+                overlay.style.left = `${leftEdge}px`;
+                overlay.style.transform = 'none';
+                // Чуть поднять над меню
+                const gap = 6;
+                const navH = Math.floor(rn.height);
+                overlay.style.bottom = `${navH + gap}px`;
+            }
+        } catch(_) {}
+    }
+    function showLeagueOverlay() {
+        const overlay = document.getElementById('league-overlay');
+        const ufoTabs = document.getElementById('ufo-subtabs');
+        const ufoContent = document.getElementById('ufo-content');
+        const blbBlock = document.getElementById('blb-block');
+        if (!overlay || !ufoTabs || !ufoContent || !blbBlock) return;
+    // если уже открыт — не дублируем
+    if (overlay.style.display === 'block') return;
+        // Обновим содержимое оверлея и покажем
+        renderLeagueOverlay();
+        overlay.style.display = 'block';
+        if (!overlay.__inited) {
+            overlay.__inited = true;
+        overlay.addEventListener('click', (e) => {
+                const ico = e.target.closest('.nav-icon[data-league]');
+                if (ico) {
+                    const key = ico.getAttribute('data-league');
+            // Выбор из оверлея: включаем анимацию перехода
+            if (key === 'UFO') selectUFOLeague(false, true);
+            if (key === 'BLB') selectBLBLeague(true);
+                    overlay.style.display = 'none';
+                    return;
+                }
+            });
+            // Клик вне оверлея — закрыть
+            document.addEventListener('click', (e) => {
+                const isUfoNav = !!e.target.closest('.nav-item[data-tab="ufo"]');
+                if (!overlay || overlay.style.display === 'none') return;
+                if (e.target.closest('#league-overlay') || isUfoNav) return;
+                overlay.style.display = 'none';
+            });
+            // При ресайзе/смене ориентации — скрыть
+            window.addEventListener('resize', () => { if (overlay) overlay.style.display = 'none'; });
+            window.addEventListener('orientationchange', () => { if (overlay) overlay.style.display = 'none'; });
+        }
+        // На всякий случай пересчитать позицию после показа (рендер может занять тик)
+        setTimeout(renderLeagueOverlay, 0);
+    }
+
+    function selectUFOLeague(_silent, animate=false) {
+        const overlay = document.getElementById('league-overlay');
+        const ufoTabs = document.getElementById('ufo-subtabs');
+        const ufoContent = document.getElementById('ufo-content');
+        const blbBlock = document.getElementById('blb-block');
+        if (!ufoTabs || !ufoContent || !blbBlock) return;
+        if (animate) playLeagueTransition('UFO');
+    setActiveLeague('UFO');
+        if (overlay) overlay.style.display = 'none';
+        blbBlock.style.display = 'none';
+        ufoTabs.style.display = '';
+        ufoContent.style.display = '';
+        if (!_silent) {
+            loadLeagueTable();
+            loadStatsTable();
+            loadSchedule();
+            loadResults();
+        }
+    }
+
+    function selectBLBLeague(animate=false) {
+        const overlay = document.getElementById('league-overlay');
+        const ufoTabs = document.getElementById('ufo-subtabs');
+        const ufoContent = document.getElementById('ufo-content');
+        const blbBlock = document.getElementById('blb-block');
+        if (!ufoTabs || !ufoContent || !blbBlock) return;
+        if (animate) playLeagueTransition('BLB');
+        setActiveLeague('BLB');
+        if (overlay) overlay.style.display = 'none';
+        ufoTabs.style.display = 'none';
+        ufoContent.style.display = 'none';
+        blbBlock.style.display = '';
+        initBLBSubtabs();
+    }
+
+    function playLeagueTransition(to) {
+        try {
+            const layer = document.getElementById('league-transition');
+            if (!layer) return;
+            const content = document.createElement('div');
+            content.className = 'lt-content';
+            const img = document.createElement('img');
+            img.className = 'lt-logo';
+            const title = document.createElement('div');
+            title.className = 'lt-title';
+            // Очистим классы стадий
+            layer.classList.remove('lt-fill-bottom','lt-fill-top','lt-unfill-top','lt-unfill-bottom');
+            if (to === 'BLB') {
+                img.src = '/static/img/placeholderlogo.png';
+                title.textContent = 'Здесь может быть ваша лига';
+                layer.style.display = 'flex';
+                // Используем золотисто-черную палитру BLB
+                layer.style.background = 'linear-gradient(135deg, #0b0b0b, #000000)';
+                // Фаза 1: заливка снизу вверх (1s)
+                layer.classList.add('lt-fill-bottom');
+                setTimeout(() => {
+                    // Смена темы/топ-бара во время полной заливки (пользователь не видит)
+                    document.body.classList.add('theme-blb');
+                    const t = document.querySelector('.top-bar .league-title');
+                    if (t) t.textContent = 'Название лиги';
+                    const logo = document.querySelector('.top-bar .league-logo');
+                    if (logo) logo.src = '/static/img/placeholderlogo.png';
+                    // Пауза 1s
+                    layer.classList.remove('lt-fill-bottom');
+                    setTimeout(() => {
+                        // Фаза 2: уборка вверх (1s)
+                        layer.classList.add('lt-unfill-top');
+                        setTimeout(() => { layer.style.display = 'none'; layer.classList.remove('lt-unfill-top'); }, 1000);
+                    }, 1000);
+                }, 1000);
+            } else {
+                img.src = '/static/img/logo.png';
+                title.textContent = 'ОБНИНСКСКАЯ ЛИГА';
+                layer.style.display = 'flex';
+                // Используем палитру стартовой заставки (splash): var(--dark)->var(--darker)
+                // Берём переменные с :root (а не body), чтобы не подмешивалась тема BLB
+                const cs = getComputedStyle(document.documentElement);
+                const dark = (cs.getPropertyValue('--dark') || '#0f172a').trim();
+                const darker = (cs.getPropertyValue('--darker') || '#020617').trim();
+                layer.style.background = `linear-gradient(135deg, ${dark}, ${darker})`;
+                // Фаза 1: заливка сверху вниз (1s)
+                layer.classList.add('lt-fill-top');
+                setTimeout(() => {
+                    // Смена темы/топ-бара во время полной заливки
+                    document.body.classList.remove('theme-blb');
+                    const t = document.querySelector('.top-bar .league-title');
+                    if (t) t.textContent = 'Лига Обнинска';
+                    const logo = document.querySelector('.top-bar .league-logo');
+                    if (logo) logo.src = '/static/img/logo.png';
+                    // Пауза 1s
+                    layer.classList.remove('lt-fill-top');
+                    setTimeout(() => {
+                        // Фаза 2: уборка вниз (1s)
+                        layer.classList.add('lt-unfill-bottom');
+                        setTimeout(() => { layer.style.display = 'none'; layer.classList.remove('lt-unfill-bottom'); }, 1000);
+                    }, 1000);
+                }, 1000);
+            }
+            content.appendChild(img);
+            content.appendChild(title);
+            layer.innerHTML = '';
+            layer.appendChild(content);
+        } catch(_) {}
+    }
+
+    function initBLBSubtabs() {
+        const tabs = document.querySelectorAll('#blb-subtabs .subtab-item');
+        const panes = {
+            table: document.getElementById('blb-table'),
+            stats: document.getElementById('blb-stats'),
+            schedule: document.getElementById('blb-schedule'),
+            results: document.getElementById('blb-results')
+        };
+        tabs.forEach(btn => {
+            if (btn.__inited) return; btn.__inited = true;
+            btn.setAttribute('data-throttle', '600');
+            btn.addEventListener('click', () => {
+                const key = btn.getAttribute('data-blbtab');
+                tabs.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                Object.values(panes).forEach(p => { if (p) p.style.display = 'none'; });
+                if (panes[key]) panes[key].style.display = '';
+            });
+        });
+    }
+
+    // ---------- MATCH DETAILS SCREEN (in-app, not modal) ----------
+    function openMatchScreen(match, details) {
+    const schedulePane = document.getElementById('ufo-schedule');
+        const mdPane = document.getElementById('ufo-match-details');
+        if (!schedulePane || !mdPane) return;
+        // показать экран деталей
+        schedulePane.style.display = 'none';
+        mdPane.style.display = '';
+
+        const hLogo = document.getElementById('md-home-logo');
+        const aLogo = document.getElementById('md-away-logo');
+        const hName = document.getElementById('md-home-name');
+        const aName = document.getElementById('md-away-name');
+        const score = document.getElementById('md-score');
+        const dt = document.getElementById('md-datetime');
+        const homePane = document.getElementById('md-pane-home');
+        const awayPane = document.getElementById('md-pane-away');
+
+        // логотипы
+        const setLogo = (imgEl, name) => {
+            const base = '/static/img/team-logos/';
+            const candidates = [];
+            if (name) {
+                const norm = name.toLowerCase().replace(/\s+/g, '').replace(/ё/g, 'е');
+                candidates.push(base + encodeURIComponent(norm + '.png'));
+                // candidates.push(base + encodeURIComponent(name + '.png'));
+            }
+            candidates.push(base + 'default.png');
+            let i = 0;
+            const next = () => { if (i >= candidates.length) return; imgEl.onerror = () => { i++; next(); }; imgEl.src = candidates[i]; };
+            next();
+        };
+
+    // Показываем названия с числом фанатов; атрибуты храним «сырые»
+    hName.setAttribute('data-team-name', match.home || '');
+    aName.setAttribute('data-team-name', match.away || '');
+    hName.textContent = withTeamCount(match.home || '');
+    aName.textContent = withTeamCount(match.away || '');
+        setLogo(hLogo, match.home || '');
+        setLogo(aLogo, match.away || '');
+        score.textContent = '— : —';
+        try {
+            if (match.date || match.time) {
+                const d = match.date ? new Date(match.date) : null;
+                const ds = d ? d.toLocaleDateString() : '';
+                dt.textContent = `${ds}${match.time ? ' ' + match.time : ''}`;
+            } else { dt.textContent = ''; }
+        } catch(_) { dt.textContent = match.time || ''; }
+
+        // вкладки (добавим «Спецсобытия» для админа)
+        const subtabs = mdPane.querySelector('.modal-subtabs');
+        mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach((el) => el.classList.remove('active'));
+        // создаём/находим панель спецсобытий
+        let specialsPane = document.getElementById('md-pane-specials');
+        if (!specialsPane) {
+            specialsPane = document.createElement('div');
+            specialsPane.id = 'md-pane-specials';
+            specialsPane.className = 'md-pane';
+            specialsPane.style.display = 'none';
+            mdPane.querySelector('.modal-body')?.appendChild(specialsPane);
+        }
+        // Вкладка «Спецсобытия» только для матчей, присутствующих в турах ставок
+        try {
+            const toursCache = JSON.parse(localStorage.getItem('betting:tours') || 'null');
+            const tours = toursCache?.data?.tours || toursCache?.tours || [];
+            const mkKey = (obj) => {
+                const h = (obj?.home || '').toLowerCase().trim();
+                const a = (obj?.away || '').toLowerCase().trim();
+                const raw = obj?.date ? String(obj.date) : (obj?.datetime ? String(obj.datetime) : '');
+                const d = raw ? raw.slice(0, 10) : '';
+                return `${h}__${a}__${d}`;
+            };
+            const present = new Set();
+            tours.forEach(t => (t.matches||[]).forEach(x => present.add(mkKey(x))));
+            const thisKey = mkKey(match);
+            let specialsAllowed = present.has(thisKey);
+            // Разрешаем редактирование только админу
+            const adminId = document.body.getAttribute('data-admin');
+            const currentId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id ? String(window.Telegram.WebApp.initDataUnsafe.user.id) : '';
+            const isAdmin = !!(adminId && currentId && String(adminId) === currentId);
+            // Показать вкладку только если матч в ставках И пользователь админ
+            const existed = subtabs?.querySelector('[data-mdtab="specials"]');
+            if (specialsAllowed && isAdmin) {
+                if (!existed) {
+                    const sp = document.createElement('div');
+                    sp.className = 'subtab-item'; sp.setAttribute('data-mdtab','specials'); sp.textContent = 'Спецсобытия';
+                    subtabs.appendChild(sp);
+                }
+            } else if (existed) {
+                existed.remove();
+            }
+        } catch(_) {}
+        // по умолчанию активируем «Команда 1»
+        mdPane.querySelector('.modal-subtabs .subtab-item[data-mdtab="home"]').classList.add('active');
+        homePane.style.display = '';
+        awayPane.style.display = 'none';
+        specialsPane.style.display = 'none';
+
+        // заполнение составов
+        const renderRoster = (pane, players) => {
+            pane.innerHTML = '';
+            const ul = document.createElement('ul');
+            ul.className = 'roster-list';
+            if (!players || players.length === 0) {
+                const li = document.createElement('li');
+                li.className = 'empty';
+                li.textContent = 'Нет данных';
+                ul.appendChild(li);
+            } else {
+                players.forEach(p => { const li = document.createElement('li'); li.textContent = p; ul.appendChild(li); });
+            }
+            pane.appendChild(ul);
+        };
+        try {
+            const homeList = Array.isArray(details?.rosters?.home) ? details.rosters.home : [];
+            const awayList = Array.isArray(details?.rosters?.away) ? details.rosters.away : [];
+            if (homeList.length || awayList.length) {
+                renderRoster(homePane, homeList);
+                renderRoster(awayPane, awayList);
+            } else {
+                renderRoster(homePane, []);
+                renderRoster(awayPane, []);
+            }
+        } catch(_) {
+            renderRoster(homePane, []);
+            renderRoster(awayPane, []);
+        }
+
+        // Если доступно API статуса — отметим LIVE индикатором в заголовке деталей
+        try {
+            fetch(`/api/match/status/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}`)
+                .then(r=>r.json()).then(s => {
+                    if (s?.status === 'live') {
+                        const live = document.createElement('span'); live.className = 'live-badge';
+                        const dot = document.createElement('span'); dot.className = 'live-dot';
+                        const lbl = document.createElement('span'); lbl.textContent = 'LIVE';
+                        live.append(dot, lbl);
+                        dt.appendChild(live);
+                    }
+                }).catch(()=>{});
+        } catch(_) {}
+
+        // переключение вкладок
+        mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach((btn) => {
+            btn.onclick = () => {
+                mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach((x)=>x.classList.remove('active'));
+                btn.classList.add('active');
+                const key = btn.getAttribute('data-mdtab');
+                if (key === 'home') { homePane.style.display = ''; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; }
+                else if (key === 'away') { homePane.style.display = 'none'; awayPane.style.display = ''; specialsPane.style.display = 'none'; }
+                else if (key === 'specials') {
+                    homePane.style.display = 'none'; awayPane.style.display = 'none'; specialsPane.style.display = '';
+                    // отрисуем спецпанель внутри specialsPane
+                    renderSpecialsPane(specialsPane, match);
+                }
+            };
+        });
+
+        // кнопка Назад
+        const back = document.getElementById('match-back');
+        if (back) back.onclick = () => {
+            // очистка
+            homePane.innerHTML = '';
+            awayPane.innerHTML = '';
+            // вернуть расписание
+            mdPane.style.display = 'none';
+            schedulePane.style.display = '';
+            // прокрутка к верху для UX
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        };
+    }
+
+    // Рендер спецсобытий (внутри деталей матча)
+    function renderSpecialsPane(host, m) {
+        const tg = window.Telegram?.WebApp || null;
+        host.innerHTML = '';
+        const shell = document.createElement('div');
+        shell.className = 'admin-panel';
+        shell.style.marginTop = '8px'; shell.style.padding = '8px'; shell.style.border = '1px solid rgba(255,255,255,0.1)'; shell.style.borderRadius = '10px';
+    const title = document.createElement('div'); title.style.marginBottom = '6px'; title.textContent = 'Спецсобытия матча';
+    // Блок статуса матча: scheduled|live|finished
+    const statusRow = document.createElement('div'); statusRow.style.display='flex'; statusRow.style.gap='8px'; statusRow.style.alignItems='center'; statusRow.style.marginBottom='6px';
+    const sLab = document.createElement('div'); sLab.textContent = 'Статус:';
+    const sSel = document.createElement('select'); sSel.innerHTML = '<option value="scheduled">Запланирован</option><option value="live">Матч идет</option><option value="finished">Матч завершен</option>';
+    const sBtn = document.createElement('button'); sBtn.className = 'details-btn'; sBtn.textContent = 'Применить статус';
+    statusRow.append(sLab, sSel, sBtn);
+        const row1 = document.createElement('div'); row1.style.display='flex'; row1.style.gap='8px'; row1.style.alignItems='center';
+        const lab1 = document.createElement('div'); lab1.textContent = 'Пенальти:';
+        const sel1 = document.createElement('select'); sel1.innerHTML = '<option value="">—</option><option value="1">Да</option><option value="0">Нет</option>';
+        row1.append(lab1, sel1);
+        const row2 = document.createElement('div'); row2.style.display='flex'; row2.style.gap='8px'; row2.style.alignItems='center'; row2.style.marginTop='6px';
+        const lab2 = document.createElement('div'); lab2.textContent = 'Красная:';
+        const sel2 = document.createElement('select'); sel2.innerHTML = '<option value="">—</option><option value="1">Да</option><option value="0">Нет</option>';
+        row2.append(lab2, sel2);
+        const actions = document.createElement('div'); actions.style.marginTop='8px';
+        const save = document.createElement('button'); save.className = 'details-btn'; save.textContent = 'Сохранить и рассчитать';
+        actions.append(save);
+        shell.append(title, statusRow, row1, row2, actions);
+        host.appendChild(shell);
+
+        // Инициализируем селектор статуса текущим значением
+        try {
+            fetch(`/api/match/status/get?home=${encodeURIComponent(m.home||'')}&away=${encodeURIComponent(m.away||'')}`)
+                .then(r=>r.json()).then(s => { if (s?.status) sSel.value = s.status; }).catch(()=>{});
+        } catch(_) {}
+
+        // Загрузим текущее состояние
+        fetch(`/api/specials/get?home=${encodeURIComponent(m.home||'')}&away=${encodeURIComponent(m.away||'')}`)
+            .then(r=>r.json())
+            .then(d => {
+                if (d.penalty_yes === 1) sel1.value = '1'; else if (d.penalty_yes === 0) sel1.value = '0'; else sel1.value='';
+                if (d.redcard_yes === 1) sel2.value = '1'; else if (d.redcard_yes === 0) sel2.value = '0'; else sel2.value='';
+            }).catch(()=>{});
+
+        // Сохранение статуса
+        sBtn.addEventListener('click', () => {
+            const fd = new FormData();
+            fd.append('initData', tg?.initData || '');
+            fd.append('home', m.home || '');
+            fd.append('away', m.away || '');
+            fd.append('status', sSel.value || 'scheduled');
+            sBtn.disabled = true; const old = sBtn.textContent; sBtn.textContent = 'Сохранение...';
+            fetch('/api/match/status/set', { method: 'POST', body: fd })
+                .then(r => r.json())
+                .then(resp => {
+                    if (resp?.error) { try { tg?.showAlert?.(resp.error); } catch(_) {} return; }
+                    try { tg?.showAlert?.('Статус обновлён'); } catch(_) {}
+                    // Обновим LIVE стор для индикации и уведомления
+                    try {
+                        if (!window.__LIVE_STATUS) window.__LIVE_STATUS = { pairs: new Set(), ts: 0 };
+                        const key = `${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}`;
+                        if (sSel.value === 'live') { window.__LIVE_STATUS.pairs.add(key); }
+                        if (sSel.value === 'finished') { window.__LIVE_STATUS.pairs.delete(key); }
+                    } catch(_) {}
+                })
+                .catch(err => { console.error('match status set error', err); try { tg?.showAlert?.('Ошибка сохранения статуса'); } catch(_) {} })
+                .finally(()=>{ sBtn.disabled=false; sBtn.textContent = old; });
+        });
+
+        save.addEventListener('click', () => {
+            const fd = new FormData();
+            fd.append('initData', tg?.initData || '');
+            fd.append('home', m.home || '');
+            fd.append('away', m.away || '');
+            if (sel1.value !== '') fd.append('penalty_yes', sel1.value);
+            if (sel2.value !== '') fd.append('redcard_yes', sel2.value);
+            save.disabled = true; const old = save.textContent; save.textContent = 'Сохранение...';
+            fetch('/api/specials/set', { method: 'POST', body: fd })
+                .then(r => r.json())
+                .then(resp => {
+                    if (resp?.error) { try { tg?.showAlert?.(resp.error); } catch(_) {} return; }
+                    try { tg?.showAlert?.('Сохранено. Расчёт запущен.'); } catch(_) {}
+                })
+                .catch(err => { console.error('specials set error', err); try { tg?.showAlert?.('Ошибка сохранения'); } catch(_) {} })
+                .finally(()=>{ save.disabled=false; save.textContent = old; });
+        });
+    }
+
+    // Удалён каталог достижений
+
+    // Кэш для реферала
+    let _referralCache = null;
+    function prefetchReferral() {
+        if (!tg || !tg.initDataUnsafe?.user) return;
+        if (_referralCache) return; // уже есть
+        const formData = new FormData();
+        formData.append('initData', tg.initData || '');
+        fetch('/api/referral', { method: 'POST', body: formData })
+            .then(r => r.json())
+            .then(data => { _referralCache = data; })
+            .catch(() => {});
+    }
+
+    function loadReferralInfo() {
+        const countEl = document.getElementById('ref-count');
+        const countEl2 = document.getElementById('ref-count-2');
+        if (!tg || !tg.initDataUnsafe?.user) return Promise.resolve();
+        // Мгновенный рендер из кэша, если есть
+        if (_referralCache) {
+            if (countEl) countEl.textContent = (_referralCache.invited_count ?? 0).toString();
+            if (countEl2) countEl2.textContent = (_referralCache.invited_count ?? 0).toString();
+        }
+        // Актуализируем в фоне
+        const formData = new FormData();
+        formData.append('initData', tg.initData || '');
+        return fetch('/api/referral', { method: 'POST', body: formData })
+            .then(r => r.json())
+            .then(data => {
+                _referralCache = data;
+                if (countEl) countEl.textContent = (data.invited_count ?? 0).toString();
+                if (countEl2) countEl2.textContent = (data.invited_count ?? 0).toString();
+                return data;
+            })
+            .catch(err => { console.error('referral load error', err); });
+    }
+
+    let _achLoaded = false;
+    let _tableLoaded = false;
+    function trySignalAllReady() {
+        // считаем готовность, когда базовые данные профиля есть, таблица лиги подтянулась,
+        // и стартовые данные UFO (stats/schedule/results) прогреты (не обязательно успешны)
+        if (_achLoaded && _tableLoaded && _statsPreloaded && _schedulePreloaded && _resultsPreloaded) {
+            window.dispatchEvent(new CustomEvent('app:all-ready'));
+        }
+    }
+
+    // При старте запоминаем активную лигу из сессии (по умолчанию НЛО) и обновляем иконку меню
+    try { setActiveLeague(getActiveLeague()); updateNavLeagueIcon(); } catch(_) {}
+
+    function updateNavLeagueIcon() {
+        try {
+            const item = document.querySelector('.nav-item[data-tab="ufo"]');
+            if (!item) return;
+            const iconEl = item.querySelector('.nav-icon');
+            const labelEl = item.querySelector('.nav-label');
+            const act = getActiveLeague();
+            if (act === 'BLB') {
+                if (iconEl) iconEl.textContent = '❔';
+                if (labelEl) labelEl.textContent = 'Лига';
+            } else {
+                if (iconEl) iconEl.textContent = '🛸';
+                if (labelEl) labelEl.textContent = 'НЛО';
+            }
+        } catch(_) {}
+    }
+
+    // старт
+    initApp();
+    // Стартовая предзагрузка UFO-данных во время заставки
+    preloadUfoData();
+    setupEventListeners();
 
     // ---------- LIVE notifications ----------
     const LiveWatcher = (() => {
