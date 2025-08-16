@@ -56,6 +56,7 @@ body.theme-blb .nav {
   height: 180px;
   object-fit: contain;
   margin-bottom: 12px;
+  animation: logoZoom 3s ease both;
 }
 #league-transition .lt-title {
   font-size: 20px;
@@ -63,12 +64,35 @@ body.theme-blb .nav {
   letter-spacing: 0.08em;
 }
 
-/* Мягкая анимация заливки */
-@keyframes fillUp {
+/* Двухфазная анимация заливки (3с: 1.5с заполнение + 1.5с уборка) */
+@keyframes fillFromBottom {
+  0% { clip-path: inset(0 0 100% 0); }
+  100% { clip-path: inset(0 0 0 0); }
+}
+@keyframes fillFromTop {
   0% { clip-path: inset(100% 0 0 0); }
   100% { clip-path: inset(0 0 0 0); }
 }
-@keyframes fillDown {
+@keyframes unfillToTop {
+  0% { clip-path: inset(0 0 0 0); }
+  100% { clip-path: inset(100% 0 0 0); }
+}
+@keyframes unfillToBottom {
   0% { clip-path: inset(0 0 0 0); }
   100% { clip-path: inset(0 0 100% 0); }
+}
+
+/* Классы стадий */
+#league-transition.lt-fill-bottom { animation: fillFromBottom 1.5s ease forwards; }
+#league-transition.lt-fill-top { animation: fillFromTop 1.5s ease forwards; }
+#league-transition.lt-unfill-top { animation: unfillToTop 1.5s ease forwards; }
+#league-transition.lt-unfill-bottom { animation: unfillToBottom 1.5s ease forwards; }
+
+/* Анимация логотипа: сначала приближается (0-1.5с), потом уходит в ноль (1.5-3с) */
+@keyframes logoZoom {
+  0% { transform: scale(0.4); opacity: 0.0; }
+  10% { opacity: 1; }
+  50% { transform: scale(1.15); opacity: 1; }
+  90% { opacity: 1; }
+  100% { transform: scale(0); opacity: 0; }
 }

@@ -1715,6 +1715,8 @@ document.addEventListener('DOMContentLoaded', () => {
             img.className = 'lt-logo';
             const title = document.createElement('div');
             title.className = 'lt-title';
+            // Очистим классы стадий
+            layer.classList.remove('lt-fill-bottom','lt-fill-top','lt-unfill-top','lt-unfill-bottom');
             if (to === 'BLB') {
                 img.src = '/static/img/logoblb.jpg';
                 title.textContent = 'БАЛАБАНОВО';
@@ -1725,7 +1727,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 const logo = document.querySelector('.top-bar .league-logo');
                 if (logo) logo.src = '/static/img/logoblb.jpg';
                 layer.style.display = 'flex';
-                layer.style.animation = 'fillUp 380ms ease forwards';
+                // Фаза 1: заливка снизу вверх (1.5с)
+                layer.classList.add('lt-fill-bottom');
+                setTimeout(() => {
+                    // Фаза 2: уборка вверх (1.5с)
+                    layer.classList.remove('lt-fill-bottom');
+                    layer.classList.add('lt-unfill-top');
+                    setTimeout(() => { layer.style.display = 'none'; layer.classList.remove('lt-unfill-top'); }, 1500);
+                }, 1500);
             } else {
                 img.src = '/static/img/logo.png';
                 title.textContent = 'ОБНИНСК';
@@ -1735,13 +1744,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 const logo = document.querySelector('.top-bar .league-logo');
                 if (logo) logo.src = '/static/img/logo.png';
                 layer.style.display = 'flex';
-                layer.style.animation = 'fillDown 380ms ease forwards';
+                // Фаза 1: заливка сверху вниз (1.5с)
+                layer.classList.add('lt-fill-top');
+                setTimeout(() => {
+                    // Фаза 2: уборка вниз (1.5с)
+                    layer.classList.remove('lt-fill-top');
+                    layer.classList.add('lt-unfill-bottom');
+                    setTimeout(() => { layer.style.display = 'none'; layer.classList.remove('lt-unfill-bottom'); }, 1500);
+                }, 1500);
             }
             content.appendChild(img);
             content.appendChild(title);
             layer.innerHTML = '';
             layer.appendChild(content);
-            setTimeout(() => { layer.style.display = 'none'; layer.style.animation = ''; }, 420);
         } catch(_) {}
     }
 
