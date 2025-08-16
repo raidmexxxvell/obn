@@ -917,21 +917,11 @@ document.addEventListener('DOMContentLoaded', () => {
             try { renderAdminOrders(); } catch(_) {}
             return;
         } catch (e) {
-            console.warn('Checkout fallback to local', e);
-            const userId = (window.Telegram?.WebApp?.initDataUnsafe?.user?.id) ? String(window.Telegram.WebApp.initDataUnsafe.user.id) : '0';
-            const order = {
-                id: 'O' + Date.now(),
-                user_id: userId,
-                total: totalLocal,
-                items: cart.slice(),
-                created_at: new Date().toISOString(),
-                status: 'local'
-            };
-            const orders = readOrders(); orders.push(order); writeOrders(orders);
-            writeCart([]);
-            renderCart();
-            try { window.Telegram?.WebApp?.showAlert?.('Заказ оформлен (локально)'); } catch(_) {}
-            try { renderAdminOrders(); } catch(_) {}
+            console.warn('Checkout failed (server-only mode)', e);
+            // В режиме «только сервер» не создаём локальные заказы и не очищаем корзину
+            const msg = (e && e.message) ? e.message : 'Не удалось оформить заказ. Попробуйте ещё раз.';
+            try { window.Telegram?.WebApp?.showAlert?.(msg); } catch(_) {}
+            // Можно дополнительно показать toast, если доступен
         }
     }
     async function renderAdminOrders() {
