@@ -89,13 +89,15 @@ body {
     transition: var(--transition);
 }
 .nav.nav--show-league .nav-league-panel {
-    width: 148px; /* ширина раскрытия */
-    padding: 8px;
+    width: 40px; /* раскрываем только на ширину иконки */
+    padding: 8px 6px;
 }
-.nav.nav--show-league { padding-left: 164px; } /* 8px (паддинг) + 148px (панель) + ~8px зазор */
+.nav.nav--show-league .nav-league-btn { gap: 0; }
+.nav.nav--show-league { padding-left: 64px; } /* 8px (паддинг) + 40px (панель) + ~16px зазор */
 .nav-league-btn {
     display: flex;
     align-items: center;
+    justify-content: center; /* центрируем иконку в узкой панели */
     gap: 8px;
     width: 100%;
     height: 100%;
@@ -110,11 +112,28 @@ body {
 }
 .nav-league-btn:hover { background: rgba(255,255,255,0.08); }
 .nav-league-btn .icon { font-size: 16px; line-height: 1; }
-.nav-league-btn .text { white-space: nowrap; }
+.nav-league-btn .text { white-space: nowrap; display: none; } /* текст скрыт — только иконка */
 
 .nav-icon { font-size: 16px; line-height: 1; margin-bottom: 0; }
 .nav-label { display: none; }
 .nav-item .nav-badge { position: absolute; top: -2px; right: 2px; background: #ef4444; color: #fff; border-radius: 999px; padding: 1px 5px; font-size: 10px; font-weight: 800; line-height: 1; border: 1px solid rgba(255,255,255,0.6); box-shadow: 0 0 0 1px rgba(0,0,0,0.4); }
+
+/* --- Модалка смены имени --- */
+#name-modal { position: fixed; inset: 0; z-index: 1200; }
+#name-modal .modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(2px); }
+#name-modal .modal-card { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: min(94%, 380px); background: rgba(17, 24, 39, 0.96); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; box-shadow: 0 12px 28px rgba(0,0,0,0.45); color: #fff; }
+#name-modal .modal-title { padding: 12px 16px; font-weight: 800; border-bottom: 1px solid rgba(255,255,255,0.08); }
+#name-modal .modal-body { padding: 12px 16px 0 16px; }
+#name-modal .modal-label { font-size: 13px; color: var(--gray); display:block; margin-bottom: 6px; }
+#name-modal .modal-input { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.12); background: rgba(2, 6, 23, 0.7); color: #fff; font-size: 14px; outline: none; }
+#name-modal .modal-input:focus { border-color: rgba(255,255,255,0.3); box-shadow: 0 0 0 2px rgba(255,255,255,0.06) inset; }
+#name-modal .modal-note { margin: 8px 0 2px; font-size: 12px; color: var(--gray); }
+#name-modal .modal-check { font-size: 12px; color: var(--gray); display:flex; gap:8px; align-items:center; margin: 8px 0 0; }
+#name-modal .modal-actions { display:flex; gap: 8px; justify-content: flex-end; padding: 12px 16px 14px; }
+#name-modal .btn { border: 0; border-radius: 10px; padding: 8px 12px; font-weight: 800; cursor: pointer; }
+#name-modal .btn-primary { background: var(--primary-dark); color: #fff; opacity: 0.9; }
+#name-modal .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+#name-modal .btn-secondary { background: rgba(255,255,255,0.08); color: #fff; }
 
 
 /* --- ВЕРХНЯЯ ПАНЕЛЬ --- */

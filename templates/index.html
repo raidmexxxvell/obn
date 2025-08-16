@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="stylesheet" href="/static/css/splash.css">
     <link rel="stylesheet" href="/static/css/blb.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>⚽</text></svg>">
 </head>
 <body data-admin="{{ admin_user_id }}">
     <!-- ЗАСТАВКА -->
@@ -253,6 +254,24 @@
             </div>
         </div>
     </div>
+
+    <!-- Кастомная модалка смены имени (без системного заголовка домена) -->
+    <div id="name-modal" style="display:none;">
+        <div class="modal-backdrop" data-close="1"></div>
+        <div class="modal-card">
+            <div class="modal-title">НЛО</div>
+            <div class="modal-body">
+                <label for="name-input" class="modal-label">Введите новое имя</label>
+                <input id="name-input" type="text" maxlength="32" class="modal-input" />
+                <div class="modal-note">Внимание: изменить имя можно только 1 раз.</div>
+                <label class="modal-check"><input type="checkbox" id="name-confirm"/> Я подтверждаю смену имени</label>
+            </div>
+            <div class="modal-actions">
+                <button id="name-cancel" class="btn btn-secondary">Отмена</button>
+                <button id="name-ok" class="btn btn-primary" disabled>OK</button>
+            </div>
+        </div>
+    </div>
     <div id="tab-leaderboard" style="display:none;">
         <div class="leaderboard-wrap">
             <div class="subtabs" id="leader-subtabs">
@@ -364,25 +383,25 @@
             <div id="shop-pane-store" class="pred-pane">
                 <div class="store-grid">
                     <div class="store-item" data-id="boots" data-name="Бутсы" data-price="20000">
-                        <div class="store-img"><img src="/static/img/shop/boots.png" alt="Бутсы" onerror="this.style.display='none'"></div>
+                        <div class="store-img"><img src="/static/img/shop/boots.png" alt="Бутсы" loading="lazy" onerror="this.style.display='none'"></div>
                         <div class="store-name">Бутсы</div>
                         <div class="store-price">20 000 кредитов</div>
                         <button class="details-btn">Купить</button>
                     </div>
                     <div class="store-item" data-id="ball" data-name="Мяч" data-price="8000">
-                        <div class="store-img"><img src="/static/img/shop/ball.png" alt="Мяч" onerror="this.style.display='none'"></div>
+                        <div class="store-img"><img src="/static/img/shop/ball.png" alt="Мяч" loading="lazy" onerror="this.style.display='none'"></div>
                         <div class="store-name">Мяч</div>
                         <div class="store-price">8 000 кредитов</div>
                         <button class="details-btn">Купить</button>
                     </div>
                     <div class="store-item" data-id="tshirt" data-name="Футболка" data-price="5000">
-                        <div class="store-img"><img src="/static/img/shop/tshirt.png" alt="Футболка" onerror="this.style.display='none'"></div>
+                        <div class="store-img"><img src="/static/img/shop/tshirt.png" alt="Футболка" loading="lazy" onerror="this.style.display='none'"></div>
                         <div class="store-name">Футболка</div>
                         <div class="store-price">5 000 кредитов</div>
                         <button class="details-btn">Купить</button>
                     </div>
                     <div class="store-item" data-id="cap" data-name="Кепка" data-price="3000">
-                        <div class="store-img"><img src="/static/img/shop/cap.png" alt="Кепка" onerror="this.style.display='none'"></div>
+                        <div class="store-img"><img src="/static/img/shop/cap.png" alt="Кепка" loading="lazy" onerror="this.style.display='none'"></div>
                         <div class="store-name">Кепка</div>
                         <div class="store-price">3 000 кредитов</div>
                         <button class="details-btn">Купить</button>
