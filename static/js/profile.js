@@ -518,8 +518,24 @@ document.addEventListener('DOMContentLoaded', () => {
     const admin = document.getElementById('tab-admin');
     [prof, ufo, preds, lead, shop, admin].forEach(el => { if (el) el.style.display = 'none'; });
     if (tab === 'profile' && prof) prof.style.display = '';
-    if (tab === 'ufo' && ufo) { ufo.style.display = ''; loadLeagueTable(); }
-    if (tab === 'predictions' && preds) { preds.style.display = ''; try { window.loadBetTours?.(); } catch(_) {} }
+    if (tab === 'ufo' && ufo) {
+        ufo.style.display = '';
+        // Покажем список лиг при входе в раздел
+        try {
+            showLeagueList();
+        } catch(_) {}
+    }
+    if (tab === 'predictions' && preds) {
+        preds.style.display = '';
+        // Если выбрана БЛБ, показываем пусто; иначе — стандартная логика
+        if (window.__ACTIVE_LEAGUE__ === 'BLB') {
+            const host = document.getElementById('pred-tours');
+            if (host) host.textContent = 'Скоро...';
+            const myb = document.getElementById('my-bets'); if (myb) myb.textContent = 'Скоро...';
+        } else {
+            try { window.loadBetTours?.(); } catch(_) {}
+        }
+    }
     if (tab === 'leaderboard' && lead) { lead.style.display = ''; ensureLeaderboardInit(); }
     if (tab === 'shop' && shop) { shop.style.display = ''; }
     if (tab === 'admin' && admin) { admin.style.display = ''; ensureAdminInit(); }
@@ -1542,6 +1558,85 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch(_) {}
     }
 
+    // ---------- ЛИГИ: НЛО / БЛБ ----------
+    function showLeagueList() {
+        const list = document.getElementById('ufo-league-list');
+        const ufoTabs = document.getElementById('ufo-subtabs');
+        const ufoContent = document.getElementById('ufo-content');
+        const blbBlock = document.getElementById('blb-block');
+        if (!list || !ufoTabs || !ufoContent || !blbBlock) return;
+        list.style.display = 'block';
+        ufoTabs.style.display = 'none';
+        ufoContent.style.display = 'none';
+        blbBlock.style.display = 'none';
+        window.__ACTIVE_LEAGUE__ = undefined;
+        // навесим обработчики один раз
+        if (!list.__inited) {
+            list.__inited = true;
+            list.addEventListener('click', (e) => {
+                const card = e.target.closest('.league-card');
+                if (!card) return;
+                const key = card.getAttribute('data-league');
+                if (key === 'UFO') selectUFOLeague();
+                if (key === 'BLB') selectBLBLeague();
+            });
+        }
+    }
+
+    function selectUFOLeague() {
+        const list = document.getElementById('ufo-league-list');
+        const ufoTabs = document.getElementById('ufo-subtabs');
+        const ufoContent = document.getElementById('ufo-content');
+        const blbBlock = document.getElementById('blb-block');
+        if (!list || !ufoTabs || !ufoContent || !blbBlock) return;
+        window.__ACTIVE_LEAGUE__ = 'UFO';
+        list.style.display = 'none';
+        blbBlock.style.display = 'none';
+        ufoTabs.style.display = '';
+        ufoContent.style.display = '';
+        // прогружаем данные НЛО
+        loadLeagueTable();
+        loadStatsTable();
+        loadSchedule();
+        loadResults();
+    }
+
+    function selectBLBLeague() {
+        const list = document.getElementById('ufo-league-list');
+        const ufoTabs = document.getElementById('ufo-subtabs');
+        const ufoContent = document.getElementById('ufo-content');
+        const blbBlock = document.getElementById('blb-block');
+        if (!list || !ufoTabs || !ufoContent || !blbBlock) return;
+        window.__ACTIVE_LEAGUE__ = 'BLB';
+        list.style.display = 'none';
+        ufoTabs.style.display = 'none';
+        ufoContent.style.display = 'none';
+        blbBlock.style.display = '';
+        // инициализация сабтабов БЛБ
+        initBLBSubtabs();
+    }
+
+    function initBLBSubtabs() {
+        const tabs = document.querySelectorAll('#blb-subtabs .subtab-item');
+        const panes = {
+            table: document.getElementById('blb-table'),
+            stats: document.getElementById('blb-stats'),
+            schedule: document.getElementById('blb-schedule'),
+            results: document.getElementById('blb-results')
+        };
+        tabs.forEach(btn => {
+            if (btn.__inited) return; btn.__inited = true;
+            btn.setAttribute('data-throttle', '600');
+            btn.addEventListener('click', () => {
+                const key = btn.getAttribute('data-blbtab');
+                tabs.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                Object.values(panes).forEach(p => { if (p) p.style.display = 'none'; });
+                if (panes[key]) panes[key].style.display = '';
+            });
+        });
+    }
+
     // ---------- MATCH DETAILS SCREEN (in-app, not modal) ----------
     function openMatchScreen(match, details) {
     const schedulePane = document.getElementById('ufo-schedule');
@@ -1858,9 +1953,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('click', (e) => {
         const item = e.target.closest('.nav-item[data-tab="ufo"]');
         if (item) {
-            loadLeagueTable();
-            // первичная загрузка статистики, чтобы не ждать при переключении
-            loadStatsTable();
+            try { showLeagueList(); } catch(_) {}
         }
     }, { once: true });
 

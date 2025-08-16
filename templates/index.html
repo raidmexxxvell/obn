@@ -107,13 +107,26 @@
 
         <!-- Вкладка НЛО -->
     <div id="tab-ufo" style="display:none;">
-            <div class="subtabs" id="ufo-subtabs">
+            <!-- Выбор лиги -->
+            <div id="ufo-league-list" class="league-list" style="display:block; padding: 8px;">
+                <div class="league-card" data-league="UFO" style="display:flex; align-items:center; gap:10px; padding:10px; border:1px solid rgba(255,255,255,0.1); border-radius:10px; cursor:pointer; margin-bottom:8px;">
+                    <div class="league-ico" style="font-size:20px;">🛸</div>
+                    <div class="league-name" style="font-weight:600;">НЛО — Лига Обнинска</div>
+                </div>
+                <div class="league-card" data-league="BLB" style="display:flex; align-items:center; gap:10px; padding:10px; border:1px solid rgba(255,255,255,0.1); border-radius:10px; cursor:pointer;">
+                    <div class="league-ico" style="font-size:20px;">🅱️</div>
+                    <div class="league-name" style="font-weight:600;">БЛБ — другая лига</div>
+                </div>
+            </div>
+
+            <!-- Подвкладки основной лиги НЛО -->
+            <div class="subtabs" id="ufo-subtabs" style="display:none;">
                 <div class="subtab-item active" data-subtab="table">Таблица</div>
                 <div class="subtab-item" data-subtab="stats">Статистика</div>
                 <div class="subtab-item" data-subtab="schedule">Расписание</div>
                 <div class="subtab-item" data-subtab="results">Результаты</div>
             </div>
-            <div class="ufo-content">
+            <div class="ufo-content" id="ufo-content" style="display:none;">
                 <div id="ufo-table" class="ufo-pane">
                     <div class="league-table-wrap">
                         <table class="league-table" id="league-table">
@@ -169,6 +182,22 @@
                         <div id="md-pane-home" class="md-pane"></div>
                         <div id="md-pane-away" class="md-pane" style="display:none;"></div>
                     </div>
+                </div>
+            </div>
+
+            <!-- Блок БЛБ: пустые подвкладки -->
+            <div id="blb-block" style="display:none;">
+                <div class="subtabs" id="blb-subtabs">
+                    <div class="subtab-item active" data-blbtab="table">Таблица</div>
+                    <div class="subtab-item" data-blbtab="stats">Статистика</div>
+                    <div class="subtab-item" data-blbtab="schedule">Расписание</div>
+                    <div class="subtab-item" data-blbtab="results">Результаты</div>
+                </div>
+                <div class="ufo-content" id="blb-content">
+                    <div id="blb-table" class="ufo-pane">Скоро...</div>
+                    <div id="blb-stats" class="ufo-pane" style="display:none;">Скоро...</div>
+                    <div id="blb-schedule" class="ufo-pane" style="display:none;">Скоро...</div>
+                    <div id="blb-results" class="ufo-pane" style="display:none;">Скоро...</div>
                 </div>
             </div>
         </div>
