@@ -504,10 +504,25 @@ document.addEventListener('DOMContentLoaded', () => {
         if (elements.editName) elements.editName.setAttribute('data-throttle', '1500');
     // переключение вкладок нижнего меню
         const navItems = document.querySelectorAll('.nav-item');
-    navItems.forEach(item => {
-            item.setAttribute('data-throttle', '600');
+        let _lastUfoTap = 0;
+        navItems.forEach(item => {
+            const tab = item.getAttribute('data-tab');
+            // На НЛО отключаем троттлинг, иначе двойной тап не сработает
+            if (tab === 'ufo') item.setAttribute('data-throttle', '0'); else item.setAttribute('data-throttle', '600');
             item.addEventListener('click', () => {
                 const tab = item.getAttribute('data-tab');
+                // Обработка двойного тапа для НЛО
+                if (tab === 'ufo') {
+                    const now = Date.now();
+                    if (now - _lastUfoTap < 350) {
+                        // двойной тап: показываем компактный оверлей-расширение
+                        showLeagueOverlay();
+                        _lastUfoTap = 0;
+                        return;
+                    }
+                    _lastUfoTap = now;
+                }
+
                 document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
                 item.classList.add('active');
     const prof = document.getElementById('tab-profile');
@@ -520,8 +535,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (tab === 'profile' && prof) prof.style.display = '';
     if (tab === 'ufo' && ufo) {
         ufo.style.display = '';
-        // Покажем оверлей выбора лиги при входе в раздел
-        try { showLeagueOverlay(); } catch(_) {}
+        // Показ контента по активной лиге (без автопоказа оверлея)
+        try {
+            const act = getActiveLeague();
+            if (act === 'BLB') selectBLBLeague(); else selectUFOLeague(true);
+        } catch(_) {}
     }
     if (tab === 'predictions' && preds) {
         preds.style.display = '';
@@ -540,6 +558,25 @@ document.addEventListener('DOMContentLoaded', () => {
                 // прокрутка к верху при смене вкладки
                 window.scrollTo({ top: 0, behavior: 'smooth' });
             });
+            // Поддержка dblclick (десктоп) для оверлея
+            if (tab === 'ufo') {
+                item.addEventListener('dblclick', (e) => {
+                    e.preventDefault(); e.stopPropagation();
+                    showLeagueOverlay();
+                });
+                // Явная обработка touchend для надёжного двойного тапа
+                let _ufoLastTouch = 0;
+                item.addEventListener('touchend', (e) => {
+                    const now = Date.now();
+                    if (now - _ufoLastTouch < 350) {
+                        e.preventDefault(); e.stopPropagation();
+                        showLeagueOverlay();
+                        _ufoLastTouch = 0;
+                    } else {
+                        _ufoLastTouch = now;
+                    }
+                }, { passive: false });
+            }
         });
         // Стартовая вкладка: Профиль
         try {
@@ -1557,23 +1594,46 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ---------- ЛИГИ: НЛО / БЛБ (оверлей над нижним меню) ----------
+    function getActiveLeague() {
+        try {
+            const mem = sessionStorage.getItem('activeLeague');
+            if (mem === 'BLB' || mem === 'UFO') return mem;
+        } catch(_) {}
+        return window.__ACTIVE_LEAGUE__ || 'UFO';
+    }
+    function setActiveLeague(code) {
+        window.__ACTIVE_LEAGUE__ = code;
+        try { sessionStorage.setItem('activeLeague', code || 'UFO'); } catch(_) {}
+    }
+    function renderLeagueOverlay() {
+        const overlay = document.getElementById('league-overlay');
+        if (!overlay) return;
+        const act = getActiveLeague();
+        const other = act === 'BLB' ? 'UFO' : 'BLB';
+        const ico = other === 'UFO' ? '🛸' : '🅱️';
+        const title = other === 'UFO' ? 'НЛО' : 'БЛБ';
+        // Рендерим одну иконку как продолжение нижнего меню
+        overlay.innerHTML = `
+            <div class="league-icons" style="display:flex; justify-content:center; gap:12px; background: rgba(10,18,40,0.96); padding:8px 10px; border-radius:12px; box-shadow: 0 4px 16px rgba(0,0,0,0.35);">
+                <div class="nav-icon" data-league="${other}" title="${title}" style="font-size:22px; cursor:pointer; line-height:1;">${ico}</div>
+            </div>
+        `;
+    }
     function showLeagueOverlay() {
         const overlay = document.getElementById('league-overlay');
         const ufoTabs = document.getElementById('ufo-subtabs');
         const ufoContent = document.getElementById('ufo-content');
         const blbBlock = document.getElementById('blb-block');
         if (!overlay || !ufoTabs || !ufoContent || !blbBlock) return;
-        // Если лига ещё не выбрана — по умолчанию показываем НЛО
-        if (!window.__ACTIVE_LEAGUE__) {
-            selectUFOLeague(true);
-        }
+        // Обновим содержимое оверлея и покажем
+        renderLeagueOverlay();
         overlay.style.display = 'block';
         if (!overlay.__inited) {
             overlay.__inited = true;
             overlay.addEventListener('click', (e) => {
-                const card = e.target.closest('.league-card');
-                if (card) {
-                    const key = card.getAttribute('data-league');
+                const ico = e.target.closest('.nav-icon[data-league]');
+                if (ico) {
+                    const key = ico.getAttribute('data-league');
                     if (key === 'UFO') selectUFOLeague();
                     if (key === 'BLB') selectBLBLeague();
                     overlay.style.display = 'none';
@@ -1596,7 +1656,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const ufoContent = document.getElementById('ufo-content');
         const blbBlock = document.getElementById('blb-block');
         if (!ufoTabs || !ufoContent || !blbBlock) return;
-        window.__ACTIVE_LEAGUE__ = 'UFO';
+        setActiveLeague('UFO');
         if (overlay) overlay.style.display = 'none';
         blbBlock.style.display = 'none';
         ufoTabs.style.display = '';
@@ -1615,7 +1675,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const ufoContent = document.getElementById('ufo-content');
         const blbBlock = document.getElementById('blb-block');
         if (!ufoTabs || !ufoContent || !blbBlock) return;
-        window.__ACTIVE_LEAGUE__ = 'BLB';
+        setActiveLeague('BLB');
         if (overlay) overlay.style.display = 'none';
         ufoTabs.style.display = 'none';
         ufoContent.style.display = 'none';
@@ -1956,13 +2016,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // загружаем таблицу при первом открытии вкладки НЛО также на всякий случай, если событие клика не перехватили
-    document.addEventListener('click', (e) => {
-        const item = e.target.closest('.nav-item[data-tab="ufo"]');
-        if (item) {
-            try { showLeagueOverlay(); } catch(_) {}
-        }
-    }, { once: true });
+    // При старте запоминаем активную лигу из сессии (по умолчанию НЛО)
+    try { setActiveLeague(getActiveLeague()); } catch(_) {}
 
     // старт
     initApp();
