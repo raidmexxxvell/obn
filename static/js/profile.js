@@ -116,13 +116,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     async function saveFavoriteTeam(value) {
         try {
-            if (!value) {
-                const res = await fetch('/api/user/favorite-team', { method: 'DELETE' });
-                if (!res.ok) return false;
-            } else {
-                const res = await fetch('/api/user/favorite-team', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ team: value }) });
-                if (!res.ok) return false;
-            }
+            const fd = new FormData();
+            fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
+            fd.append('team', value || '');
+            const res = await fetch('/api/user/favorite-team', { method: 'POST', body: fd });
+            if (!res.ok) return false;
             await fetchTeamsAndCounts(true);
             renderFavoriteSelect(value);
             return true;
@@ -457,7 +455,7 @@ document.addEventListener('DOMContentLoaded', () => {
     [prof, ufo, preds, lead, shop, admin].forEach(el => { if (el) el.style.display = 'none'; });
     if (tab === 'profile' && prof) prof.style.display = '';
     if (tab === 'ufo' && ufo) { ufo.style.display = ''; loadLeagueTable(); }
-    if (tab === 'predictions' && preds) preds.style.display = '';
+    if (tab === 'predictions' && preds) { preds.style.display = ''; try { window.loadBetTours?.(); } catch(_) {} }
     if (tab === 'leaderboard' && lead) { lead.style.display = ''; ensureLeaderboardInit(); }
     if (tab === 'shop' && shop) { shop.style.display = ''; }
     if (tab === 'admin' && admin) { admin.style.display = ''; ensureAdminInit(); }

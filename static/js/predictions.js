@@ -29,8 +29,8 @@
       });
     });
 
-    let _toursLoading = false;
-    function loadTours() {
+  let _toursLoading = false;
+  function loadTours() {
       if (!toursEl || _toursLoading) return;
       _toursLoading = true;
       const CACHE_KEY = 'betting:tours';
@@ -186,7 +186,10 @@
         }).finally(()=>{ _toursLoading = false; });
       }
       if (cached && !(_toursLoading)) { /* уже отрисовали кэш; загрузка в фоне */ }
-    }
+  }
+
+  // Экспортируем для вызова извне при входе во вкладку
+  try { window.loadBetTours = () => { try { loadTours(); } catch(_) {} }; } catch(_) {}
 
     function mkTeam(name) {
       const d = document.createElement('div'); d.className = 'team';

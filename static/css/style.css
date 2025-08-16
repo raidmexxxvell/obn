@@ -36,7 +36,7 @@ body {
     left: 50%;
     transform: translateX(-50%);
     bottom: 14px;
-    width: min(520px, calc(100% - 12px));
+    width: min(520px, calc(100% - 24px)); /* чуть больше отступы слева/справа */
     background: rgba(10, 18, 40, 0.92);
     backdrop-filter: blur(12px);
     border-radius: 16px;
@@ -68,7 +68,7 @@ body {
 }
 
 .nav-icon { font-size: 16px; line-height: 1; margin-bottom: 0; }
-.nav-label { font-size: 11px; line-height: 1; margin-top: 0; }
+.nav-label { display: none; }
 
 
 /* --- ВЕРХНЯЯ ПАНЕЛЬ --- */
@@ -173,6 +173,8 @@ body {
     font-size: 13px;
 }
 #favorite-team:focus { outline: none; border-color: rgba(255,255,255,0.28); box-shadow: 0 0 0 2px rgba(255,255,255,0.12) inset; }
+/* Цвет для открытого списка в поддерживаемых браузерах */
+#favorite-team option { background: rgba(10, 18, 40, 0.98); color: var(--light); }
 
 /* Кнопка «Обновить» в таблице */
 .refresh-btn {
