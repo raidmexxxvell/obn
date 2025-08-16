@@ -141,6 +141,13 @@ body {
 .stream-aspect iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
 .stream-skeleton { display:flex; align-items:center; justify-content:center; color: var(--gray); font-size: 12px; height: 220px; }
 
+/* --- Админ: трансляции --- */
+.stream-row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.stream-row .title { flex: 1 1 auto; font-weight: 700; }
+.stream-row .time { color: var(--gray); font-size: 12px; }
+.stream-row input[type="text"] { flex: 1 1 280px; min-width: 180px; padding: 8px 10px; border-radius: 10px; border:1px solid rgba(255,255,255,0.2); background: transparent; color:#fff; }
+.stream-row .confirm { white-space: nowrap; }
+
 
 /* --- ВЕРХНЯЯ ПАНЕЛЬ --- */
 .top-bar {

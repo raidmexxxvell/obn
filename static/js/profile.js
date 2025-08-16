@@ -750,6 +750,93 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
 
+        // --- Админ: подвкладка «Трансляции» ---
+        try {
+            const adminTabs = document.querySelectorAll('#admin-subtabs .subtab-item');
+            const paneService = document.getElementById('admin-pane-service');
+            const paneOrders = document.getElementById('admin-pane-orders');
+            const paneStreams = document.getElementById('admin-pane-streams');
+            const adminWrap = document.getElementById('tab-admin');
+            const adminId = document.body.getAttribute('data-admin');
+            const currentId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id ? String(window.Telegram.WebApp.initDataUnsafe.user.id) : '';
+            const isOwner = !!(adminId && currentId && String(adminId) === currentId);
+            if (adminWrap && isOwner) {
+                // показать вкладку Админ
+                const navAdmin = document.getElementById('nav-admin'); if (navAdmin) navAdmin.style.display = '';
+                // переключение подвкладок
+                adminTabs.forEach(tab => tab.addEventListener('click', () => {
+                    adminTabs.forEach(t => t.classList.remove('active')); tab.classList.add('active');
+                    const key = tab.getAttribute('data-atab');
+                    paneService.style.display = key==='service' ? '' : 'none';
+                    paneOrders.style.display = key==='orders' ? '' : 'none';
+                    paneStreams.style.display = key==='streams' ? '' : 'none';
+                    if (key==='streams') initAdminStreams();
+                }));
+                // автопоказ сервиса по умолчанию
+            }
+        } catch(_) {}
+
+        async function initAdminStreams() {
+            const list = document.getElementById('admin-streams-list');
+            const msg = document.getElementById('admin-streams-msg');
+            const winInput = document.getElementById('admin-streams-window');
+            const refreshBtn = document.getElementById('admin-streams-refresh');
+            const winMin = Math.max(15, Math.min(240, parseInt(winInput.value||'60',10)));
+            const now = Date.now();
+            msg.textContent = 'Загружаю расписание...';
+            try {
+                const res = await fetch('/api/schedule');
+                const data = await res.json();
+                const tours = data?.tours || [];
+                const upcoming = [];
+                tours.forEach(t => (t.matches||[]).forEach(m => {
+                    let start = 0; try { start = m.datetime ? Date.parse(m.datetime) : 0; } catch(_){}
+                    if (start && (start - now) <= winMin*60*1000 && (start - now) > -180*60*1000) {
+                        upcoming.push({ tour: t.tour, title: t.title, ...m, start });
+                    }
+                }));
+                upcoming.sort((a,b)=>a.start-b.start);
+                list.innerHTML = '';
+                if (!upcoming.length) {
+                    list.innerHTML = '<div class="store-item" style="opacity:.85"><div class="store-name">В ближайшие '+winMin+' минут матчей нет</div></div>';
+                } else {
+                    // Получим текущие подтверждения
+                    const cur = await (await fetch('/api/streams/list')).json().catch(()=>({ items: [] }));
+                    const confirmed = new Set((cur.items||[]).map(x=>`${(x.home||'').toLowerCase()}__${(x.away||'').toLowerCase()}__${(x.date||'')}`));
+                    upcoming.forEach(m => {
+                        const row = document.createElement('div'); row.className='store-item';
+                        const inner = document.createElement('div'); inner.className='stream-row';
+                        const title = document.createElement('div'); title.className='title'; title.textContent = `${m.home} — ${m.away}`;
+                        const time = document.createElement('div'); time.className='time';
+                        try { time.textContent = new Date(m.start).toLocaleString(); } catch(_) { time.textContent = m.datetime || ''; }
+                        const input = document.createElement('input'); input.type='text'; input.placeholder='vk video id или URL поста'; input.value='';
+                        const btn = document.createElement('button'); btn.className='details-btn confirm'; btn.textContent='Подтвердить';
+                        btn.onclick = async () => {
+                            const val = (input.value||'').trim(); if (!val) { msg.textContent='Укажите ссылку или id.'; return; }
+                            const fd = new FormData();
+                            fd.append('initData', window.Telegram?.WebApp?.initData || '');
+                            fd.append('home', m.home || '');
+                            fd.append('away', m.away || '');
+                            fd.append('date', (m.datetime||'').slice(0,10));
+                            if (/^[-]?\d+_\d+$/.test(val)) fd.append('vkVideoId', val); else fd.append('vkPostUrl', val);
+                            const r = await fetch('/api/streams/confirm', { method: 'POST', body: fd });
+                            const j = await r.json().catch(()=>({}));
+                            if (!r.ok) { msg.textContent = j?.error || 'Не удалось сохранить'; return; }
+                            msg.textContent = 'Сохранено'; btn.disabled = true; input.disabled = true;
+                        };
+                        inner.append(title, time, input, btn); row.appendChild(inner); list.appendChild(row);
+                        // пометка, если уже подтверждено
+                        const k = `${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}__${(m.datetime||'').slice(0,10)}`;
+                        if (confirmed.has(k)) { btn.disabled = true; input.disabled = true; }
+                    });
+                }
+                msg.textContent = 'Готово';
+            } catch (e) {
+                console.error('admin streams load', e); msg.textContent = 'Ошибка загрузки';
+            }
+            refreshBtn.onclick = initAdminStreams;
+            winInput.onchange = initAdminStreams;
+        }
         const shareBtn = document.getElementById('share-ref');
         if (shareBtn) {
             shareBtn.setAttribute('data-throttle', '1200');
@@ -2184,7 +2271,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 existed.remove();
             }
         } catch(_) {}
-        // Вкладка «Трансляция»: создаём/находим и добавляем при наличии источника
+        // Вкладка «Трансляция»: создаём/находим; показываем, если сервер говорит, что доступна (подтверждена админом и по времени)
         let streamPane = document.getElementById('md-pane-stream');
         if (!streamPane) {
             streamPane = document.createElement('div');
@@ -2195,19 +2282,22 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         // Очистка плеера при каждом открытии экрана (ленивая вставка при показе)
         streamPane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
-        // При наличии конфига добавим кнопку-вкладку «Трансляция»
+        // Спроси сервер, можно ли показывать вкладку (подтверждено + за N минут до матча)
         try {
-            const st = window.__STREAMS__?.findStream(match);
-            const existingStreamTab = subtabs?.querySelector('[data-mdtab="stream"]');
-            if (st) {
-                if (!existingStreamTab) {
-                    const tab = document.createElement('div');
-                    tab.className = 'subtab-item'; tab.setAttribute('data-mdtab','stream'); tab.textContent = 'Трансляция';
-                    subtabs.appendChild(tab);
+            const dateStr = (match?.datetime || match?.date || '').toString().slice(0,10);
+            const url = `/api/streams/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}&date=${encodeURIComponent(dateStr)}&window=10`;
+            fetch(url).then(r=>r.json()).then(ans => {
+                const existing = subtabs?.querySelector('[data-mdtab="stream"]');
+                if (ans?.available) {
+                    if (!existing) {
+                        const tab = document.createElement('div'); tab.className='subtab-item'; tab.setAttribute('data-mdtab','stream'); tab.textContent='Трансляция';
+                        subtabs.appendChild(tab);
+                    }
+                    streamPane.__streamInfo = ans;
+                } else if (existing) {
+                    existing.remove();
                 }
-            } else if (existingStreamTab) {
-                existingStreamTab.remove();
-            }
+            }).catch(()=>{});
         } catch(_) {}
 
         // по умолчанию активируем «Команда 1»
@@ -2279,8 +2369,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     // Лениво вставляем VK iframe только при первом показе
                     if (!streamPane.__inited) {
                         try {
-                            const st = window.__STREAMS__?.findStream(match);
-                            if (st) {
+                            const st = streamPane.__streamInfo || null;
+                            if (st && (st.vkVideoId || st.vkPostUrl)) {
                                 const host = document.createElement('div'); host.className = 'stream-wrap';
                                 const ratio = document.createElement('div'); ratio.className = 'stream-aspect';
                                 // Формирование src. Вариант 1: video id типа "-12345_67890"; Вариант 2: пост.

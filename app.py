@@ -6,7 +6,7 @@ import hashlib
 import hmac
 from datetime import datetime, date, timezone
 from datetime import timedelta
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlparse
 
 from flask import Flask, request, jsonify, render_template
 
@@ -396,6 +396,18 @@ class UserPref(Base):
     __tablename__ = 'user_prefs'
     user_id = Column(Integer, primary_key=True)
     favorite_team = Column(Text, nullable=True)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+# Трансляции матчей (подтвержденные админом)
+class MatchStream(Base):
+    __tablename__ = 'match_streams'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    home = Column(Text, nullable=False)
+    away = Column(Text, nullable=False)
+    date = Column(String(10), nullable=True)  # YYYY-MM-DD
+    vk_video_id = Column(Text, nullable=True)
+    vk_post_url = Column(Text, nullable=True)
+    confirmed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 class WeeklyCreditBaseline(Base):
@@ -3969,6 +3981,160 @@ def api_results_refresh():
     except Exception as e:
         app.logger.error(f"Ошибка принудительного обновления результатов: {e}")
         return jsonify({'error': 'Не удалось обновить результаты'}), 500
+
+@app.route('/api/streams/confirm', methods=['POST'])
+def api_streams_confirm():
+    """Админ подтверждает трансляцию для матча.
+    Поля: initData, home, away, date(YYYY-MM-DD optional), [vkVideoId]|[vkPostUrl]
+    """
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData',''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID','')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+        home = (request.form.get('home') or '').strip()
+        away = (request.form.get('away') or '').strip()
+        date_str = (request.form.get('date') or '').strip()  # YYYY-MM-DD
+        vk_id = (request.form.get('vkVideoId') or '').strip()
+        vk_url = (request.form.get('vkPostUrl') or '').strip()
+        # Если прислали embed-ссылку video_ext.php — извлечём oid/id и сохраним как vkVideoId
+        try:
+            if vk_url and 'video_ext.php' in vk_url:
+                u = urlparse(vk_url)
+                q = parse_qs(u.query)
+                oid = (q.get('oid',[None])[0])
+                vid = (q.get('id',[None])[0])
+                if oid and vid:
+                    vk_id = f"{oid}_{vid}"
+                    vk_url = ''
+        except Exception:
+            pass
+        # Также поддержим прямую ссылку вида https://vk.com/video-123456_654321
+        try:
+            if vk_url and '/video' in vk_url:
+                path = urlparse(vk_url).path or ''
+                # /video-123456_654321 или /video123_456
+                import re as _re
+                m = _re.search(r"/video(-?\d+_\d+)", path)
+                if m:
+                    vk_id = m.group(1)
+                    vk_url = ''
+        except Exception:
+            pass
+        if not home or not away:
+            return jsonify({'error': 'home/away обязательны'}), 400
+        if not vk_id and not vk_url:
+            return jsonify({'error': 'нужен vkVideoId или vkPostUrl'}), 400
+        if vk_id and not re.match(r'^-?\d+_\d+$', vk_id):
+            return jsonify({'error': 'vkVideoId должен быть формата oid_id'}), 400
+        if SessionLocal is None:
+            return jsonify({'error': 'БД недоступна'}), 500
+        db: Session = get_db()
+        try:
+            row = db.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None)).first()
+            now = datetime.now(timezone.utc)
+            if not row:
+                row = MatchStream(home=home, away=away, date=(date_str or None))
+                db.add(row)
+            row.vk_video_id = vk_id or None
+            row.vk_post_url = vk_url or None
+            row.confirmed_at = now
+            row.updated_at = now
+            db.commit()
+            return jsonify({'status': 'ok', 'home': home, 'away': away, 'date': date_str, 'vkVideoId': row.vk_video_id, 'vkPostUrl': row.vk_post_url})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"streams/confirm error: {e}")
+        return jsonify({'error': 'Не удалось сохранить трансляцию'}), 500
+
+@app.route('/api/streams/list', methods=['GET'])
+def api_streams_list():
+    """Возвращает список подтвержденных трансляций (минимальный набор)."""
+    try:
+        if SessionLocal is None:
+            return jsonify({'items': []})
+        db: Session = get_db()
+        try:
+            rows = db.query(MatchStream).all()
+            items = []
+            for r in rows:
+                items.append({'home': r.home, 'away': r.away, 'date': r.date or '', 'vkVideoId': r.vk_video_id or '', 'vkPostUrl': r.vk_post_url or ''})
+            return jsonify({'items': items})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"streams/list error: {e}")
+        return jsonify({'items': []})
+
+@app.route('/api/streams/get', methods=['GET'])
+def api_streams_get():
+    """Клиентский эндпоинт: получить трансляцию для конкретного матча, если подтверждена и если в окне +-N минут.
+    Параметры: home, away, date (YYYY-MM-DD optional), window (минут, по умолчанию 60).
+    """
+    try:
+        if SessionLocal is None:
+            return jsonify({'available': False})
+        home = (request.args.get('home') or '').strip()
+        away = (request.args.get('away') or '').strip()
+        date_str = (request.args.get('date') or '').strip()
+        try:
+            win = int(request.args.get('window') or '60')
+        except Exception:
+            win = 60
+        win = max(15, min(240, win))
+        # найдём матч и время старта
+        start_ts = None
+    try:
+            tours = []
+            if SessionLocal is not None:
+                dbx = get_db()
+                try:
+                    snap = _snapshot_get(dbx, 'schedule')
+                    payload = snap and snap.get('payload')
+                    tours = payload and payload.get('tours') or []
+                finally:
+                    dbx.close()
+            if not tours:
+                tours = _load_all_tours_from_sheet()
+            for t in tours:
+                for m in t.get('matches', []):
+                    if (m.get('home') == home and m.get('away') == away):
+                        if date_str and (m.get('datetime') or '').startswith(date_str):
+                            start_ts = int(datetime.fromisoformat(m['datetime']).timestamp()*1000)
+                            raise StopIteration  # break all
+                        elif not date_str:
+                            try:
+                                start_ts = int(datetime.fromisoformat(m['datetime']).timestamp()*1000)
+                            except Exception:
+                                start_ts = None
+                            raise StopIteration
+        except StopIteration:
+            pass
+        now = int(time.time()*1000)
+        # TEMP test override for match "дождь — звезда": показать всегда (для проверки вида)
+        try:
+            if (home.lower().strip() == 'дождь' and away.lower().strip() == 'звезда'):
+                return jsonify({'available': True, 'vkVideoId': '-211669815_456249825', 'vkPostUrl': ''})
+        except Exception:
+            pass
+        if not start_ts or (start_ts - now) > win*60*1000:
+            return jsonify({'available': False})
+        # найдём подтверждение
+        db: Session = get_db()
+        try:
+            row = db.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None)).first()
+            if not row:
+                return jsonify({'available': False})
+            return jsonify({'available': True, 'vkVideoId': row.vk_video_id or '', 'vkPostUrl': row.vk_post_url or ''})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"streams/get error: {e}")
+        return jsonify({'available': False})
 
 @app.route('/api/admin/users-stats', methods=['POST'])
 def api_admin_users_stats():
