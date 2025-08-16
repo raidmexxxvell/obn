@@ -1629,12 +1629,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Ширина как у иконки меню
                 const w = Math.max(40, Math.floor(r.width));
                 overlay.style.width = `${w}px`;
-                // Выровнять правый край по правому краю нижнего меню
-                const rightEdge = Math.floor(rn.right);
-                overlay.style.left = `${rightEdge - w}px`;
+                // Привязать левый край плашки к левому краю нижнего меню
+                const leftEdge = Math.floor(rn.left);
+                overlay.style.left = `${leftEdge}px`;
                 overlay.style.transform = 'none';
                 // Чуть поднять над меню
-                const gap = 6; // было 4
+                const gap = 6;
                 const navH = Math.floor(rn.height);
                 overlay.style.bottom = `${navH + gap}px`;
             }
