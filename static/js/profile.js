@@ -1604,6 +1604,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function setActiveLeague(code) {
         window.__ACTIVE_LEAGUE__ = code;
         try { sessionStorage.setItem('activeLeague', code || 'UFO'); } catch(_) {}
+        try { updateNavLeagueIcon(); } catch(_) {}
     }
     function renderLeagueOverlay() {
         const overlay = document.getElementById('league-overlay');
@@ -1614,10 +1615,24 @@ document.addEventListener('DOMContentLoaded', () => {
         const title = other === 'UFO' ? 'НЛО' : 'БЛБ';
         // Рендерим одну иконку как продолжение нижнего меню
         overlay.innerHTML = `
-            <div class="league-icons" style="display:flex; justify-content:center; gap:12px; background: rgba(10,18,40,0.96); padding:8px 10px; border-radius:12px; box-shadow: 0 4px 16px rgba(0,0,0,0.35);">
+            <div class="league-icons" style="display:flex; align-items:center; justify-content:center; background: rgba(10,18,40,0.96); padding:6px 0; border-radius: 10px 10px 0 0; box-shadow: 0 4px 16px rgba(0,0,0,0.35);">
                 <div class="nav-icon" data-league="${other}" title="${title}" style="font-size:22px; cursor:pointer; line-height:1;">${ico}</div>
             </div>
         `;
+        // Подгонка позиции/размера под иконку меню
+        try {
+            const anchor = document.querySelector('.nav-item[data-tab="ufo"]');
+            const nav = document.querySelector('nav.nav');
+            if (anchor) {
+                const r = anchor.getBoundingClientRect();
+                overlay.style.width = `${Math.max(40, Math.floor(r.width))}px`;
+                overlay.style.left = `${Math.floor(r.left)}px`; // fixed относительно вьюпорта
+                overlay.style.transform = 'none';
+                const gap = 4; // слитно, но с маленьким зазором
+                const navH = nav ? Math.floor(nav.getBoundingClientRect().height) : Math.floor(r.height);
+                overlay.style.bottom = `${navH + gap}px`;
+            }
+        } catch(_) {}
     }
     function showLeagueOverlay() {
         const overlay = document.getElementById('league-overlay');
@@ -1647,7 +1662,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (e.target.closest('#league-overlay') || isUfoNav) return;
                 overlay.style.display = 'none';
             });
+            // При ресайзе/смене ориентации — скрыть
+            window.addEventListener('resize', () => { if (overlay) overlay.style.display = 'none'; });
+            window.addEventListener('orientationchange', () => { if (overlay) overlay.style.display = 'none'; });
         }
+        // На всякий случай пересчитать позицию после показа (рендер может занять тик)
+        setTimeout(renderLeagueOverlay, 0);
     }
 
     function selectUFOLeague(_silent) {
@@ -2016,8 +2036,25 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // При старте запоминаем активную лигу из сессии (по умолчанию НЛО)
-    try { setActiveLeague(getActiveLeague()); } catch(_) {}
+    // При старте запоминаем активную лигу из сессии (по умолчанию НЛО) и обновляем иконку меню
+    try { setActiveLeague(getActiveLeague()); updateNavLeagueIcon(); } catch(_) {}
+
+    function updateNavLeagueIcon() {
+        try {
+            const item = document.querySelector('.nav-item[data-tab="ufo"]');
+            if (!item) return;
+            const iconEl = item.querySelector('.nav-icon');
+            const labelEl = item.querySelector('.nav-label');
+            const act = getActiveLeague();
+            if (act === 'BLB') {
+                if (iconEl) iconEl.textContent = '🅱️';
+                if (labelEl) labelEl.textContent = 'БЛБ';
+            } else {
+                if (iconEl) iconEl.textContent = '🛸';
+                if (labelEl) labelEl.textContent = 'НЛО';
+            }
+        } catch(_) {}
+    }
 
     // старт
     initApp();
