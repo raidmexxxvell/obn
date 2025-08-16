@@ -376,7 +376,20 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch(_) { return ''; }
         };
 
-        achievements.forEach(a => {
+        // Сортировка по близости к выполнению (меньший остаток до цели первее)
+        const safe = Array.isArray(achievements) ? achievements.slice() : [];
+        safe.sort((a,b) => {
+            const pa = Math.max(0, (a.target||1) - (a.value||0));
+            const pb = Math.max(0, (b.target||1) - (b.value||0));
+            return pa - pb;
+        });
+
+        // Пагинация по 4, с кнопкой «Показать ещё»
+        const pageSize = 4;
+        let shown = 0;
+        const renderBatch = () => {
+            const batch = safe.slice(shown, shown + pageSize);
+            batch.forEach(a => {
             const card = document.createElement('div');
             card.className = `achievement-card ${a.unlocked ? '' : 'locked'}`;
             const icon = document.createElement('img');
@@ -412,7 +425,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
             card.append(icon, name, toggle, req, progressWrap);
             elements.badgesContainer.appendChild(card);
+            });
+            shown += batch.length;
+        };
+
+        renderBatch();
+        // Кнопка «Показать ещё», пока есть элементы
+        const moreBtn = document.createElement('button');
+        moreBtn.className = 'details-btn';
+        moreBtn.textContent = 'Показать ещё';
+        moreBtn.style.marginTop = '8px';
+        moreBtn.addEventListener('click', () => {
+            renderBatch();
+            if (shown >= safe.length) moreBtn.remove();
         });
+        if (safe.length > shown) {
+            elements.badgesContainer.parentElement.appendChild(moreBtn);
+        }
     // отметим, что достижения готовы
     _achLoaded = true;
     trySignalAllReady();
@@ -589,12 +618,11 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch(_) {}
 
-    // подвкладки Профиля (Достижения/Список/Реферал)
+    // подвкладки Профиля (Достижения/Реферал)
         const pTabs = document.querySelectorAll('#profile-subtabs .subtab-item');
         const pMap = {
             badges: document.getElementById('profile-pane-badges'),
-        catalog: document.getElementById('profile-pane-catalog'),
-        ref: document.getElementById('profile-pane-ref'),
+            ref: document.getElementById('profile-pane-ref'),
         };
         pTabs.forEach(btn => {
             btn.setAttribute('data-throttle', '600');
@@ -605,8 +633,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 Object.values(pMap).forEach(el => { if (el) el.style.display = 'none'; });
                 if (pMap[key]) {
                     pMap[key].style.display = '';
-            if (key === 'catalog') loadAchievementsCatalog();
-            if (key === 'ref') loadReferralInfo();
+                    if (key === 'ref') loadReferralInfo();
                 }
             });
         });
@@ -1576,20 +1603,35 @@ document.addEventListener('DOMContentLoaded', () => {
             specialsPane.style.display = 'none';
             mdPane.querySelector('.modal-body')?.appendChild(specialsPane);
         }
-        // Если админ — добавим вкладку, если её нет
+        // Вкладка «Спецсобытия» только для матчей, присутствующих в турах ставок
         try {
+            const toursCache = JSON.parse(localStorage.getItem('betting:tours') || 'null');
+            const tours = toursCache?.data?.tours || toursCache?.tours || [];
+            const mkKey = (obj) => {
+                const h = (obj?.home || '').toLowerCase().trim();
+                const a = (obj?.away || '').toLowerCase().trim();
+                const raw = obj?.date ? String(obj.date) : (obj?.datetime ? String(obj.datetime) : '');
+                const d = raw ? raw.slice(0, 10) : '';
+                return `${h}__${a}__${d}`;
+            };
+            const present = new Set();
+            tours.forEach(t => (t.matches||[]).forEach(x => present.add(mkKey(x))));
+            const thisKey = mkKey(match);
+            let specialsAllowed = present.has(thisKey);
+            // Разрешаем редактирование только админу
             const adminId = document.body.getAttribute('data-admin');
             const currentId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id ? String(window.Telegram.WebApp.initDataUnsafe.user.id) : '';
-            if (adminId && currentId && String(adminId) === currentId && subtabs) {
-                if (!subtabs.querySelector('[data-mdtab="specials"]')) {
+            const isAdmin = !!(adminId && currentId && String(adminId) === currentId);
+            // Показать вкладку только если матч в ставках И пользователь админ
+            const existed = subtabs?.querySelector('[data-mdtab="specials"]');
+            if (specialsAllowed && isAdmin) {
+                if (!existed) {
                     const sp = document.createElement('div');
                     sp.className = 'subtab-item'; sp.setAttribute('data-mdtab','specials'); sp.textContent = 'Спецсобытия';
                     subtabs.appendChild(sp);
                 }
-            } else {
-                // если не админ, убедимся, что вкладки нет
-                const exist = subtabs?.querySelector('[data-mdtab="specials"]');
-                if (exist) exist.remove();
+            } else if (existed) {
+                existed.remove();
             }
         } catch(_) {}
         // по умолчанию активируем «Команда 1»
@@ -1628,6 +1670,20 @@ document.addEventListener('DOMContentLoaded', () => {
             renderRoster(awayPane, []);
         }
 
+        // Если доступно API статуса — отметим LIVE индикатором в заголовке деталей
+        try {
+            fetch(`/api/match/status/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}`)
+                .then(r=>r.json()).then(s => {
+                    if (s?.status === 'live') {
+                        const live = document.createElement('span'); live.className = 'live-badge';
+                        const dot = document.createElement('span'); dot.className = 'live-dot';
+                        const lbl = document.createElement('span'); lbl.textContent = 'LIVE';
+                        live.append(dot, lbl);
+                        dt.appendChild(live);
+                    }
+                }).catch(()=>{});
+        } catch(_) {}
+
         // переключение вкладок
         mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach((btn) => {
             btn.onclick = () => {
@@ -1665,7 +1721,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const shell = document.createElement('div');
         shell.className = 'admin-panel';
         shell.style.marginTop = '8px'; shell.style.padding = '8px'; shell.style.border = '1px solid rgba(255,255,255,0.1)'; shell.style.borderRadius = '10px';
-        const title = document.createElement('div'); title.style.marginBottom = '6px'; title.textContent = 'Спецсобытия матча';
+    const title = document.createElement('div'); title.style.marginBottom = '6px'; title.textContent = 'Спецсобытия матча';
+    // Блок статуса матча: scheduled|live|finished
+    const statusRow = document.createElement('div'); statusRow.style.display='flex'; statusRow.style.gap='8px'; statusRow.style.alignItems='center'; statusRow.style.marginBottom='6px';
+    const sLab = document.createElement('div'); sLab.textContent = 'Статус:';
+    const sSel = document.createElement('select'); sSel.innerHTML = '<option value="scheduled">Запланирован</option><option value="live">Матч идет</option><option value="finished">Матч завершен</option>';
+    const sBtn = document.createElement('button'); sBtn.className = 'details-btn'; sBtn.textContent = 'Применить статус';
+    statusRow.append(sLab, sSel, sBtn);
         const row1 = document.createElement('div'); row1.style.display='flex'; row1.style.gap='8px'; row1.style.alignItems='center';
         const lab1 = document.createElement('div'); lab1.textContent = 'Пенальти:';
         const sel1 = document.createElement('select'); sel1.innerHTML = '<option value="">—</option><option value="1">Да</option><option value="0">Нет</option>';
@@ -1677,8 +1739,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const actions = document.createElement('div'); actions.style.marginTop='8px';
         const save = document.createElement('button'); save.className = 'details-btn'; save.textContent = 'Сохранить и рассчитать';
         actions.append(save);
-        shell.append(title, row1, row2, actions);
+        shell.append(title, statusRow, row1, row2, actions);
         host.appendChild(shell);
+
+        // Инициализируем селектор статуса текущим значением
+        try {
+            fetch(`/api/match/status/get?home=${encodeURIComponent(m.home||'')}&away=${encodeURIComponent(m.away||'')}`)
+                .then(r=>r.json()).then(s => { if (s?.status) sSel.value = s.status; }).catch(()=>{});
+        } catch(_) {}
 
         // Загрузим текущее состояние
         fetch(`/api/specials/get?home=${encodeURIComponent(m.home||'')}&away=${encodeURIComponent(m.away||'')}`)
@@ -1687,6 +1755,31 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (d.penalty_yes === 1) sel1.value = '1'; else if (d.penalty_yes === 0) sel1.value = '0'; else sel1.value='';
                 if (d.redcard_yes === 1) sel2.value = '1'; else if (d.redcard_yes === 0) sel2.value = '0'; else sel2.value='';
             }).catch(()=>{});
+
+        // Сохранение статуса
+        sBtn.addEventListener('click', () => {
+            const fd = new FormData();
+            fd.append('initData', tg?.initData || '');
+            fd.append('home', m.home || '');
+            fd.append('away', m.away || '');
+            fd.append('status', sSel.value || 'scheduled');
+            sBtn.disabled = true; const old = sBtn.textContent; sBtn.textContent = 'Сохранение...';
+            fetch('/api/match/status/set', { method: 'POST', body: fd })
+                .then(r => r.json())
+                .then(resp => {
+                    if (resp?.error) { try { tg?.showAlert?.(resp.error); } catch(_) {} return; }
+                    try { tg?.showAlert?.('Статус обновлён'); } catch(_) {}
+                    // Обновим LIVE стор для индикации и уведомления
+                    try {
+                        if (!window.__LIVE_STATUS) window.__LIVE_STATUS = { pairs: new Set(), ts: 0 };
+                        const key = `${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}`;
+                        if (sSel.value === 'live') { window.__LIVE_STATUS.pairs.add(key); }
+                        if (sSel.value === 'finished') { window.__LIVE_STATUS.pairs.delete(key); }
+                    } catch(_) {}
+                })
+                .catch(err => { console.error('match status set error', err); try { tg?.showAlert?.('Ошибка сохранения статуса'); } catch(_) {} })
+                .finally(()=>{ sBtn.disabled=false; sBtn.textContent = old; });
+        });
 
         save.addEventListener('click', () => {
             const fd = new FormData();
@@ -1707,33 +1800,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function loadAchievementsCatalog() {
-        const table = document.getElementById('achv-catalog-table');
-        const updated = document.getElementById('achv-catalog-updated');
-        if (!table) return;
-    fetch('/api/achievements-catalog').then(r => r.json()).then(data => {
-            const tbody = table.querySelector('tbody');
-            tbody.innerHTML = '';
-            const catalog = data.catalog || [];
-            // строим таблицу: шапка из трёх колонок уровней
-            catalog.forEach(group => {
-                const header = document.createElement('tr');
-        const first = document.createElement('td'); first.textContent = group.title;
-                const t1 = document.createElement('td'); t1.textContent = `${group.tiers[0].name} ${group.tiers[0].target}`;
-                const t2 = document.createElement('td'); t2.textContent = `${group.tiers[1].name} ${group.tiers[1].target}`;
-                const t3 = document.createElement('td'); t3.textContent = `${group.tiers[2].name} ${group.tiers[2].target}`;
-        header.append(first, t1, t2, t3);
-                tbody.appendChild(header);
-
-                const descRow = document.createElement('tr');
-                const descTitle = document.createElement('td'); descTitle.textContent = 'Описание';
-                const desc = document.createElement('td'); desc.colSpan = 3; desc.textContent = group.description;
-                descRow.append(descTitle, desc);
-                tbody.appendChild(descRow);
-            });
-            if (updated) updated.textContent = '';
-        }).catch(err => console.error('achv catalog load error', err));
-    }
+    // Удалён каталог достижений
 
     // Кэш для реферала
     let _referralCache = null;
@@ -1807,6 +1874,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const LiveWatcher = (() => {
         let lastLiveKeys = new Set();
         const getKey = (m) => `${m.home||''}__${m.away||''}__${m.datetime||m.date||''}`;
+        const getPair = (m) => `${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}`;
         const isLive = (m) => {
             try {
                 const now = new Date();
@@ -1822,6 +1890,20 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch(_) {}
             return false;
         };
+        const fetchLiveFlags = async () => {
+            try {
+                const r = await fetch('/api/match/status/live?_=' + Date.now());
+                const d = await r.json();
+                const pairs = new Set();
+                (d.items||[]).forEach(it => { pairs.add(`${(it.home||'').toLowerCase()}__${(it.away||'').toLowerCase()}`); });
+                if (!window.__LIVE_STATUS) window.__LIVE_STATUS = { pairs: new Set(), ts: 0 };
+                window.__LIVE_STATUS.pairs = pairs;
+                window.__LIVE_STATUS.ts = Date.now();
+                return pairs;
+            } catch(_) {
+                return (window.__LIVE_STATUS && window.__LIVE_STATUS.pairs) ? window.__LIVE_STATUS.pairs : new Set();
+            }
+        };
         const showToast = (text) => {
             let cont = document.querySelector('.toast-container');
             if (!cont) { cont = document.createElement('div'); cont.className = 'toast-container'; document.body.appendChild(cont); }
@@ -1829,13 +1911,16 @@ document.addEventListener('DOMContentLoaded', () => {
             cont.appendChild(el);
             setTimeout(()=>{ el.remove(); if (cont.childElementCount===0) cont.remove(); }, 3500);
         };
-        const scan = () => {
+        const scan = async () => {
             // берём из кэша /api/schedule
             try {
                 const cached = JSON.parse(localStorage.getItem('schedule:tours') || 'null');
                 const tours = cached?.data?.tours || [];
                 const currentLive = new Set();
-                tours.forEach(t => (t.matches||[]).forEach(m => { if (isLive(m)) currentLive.add(getKey(m)); }));
+                const pairFlags = await fetchLiveFlags();
+                tours.forEach(t => (t.matches||[]).forEach(m => {
+                    if (isLive(m) || pairFlags.has(getPair(m))) currentLive.add(getKey(m));
+                }));
                 // уведомляем о новых LIVE матчах
                 currentLive.forEach(k => { if (!lastLiveKeys.has(k)) showToast('Матч начался!'); });
                 lastLiveKeys = currentLive;

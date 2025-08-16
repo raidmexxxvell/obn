@@ -128,6 +128,8 @@ BET_MAX_STAKE = int(os.environ.get('BET_MAX_STAKE', '10000'))
 BET_DAILY_MAX_STAKE = int(os.environ.get('BET_DAILY_MAX_STAKE', '50000'))
 BET_MARGIN = float(os.environ.get('BET_MARGIN', '0.06'))  # 6% маржа по умолчанию
 _LAST_SETTLE_TS = 0
+BET_MATCH_DURATION_MINUTES = int(os.environ.get('BET_MATCH_DURATION_MINUTES', '60'))  # длительность матча для авторасчёта спецрынков
+BET_LOCK_AHEAD_MINUTES = int(os.environ.get('BET_LOCK_AHEAD_MINUTES', '5'))  # за сколько минут до начала матча закрывать ставки
 
 
 # Core models used across the app
@@ -373,6 +375,15 @@ class MatchSpecials(Base):
     # Фиксация факта события в матче
     penalty_yes = Column(Integer, default=None)   # 1=yes, 0=no, None=не задано
     redcard_yes = Column(Integer, default=None)   # 1=yes, 0=no, None=не задано
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+class MatchFlags(Base):
+    __tablename__ = 'match_flags'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    home = Column(Text, nullable=False)
+    away = Column(Text, nullable=False)
+    status = Column(String(16), default='scheduled')  # scheduled | live | finished
+    live_started_at = Column(DateTime(timezone=True), nullable=True)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 class UserPhoto(Base):
@@ -1598,10 +1609,19 @@ def _build_betting_tours_payload():
             try:
                 lock = False
                 if m.get('datetime'):
-                    lock = datetime.fromisoformat(m['datetime']) <= now_local
+                    lock = datetime.fromisoformat(m['datetime']) - timedelta(minutes=BET_LOCK_AHEAD_MINUTES) <= now_local
                 elif m.get('date'):
                     d = datetime.fromisoformat(m['date']).date()
                     lock = datetime.combine(d, datetime.max.time()) <= now_local
+                # Если матч помечен как live/finished админом — обязательно закрываем
+                if SessionLocal is not None:
+                    db = get_db()
+                    try:
+                        row = db.query(MatchFlags).filter(MatchFlags.home==m.get('home',''), MatchFlags.away==m.get('away','')).first()
+                        if row and row.status in ('live','finished'):
+                            lock = True
+                    finally:
+                        db.close()
                 m['lock'] = bool(lock)
                 m['odds'] = _compute_match_odds(m.get('home',''), m.get('away',''))
                 totals = []
@@ -1684,6 +1704,86 @@ def _build_leaderboards_payloads(db: Session) -> dict:
         'server_leaders': { 'items': rows_serv, 'updated_at': datetime.now(timezone.utc).isoformat() },
         'prizes': { 'data': prizes_payload, 'updated_at': datetime.now(timezone.utc).isoformat() }
     }
+
+# --------- Admin: матч статус (scheduled | live | finished) ---------
+@app.route('/api/match/status/set', methods=['POST'])
+def api_match_status_set():
+    """Установка статуса матча админом: scheduled|live|finished. Поля: initData, home, away, status"""
+    parsed = parse_and_verify_telegram_init_data(request.form.get('initData',''))
+    if not parsed or not parsed.get('user'):
+        return jsonify({'error':'Unauthorized'}), 401
+    user_id = str(parsed['user'].get('id'))
+    admin_id = os.environ.get('ADMIN_USER_ID','')
+    if not admin_id or user_id != admin_id:
+        return jsonify({'error':'Forbidden'}), 403
+    home = (request.form.get('home') or '').strip()
+    away = (request.form.get('away') or '').strip()
+    status = (request.form.get('status') or 'scheduled').strip().lower()
+    if status not in ('scheduled','live','finished'):
+        return jsonify({'error':'Bad status'}), 400
+    if SessionLocal is None:
+        return jsonify({'error':'DB unavailable'}), 500
+    db = get_db()
+    try:
+        row = db.query(MatchFlags).filter(MatchFlags.home==home, MatchFlags.away==away).first()
+        now = datetime.now(timezone.utc)
+        if not row:
+            row = MatchFlags(home=home, away=away)
+            db.add(row)
+        row.status = status
+        if status == 'live' and not row.live_started_at:
+            row.live_started_at = now
+        if status != 'live' and row.live_started_at is None:
+            row.live_started_at = None
+        row.updated_at = now
+        db.commit()
+        # Перестроим снапшот туров (lock может зависеть от статуса)
+        try:
+            payload = _build_betting_tours_payload()
+            _snapshot_set(db, 'betting-tours', payload)
+        except Exception:
+            pass
+        if status == 'finished':
+            try: _settle_open_bets()
+            except Exception: pass
+        return jsonify({'ok': True, 'status': status})
+    finally:
+        db.close()
+
+@app.route('/api/match/status/get', methods=['GET'])
+def api_match_status_get():
+    home = (request.args.get('home') or '').strip()
+    away = (request.args.get('away') or '').strip()
+    if SessionLocal is None:
+        return jsonify({'status':'scheduled'})
+    db = get_db()
+    try:
+        row = db.query(MatchFlags).filter(MatchFlags.home==home, MatchFlags.away==away).first()
+        if not row:
+            return jsonify({'status':'scheduled'})
+        return jsonify({'status': row.status, 'live_started_at': row.live_started_at.isoformat() if row.live_started_at else ''})
+    finally:
+        db.close()
+
+@app.route('/api/match/status/live', methods=['GET'])
+def api_match_status_live():
+    """Список текущих live-матчей по флагам (для индикаторов и клиентских уведомлений)."""
+    if SessionLocal is None:
+        return jsonify({'items': []})
+    db = get_db()
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=6)
+        rows = db.query(MatchFlags).filter(MatchFlags.status=='live', MatchFlags.updated_at >= cutoff).all()
+        items = []
+        for r in rows:
+            items.append({
+                'home': r.home,
+                'away': r.away,
+                'live_started_at': r.live_started_at.isoformat() if r.live_started_at else ''
+            })
+        return jsonify({'items': items, 'updated_at': datetime.now(timezone.utc).isoformat()})
+    finally:
+        db.close()
 
 @app.route('/api/leaderboard/top-predictors')
 def api_leader_top_predictors():
@@ -3200,10 +3300,32 @@ def _settle_open_bets():
                     continue
                 won = (total > line) if side == 'over' else (total < line)
             elif b.market in ('penalty','redcard'):
-                # Да/Нет по записи в MatchSpecials
+                # Да/Нет по записи в MatchSpecials; если к моменту расчёта не внесено —
+                # считаем «Нет» только после окончания матча:
+                #  - по времени (match_datetime + BET_MATCH_DURATION_MINUTES)
+                #  - или по факту наличия результата/счёта в снапшоте/таблице
                 res = _get_special_result(b.home, b.away, b.market)
                 if res is None:
-                    continue
+                    finished = False
+                    if b.match_datetime:
+                        try:
+                            end_dt = b.match_datetime + timedelta(minutes=BET_MATCH_DURATION_MINUTES)
+                        except Exception:
+                            end_dt = b.match_datetime
+                        if end_dt <= now:
+                            finished = True
+                    if not finished:
+                        # нет уверенности по времени — ориентируемся на появление результата/счёта
+                        r = _get_match_result(b.home, b.away)
+                        if r is not None:
+                            finished = True
+                        else:
+                            tg = _get_match_total_goals(b.home, b.away)
+                            if tg is not None:
+                                finished = True
+                    if not finished:
+                        continue
+                    res = False
                 # selection: 'yes'|'no'
                 won = ((res is True) and b.selection == 'yes') or ((res is False) and b.selection == 'no')
             else:
