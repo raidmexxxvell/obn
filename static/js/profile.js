@@ -348,6 +348,34 @@ document.addEventListener('DOMContentLoaded', () => {
             next();
         };
 
+        const descFor = (a) => {
+            try {
+                const tgt = a.target;
+                switch (a.group) {
+                    case 'streak':
+                        return `Ежедневные чекины подряд. Цель: ${tgt} дней.`;
+                    case 'credits':
+                        return `Накопите кредиты до порога: ${(tgt||0).toLocaleString()} кр.`;
+                    case 'level':
+                        return `Достигните уровень: ${tgt}. Получайте опыт за активность.`;
+                    case 'invited':
+                        return `Пригласите друзей по реферальной ссылке: ${tgt} человек.`;
+                    case 'betcount':
+                        return `Сделайте ${tgt} ставок.`;
+                    case 'betwins':
+                        return `Выиграйте ${tgt} ставок.`;
+                    case 'bigodds':
+                        return `Выиграйте ставку с коэффициентом не ниже ${Number(tgt).toFixed(1)}.`;
+                    case 'markets':
+                        return `Ставьте на разные рынки (1X2, тоталы, спецсобытия и т.д.). Цель: ${tgt} типа рынков.`;
+                    case 'weeks':
+                        return `Делайте ставки в разные недели. Цель: ${tgt} недель.`;
+                    default:
+                        return '';
+                }
+            } catch(_) { return ''; }
+        };
+
         achievements.forEach(a => {
             const card = document.createElement('div');
             card.className = `achievement-card ${a.unlocked ? '' : 'locked'}`;
@@ -355,18 +383,25 @@ document.addEventListener('DOMContentLoaded', () => {
             setAchievementIcon(icon, a);
             icon.alt = a.name || 'badge';
             const name = document.createElement('div'); name.className='badge-name'; name.textContent = a.name;
-            const req = document.createElement('div'); req.className='badge-requirements';
-            if (a.group === 'streak') {
-                req.textContent = `${a.unlocked ? 'Открыто' : 'Прогресс'}: ${a.value}/${a.target} дней подряд`;
-            } else if (a.group === 'credits') {
-                req.textContent = `${a.unlocked ? 'Открыто' : 'Прогресс'}: ${(a.value||0).toLocaleString()}/${(a.target||0).toLocaleString()} кредитов`;
-            } else if (a.group === 'level') {
-                req.textContent = `${a.unlocked ? 'Открыто' : 'Прогресс'}: ${a.value}/${a.target} уровень`;
-            } else if (a.group === 'invited') {
-                req.textContent = `${a.unlocked ? 'Открыто' : 'Прогресс'}: ${a.value}/${a.target} приглашений`;
-            } else {
-                req.textContent = '';
-            }
+            // Описание (скрыто по умолчанию) + кнопка «Описание»
+            const req = document.createElement('div'); req.className='badge-requirements hidden';
+            // Короткая сводка прогресса
+            const progressLine = (() => {
+                const v = a.value ?? 0; const t = a.target ?? 0;
+                if (a.group === 'bigodds') {
+                    return `${a.unlocked ? 'Открыто' : 'Прогресс'}: ${Number(v||0).toFixed(2)} / ${Number(t||0).toFixed(1)}`;
+                }
+                return `${a.unlocked ? 'Открыто' : 'Прогресс'}: ${v} / ${t}`;
+            })();
+            const fullDesc = descFor(a);
+            req.textContent = fullDesc ? `${progressLine}. ${fullDesc}` : progressLine;
+            const toggle = document.createElement('div');
+            toggle.className = 'achv-desc-toggle';
+            toggle.textContent = 'Описание';
+            toggle.addEventListener('click', (e) => {
+                e.stopPropagation();
+                req.classList.toggle('hidden');
+            });
             const progressWrap = document.createElement('div');
             progressWrap.className = 'achv-progress-container';
             const progressBar = document.createElement('div');
@@ -375,7 +410,7 @@ document.addEventListener('DOMContentLoaded', () => {
             progressBar.style.width = `${pct}%`;
             progressWrap.appendChild(progressBar);
 
-            card.append(icon, name, req, progressWrap);
+            card.append(icon, name, toggle, req, progressWrap);
             elements.badgesContainer.appendChild(card);
         });
     // отметим, что достижения готовы
@@ -528,17 +563,20 @@ document.addEventListener('DOMContentLoaded', () => {
                         const updatedText = document.getElementById('league-updated-text');
                         if (updatedText) {
                             const now = new Date();
+                            // Сохраним ISO в data-атрибут и не дадим перезаписать более старым временем
+                            const iso = now.toISOString();
+                            updatedText.setAttribute('data-updated-iso', iso);
                             updatedText.textContent = `Обновлено: ${now.toLocaleString()}`;
                         }
                     } catch(_) {}
                     // И параллельно актуализируем по серверу принудительным GET без кэша
                     try {
                         const u = `/api/league-table?_=${Date.now()}`;
-                        const r = await fetch(u, { headers: { 'Cache-Control': 'no-cache' } });
+                        const r = await fetch(u, { headers: { 'Cache-Control': 'no-store' } });
                         const data = await r.json();
                         const updatedText = document.getElementById('league-updated-text');
                         if (updatedText && data?.updated_at) {
-                            const d2 = new Date(data.updated_at); updatedText.textContent = `Обновлено: ${d2.toLocaleString()}`;
+                            setUpdatedLabelSafely(updatedText, data.updated_at);
                         }
                     } catch(_) {}
                     // Перерисуем все панели
@@ -746,8 +784,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (idx === 3) rowEl.classList.add('rank-3');
             });
             if (updatedText && data.updated_at) {
-                const d = new Date(data.updated_at);
-                updatedText.textContent = `Обновлено: ${d.toLocaleString()}`;
+                setUpdatedLabelSafely(updatedText, data.updated_at);
             }
             // показать кнопку обновления для админа (обработчик навешивается один раз выше)
             const refreshBtn = document.getElementById('league-refresh-btn');
@@ -767,6 +804,23 @@ document.addEventListener('DOMContentLoaded', () => {
             trySignalAllReady();
             _leagueLoading = false;
         });
+    }
+
+    // Безопасное обновление метки "Обновлено":
+    // - хранит текущий ISO в data-updated-iso
+    // - обновляет текст только если новый ts >= текущего
+    function setUpdatedLabelSafely(labelEl, newIso) {
+        try {
+            const prevIso = labelEl.getAttribute('data-updated-iso');
+            const prevTs = prevIso ? Date.parse(prevIso) : 0;
+            const nextTs = Date.parse(newIso);
+            if (!Number.isFinite(nextTs)) return;
+            if (nextTs >= prevTs) {
+                labelEl.setAttribute('data-updated-iso', newIso);
+                const d = new Date(newIso);
+                labelEl.textContent = `Обновлено: ${d.toLocaleString()}`;
+            }
+        } catch(_) {}
     }
 
     let _statsLoading = false;
@@ -1172,21 +1226,29 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                     });
                     footer.appendChild(btnDetails);
-                    // Кнопка «Сделать прогноз» показывается, только если матч есть в турах для ставок
+                    // Кнопка «Сделать прогноз» показывается, только если ЭТОТ матч (с этой датой) есть в турах для ставок
                     const btn = document.createElement('button');
                     btn.className = 'details-btn';
                     btn.setAttribute('data-throttle', '800');
-                    // Кнопка «Сделать прогноз» показывается, только если матч есть в турах для ставок
                     const toursCache = (() => { try { return JSON.parse(localStorage.getItem('betting:tours') || 'null'); } catch(_) { return null; } })();
+                    // Ключ матча: home__away__YYYY-MM-DD (чтобы отличать одноимённые пары в разных турах)
+                    const mkKey = (obj) => {
+                        try {
+                            const h = (obj?.home || '').toLowerCase().trim();
+                            const a = (obj?.away || '').toLowerCase().trim();
+                            const raw = obj?.date ? String(obj.date) : (obj?.datetime ? String(obj.datetime) : '');
+                            const d = raw ? raw.slice(0, 10) : '';
+                            return `${h}__${a}__${d}`;
+                        } catch(_) { return `${(obj?.home||'').toLowerCase()}__${(obj?.away||'').toLowerCase()}__`; }
+                    };
                     const tourMatches = new Set();
                     try {
                         const tours = toursCache?.data?.tours || toursCache?.tours || [];
                         tours.forEach(t => (t.matches||[]).forEach(x => {
-                            const key = `${(x.home||'').toLowerCase()}__${(x.away||'').toLowerCase()}`;
-                            tourMatches.add(key);
+                            tourMatches.add(mkKey(x));
                         }));
                     } catch(_) {}
-                    const thisKey = `${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}`;
+                    const thisKey = mkKey(m);
                     const matchHasPrediction = tourMatches.has(thisKey);
                     if (matchHasPrediction) {
                         btn.textContent = 'Сделать прогноз';

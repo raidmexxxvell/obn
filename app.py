@@ -495,23 +495,39 @@ def get_achievements_sheet():
     try:
         ws = doc.worksheet("achievements")
     except gspread.exceptions.WorksheetNotFound:
-        ws = doc.add_worksheet(title="achievements", rows=1000, cols=10)
+        ws = doc.add_worksheet(title="achievements", rows=1000, cols=20)
         # user_id | credits_tier | credits_unlocked_at | level_tier | level_unlocked_at | streak_tier | streak_unlocked_at | invited_tier | invited_unlocked_at
         _metrics_inc('sheet_writes', 1)
-        ws.update('A1:I1', [[
-            'user_id', 'credits_tier', 'credits_unlocked_at', 'level_tier', 'level_unlocked_at', 'streak_tier', 'streak_unlocked_at', 'invited_tier', 'invited_unlocked_at'
-        ]])
+        ws.update(values=[[
+            'user_id',
+            'credits_tier','credits_unlocked_at',
+            'level_tier','level_unlocked_at',
+            'streak_tier','streak_unlocked_at',
+            'invited_tier','invited_unlocked_at',
+            'betcount_tier','betcount_unlocked_at',
+            'betwins_tier','betwins_unlocked_at',
+            'bigodds_tier','bigodds_unlocked_at',
+            'markets_tier','markets_unlocked_at',
+            'weeks_tier','weeks_unlocked_at'
+        ]], range_name='A1:S1')
     # Убедимся, что колонки для invited присутствуют
     try:
         headers = ws.row_values(1)
-        if len(headers) < 9:
-            headers = list(headers) + [''] * (9 - len(headers))
-            headers[0:9] = headers[0:9]
-            if len(headers) >= 7:
-                if len(headers) < 9:
-                    headers += ['invited_tier', 'invited_unlocked_at']
+        want = [
+            'user_id',
+            'credits_tier','credits_unlocked_at',
+            'level_tier','level_unlocked_at',
+            'streak_tier','streak_unlocked_at',
+            'invited_tier','invited_unlocked_at',
+            'betcount_tier','betcount_unlocked_at',
+            'betwins_tier','betwins_unlocked_at',
+            'bigodds_tier','bigodds_unlocked_at',
+            'markets_tier','markets_unlocked_at',
+            'weeks_tier','weeks_unlocked_at'
+        ]
+        if headers != want:
             _metrics_inc('sheet_writes', 1)
-            ws.update('A1:I1', [headers[:9]])
+            ws.update(values=[want], range_name='A1:S1')
     except Exception as e:
         app.logger.warning(f"Не удалось проверить/обновить заголовки achievements: {e}")
     return ws
@@ -792,9 +808,9 @@ def get_referrals_sheet():
         ws = doc.worksheet("referrals")
     except gspread.exceptions.WorksheetNotFound:
         ws = doc.add_worksheet(title="referrals", rows=1000, cols=6)
-        ws.update('A1:F1', [[
+        ws.update(values=[[
             'user_id', 'referral_code', 'referrer_id', 'invited_count', 'created_at', 'updated_at'
-        ]])
+        ]], range_name='A1:F1')
     return ws
 
 def mirror_referral_to_sheets(user_id: int, referral_code: str, referrer_id: int|None, invited_count: int, created_at_iso: str|None = None):
@@ -865,8 +881,8 @@ def get_user_achievements_row(user_id):
         cell = ws.find(str(user_id), in_column=1)
         if cell:
             row_vals = ws.row_values(cell.row)
-            # Гарантируем длину
-            row_vals = list(row_vals) + [''] * (9 - len(row_vals))
+            # Гарантируем длину до 19 колонок (A..S)
+            row_vals = list(row_vals) + [''] * (19 - len(row_vals))
             return cell.row, {
                 'credits_tier': int(row_vals[1] or 0),
                 'credits_unlocked_at': row_vals[2] or '',
@@ -875,12 +891,34 @@ def get_user_achievements_row(user_id):
                 'streak_tier': int(row_vals[5] or 0),
                 'streak_unlocked_at': row_vals[6] or '',
                 'invited_tier': int(row_vals[7] or 0),
-                'invited_unlocked_at': row_vals[8] or ''
+                'invited_unlocked_at': row_vals[8] or '',
+                'betcount_tier': int((row_vals[9] or 0)),
+                'betcount_unlocked_at': row_vals[10] or '',
+                'betwins_tier': int((row_vals[11] or 0)),
+                'betwins_unlocked_at': row_vals[12] or '',
+                'bigodds_tier': int((row_vals[13] or 0)),
+                'bigodds_unlocked_at': row_vals[14] or '',
+                'markets_tier': int((row_vals[15] or 0)),
+                'markets_unlocked_at': row_vals[16] or '',
+                'weeks_tier': int((row_vals[17] or 0)),
+                'weeks_unlocked_at': row_vals[18] if len(row_vals) > 18 else ''
             }
     except gspread.exceptions.APIError as e:
         app.logger.error(f"Ошибка API при чтении достижений: {e}")
     # Создаём новую строку (включая invited_tier/unlocked_at)
-    ws.append_row([str(user_id), '0', '', '0', '', '0', '', '0', ''])
+    # Инициализируем 19 колонок: user_id + 9 пар (tier, unlocked_at)
+    ws.append_row([
+        str(user_id),
+        '0','',  # credits
+        '0','',  # level
+        '0','',  # streak
+        '0','',  # invited
+        '0','',  # betcount
+        '0','',  # betwins
+        '0','',  # bigodds
+        '0','',  # markets
+        '0',''   # weeks
+    ])
     # Найдём только что добавленную (последняя строка)
     last_row = len(ws.get_all_values())
     return last_row, {
@@ -891,7 +929,17 @@ def get_user_achievements_row(user_id):
         'streak_tier': 0,
         'streak_unlocked_at': '',
         'invited_tier': 0,
-        'invited_unlocked_at': ''
+        'invited_unlocked_at': '',
+        'betcount_tier': 0,
+        'betcount_unlocked_at': '',
+        'betwins_tier': 0,
+        'betwins_unlocked_at': '',
+        'bigodds_tier': 0,
+        'bigodds_unlocked_at': '',
+        'markets_tier': 0,
+        'markets_unlocked_at': '',
+        'weeks_tier': 0,
+        'weeks_unlocked_at': ''
     }
 
 def compute_tier(value: int, thresholds) -> int:
@@ -2271,6 +2319,66 @@ def api_achievements_catalog():
                     {'tier':3, 'name':'Легенда', 'target':100}
                 ],
                 'description': 'ОПИСАНИЕ: достигайте уровней за счёт опыта'
+            },
+            {
+                'group': 'invited',
+                'title': 'Приглашения',
+                'tiers': [
+                    {'tier':1, 'name':'Рекрутер', 'target':10},
+                    {'tier':2, 'name':'Посол', 'target':50},
+                    {'tier':3, 'name':'Легенда', 'target':150}
+                ],
+                'description': 'Пригласите друзей через реферальную ссылку (10/50/150)'
+            },
+            {
+                'group': 'betcount',
+                'title': 'Количество ставок',
+                'tiers': [
+                    {'tier':1, 'name':'Новичок ставок', 'target':10},
+                    {'tier':2, 'name':'Профи ставок', 'target':50},
+                    {'tier':3, 'name':'Марафонец', 'target':200}
+                ],
+                'description': 'Сделайте 10/50/200 ставок'
+            },
+            {
+                'group': 'betwins',
+                'title': 'Победы в ставках',
+                'tiers': [
+                    {'tier':1, 'name':'Счастливчик', 'target':5},
+                    {'tier':2, 'name':'Снайпер', 'target':20},
+                    {'tier':3, 'name':'Чемпион', 'target':75}
+                ],
+                'description': 'Выиграйте 5/20/75 ставок'
+            },
+            {
+                'group': 'bigodds',
+                'title': 'Крупный коэффициент',
+                'tiers': [
+                    {'tier':1, 'name':'Рисковый', 'target':3.0},
+                    {'tier':2, 'name':'Хайроллер', 'target':4.5},
+                    {'tier':3, 'name':'Легенда кэфов', 'target':6.0}
+                ],
+                'description': 'Выиграйте ставку с коэффициентом не ниже 3.0/4.5/6.0'
+            },
+            {
+                'group': 'markets',
+                'title': 'Разнообразие рынков',
+                'tiers': [
+                    {'tier':1, 'name':'Универсал I', 'target':2},
+                    {'tier':2, 'name':'Универсал II', 'target':3},
+                    {'tier':3, 'name':'Универсал III', 'target':4}
+                ],
+                'description': 'Ставьте на разные рынки: 1x2, тоталы, пенальти, красные (2/3/4 типа)'
+            },
+            {
+                'group': 'weeks',
+                'title': 'Регулярность по неделям',
+                'tiers': [
+                    {'tier':1, 'name':'Регуляр', 'target':2},
+                    {'tier':2, 'name':'Постоянный', 'target':5},
+                    {'tier':3, 'name':'Железный', 'target':10}
+                ],
+                'description': 'Делайте ставки в разные недели (2/5/10 недель)'
             }
         ]
         return jsonify({'catalog': catalog})
@@ -2484,6 +2592,12 @@ def get_achievements():
         credits_thresholds = [(500000, 3), (50000, 2), (10000, 1)]
         level_thresholds = [(100, 3), (50, 2), (25, 1)]
         invited_thresholds = [(150, 3), (50, 2), (10, 1)]
+        # Новые достижения
+        betcount_thresholds = [(200, 3), (50, 2), (10, 1)]
+        betwins_thresholds = [(75, 3), (20, 2), (5, 1)]
+        bigodds_thresholds = [(6.0, 3), (4.5, 2), (3.0, 1)]
+        markets_thresholds = [(4, 3), (3, 2), (2, 1)]
+        weeks_thresholds = [(10, 3), (5, 2), (2, 1)]
 
         # Вычисляем текущие тиры
         streak_tier = compute_tier(user['consecutive_days'], streak_thresholds)
@@ -2498,6 +2612,50 @@ def get_achievements():
             finally:
                 db.close()
         invited_tier = compute_tier(invited_count, invited_thresholds)
+
+        # Считаем ставки пользователя
+        bet_stats = {
+            'total': 0,
+            'won': 0,
+            'max_win_odds': 0.0,
+            'markets_used': set(),
+            'weeks_active': set(),
+        }
+        if SessionLocal is not None:
+            db: Session = get_db()
+            try:
+                qs = db.query(Bet).filter(Bet.user_id == int(user_id))
+                for b in qs.all():
+                    bet_stats['total'] += 1
+                    try:
+                        if (b.status or '').lower() == 'won':
+                            bet_stats['won'] += 1
+                            k = float((b.odds or '0').replace(',', '.'))
+                            if k > bet_stats['max_win_odds']:
+                                bet_stats['max_win_odds'] = k
+                    except Exception:
+                        pass
+                    mk = (b.market or '1x2').lower()
+                    # нормализуем specials: penalty/redcard считаем как 'specials'
+                    if mk in ('penalty', 'redcard'):
+                        mk = 'specials'
+                    bet_stats['markets_used'].add(mk)
+                    # неделя по МСК-округлению (используем период лидерборда)
+                    if b.placed_at:
+                        try:
+                            # старт недели МСК для даты b.placed_at и в корзину week_key (UTC iso)
+                            start = _week_period_start_msk_to_utc(b.placed_at.astimezone(timezone.utc))
+                            bet_stats['weeks_active'].add(start.date().isoformat())
+                        except Exception:
+                            pass
+            finally:
+                db.close()
+
+        betcount_tier = compute_tier(bet_stats['total'], betcount_thresholds)
+        betwins_tier = compute_tier(bet_stats['won'], betwins_thresholds)
+        bigodds_tier = compute_tier(bet_stats['max_win_odds'], bigodds_thresholds)
+        markets_tier = compute_tier(len(bet_stats['markets_used']), markets_thresholds)
+        weeks_tier = compute_tier(len(bet_stats['weeks_active']), weeks_thresholds)
 
         # Обновляем прогресс в отдельной таблице (фиксируем время первого получения каждого тира)
         ach_row, ach = get_user_achievements_row(user_id)
@@ -2515,6 +2673,23 @@ def get_achievements():
         if invited_tier > ach.get('invited_tier', 0):
             updates.append({'range': f'H{ach_row}', 'values': [[str(invited_tier)]]})
             updates.append({'range': f'I{ach_row}', 'values': [[now_iso]]})
+        # Новые группы: фиксируем апгрейд тиров
+        if betcount_tier > ach.get('betcount_tier', 0):
+            updates.append({'range': f'J{ach_row}', 'values': [[str(betcount_tier)]]})
+            updates.append({'range': f'K{ach_row}', 'values': [[now_iso]]})
+        if betwins_tier > ach.get('betwins_tier', 0):
+            updates.append({'range': f'L{ach_row}', 'values': [[str(betwins_tier)]]})
+            updates.append({'range': f'M{ach_row}', 'values': [[now_iso]]})
+        if bigodds_tier > ach.get('bigodds_tier', 0):
+            updates.append({'range': f'N{ach_row}', 'values': [[str(bigodds_tier)]]})
+            updates.append({'range': f'O{ach_row}', 'values': [[now_iso]]})
+        if markets_tier > ach.get('markets_tier', 0):
+            updates.append({'range': f'P{ach_row}', 'values': [[str(markets_tier)]]})
+            updates.append({'range': f'Q{ach_row}', 'values': [[now_iso]]})
+        if weeks_tier > ach.get('weeks_tier', 0):
+            updates.append({'range': f'R{ach_row}', 'values': [[str(weeks_tier)]]})
+            updates.append({'range': f'S{ach_row}', 'values': [[now_iso]]})
+
         if updates:
             get_achievements_sheet().batch_update(updates)
 
@@ -2544,6 +2719,36 @@ def get_achievements():
             achievements.append({ 'group': 'invited', 'tier': invited_tier, 'name': {1:'Рекрутер',2:'Посол',3:'Легенда'}[invited_tier], 'value': invited_count, 'target': {1:10,2:50,3:150}[invited_tier], 'icon': {1:'bronze',2:'silver',3:'gold'}[invited_tier], 'unlocked': True })
         else:
             achievements.append({ 'group': 'invited', 'tier': 1, 'name': 'Рекрутер', 'value': invited_count, 'target': 10, 'icon': 'bronze', 'unlocked': False })
+
+        # Количество ставок: 10/50/200
+        if betcount_tier:
+            achievements.append({ 'group': 'betcount', 'tier': betcount_tier, 'name': {1:'Новичок ставок',2:'Профи ставок',3:'Марафонец'}[betcount_tier], 'value': bet_stats['total'], 'target': {1:10,2:50,3:200}[betcount_tier], 'icon': {1:'bronze',2:'silver',3:'gold'}[betcount_tier], 'unlocked': True })
+        else:
+            achievements.append({ 'group': 'betcount', 'tier': 1, 'name': 'Новичок ставок', 'value': bet_stats['total'], 'target': 10, 'icon': 'bronze', 'unlocked': False })
+
+        # Победы в ставках: 5/20/75
+        if betwins_tier:
+            achievements.append({ 'group': 'betwins', 'tier': betwins_tier, 'name': {1:'Счастливчик',2:'Снайпер',3:'Чемпион'}[betwins_tier], 'value': bet_stats['won'], 'target': {1:5,2:20,3:75}[betwins_tier], 'icon': {1:'bronze',2:'silver',3:'gold'}[betwins_tier], 'unlocked': True })
+        else:
+            achievements.append({ 'group': 'betwins', 'tier': 1, 'name': 'Счастливчик', 'value': bet_stats['won'], 'target': 5, 'icon': 'bronze', 'unlocked': False })
+
+        # Крупный коэффициент: 3.0/4.5/6.0
+        if bigodds_tier:
+            achievements.append({ 'group': 'bigodds', 'tier': bigodds_tier, 'name': {1:'Рисковый',2:'Хайроллер',3:'Легенда кэфов'}[bigodds_tier], 'value': bet_stats['max_win_odds'], 'target': {1:3.0,2:4.5,3:6.0}[bigodds_tier], 'icon': {1:'bronze',2:'silver',3:'gold'}[bigodds_tier], 'unlocked': True })
+        else:
+            achievements.append({ 'group': 'bigodds', 'tier': 1, 'name': 'Рисковый', 'value': bet_stats['max_win_odds'], 'target': 3.0, 'icon': 'bronze', 'unlocked': False })
+
+        # Разнообразие рынков: 2/3/4
+        if markets_tier:
+            achievements.append({ 'group': 'markets', 'tier': markets_tier, 'name': {1:'Универсал I',2:'Универсал II',3:'Универсал III'}[markets_tier], 'value': len(bet_stats['markets_used']), 'target': {1:2,2:3,3:4}[markets_tier], 'icon': {1:'bronze',2:'silver',3:'gold'}[markets_tier], 'unlocked': True })
+        else:
+            achievements.append({ 'group': 'markets', 'tier': 1, 'name': 'Универсал I', 'value': len(bet_stats['markets_used']), 'target': 2, 'icon': 'bronze', 'unlocked': False })
+
+        # Регулярность по неделям: 2/5/10
+        if weeks_tier:
+            achievements.append({ 'group': 'weeks', 'tier': weeks_tier, 'name': {1:'Регуляр',2:'Постоянный',3:'Железный'}[weeks_tier], 'value': len(bet_stats['weeks_active']), 'target': {1:2,2:5,3:10}[weeks_tier], 'icon': {1:'bronze',2:'silver',3:'gold'}[weeks_tier], 'unlocked': True })
+        else:
+            achievements.append({ 'group': 'weeks', 'tier': 1, 'name': 'Регуляр', 'value': len(bet_stats['weeks_active']), 'target': 2, 'icon': 'bronze', 'unlocked': False })
         return jsonify({'achievements': achievements})
 
     except Exception as e:
