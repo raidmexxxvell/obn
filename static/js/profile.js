@@ -2289,10 +2289,48 @@ document.addEventListener('DOMContentLoaded', () => {
             fetch(url).then(r=>r.json()).then(ans => {
                 const existing = subtabs?.querySelector('[data-mdtab="stream"]');
                 if (ans?.available) {
-                    if (!existing) {
-                        const tab = document.createElement('div'); tab.className='subtab-item'; tab.setAttribute('data-mdtab','stream'); tab.textContent='Трансляция';
-                        subtabs.appendChild(tab);
+                    let tabEl = existing;
+                    if (!tabEl) {
+                        tabEl = document.createElement('div');
+                        tabEl.className='subtab-item';
+                        tabEl.setAttribute('data-mdtab','stream');
+                        tabEl.textContent='Трансляция';
+                        // Навешиваем обработчик клика сразу, т.к. элемент добавляется динамически
+                        tabEl.onclick = () => {
+                            mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach((x)=>x.classList.remove('active'));
+                            tabEl.classList.add('active');
+                            homePane.style.display = 'none';
+                            awayPane.style.display = 'none';
+                            specialsPane.style.display = 'none';
+                            streamPane.style.display = '';
+                            // Лениво вставляем VK iframe только при первом показе
+                            if (!streamPane.__inited) {
+                                try {
+                                    const st = streamPane.__streamInfo || null;
+                                    if (st && (st.vkVideoId || st.vkPostUrl)) {
+                                        const host = document.createElement('div'); host.className = 'stream-wrap';
+                                        const ratio = document.createElement('div'); ratio.className = 'stream-aspect';
+                                        let src = '';
+                                        if (st.vkVideoId) {
+                                            src = `https://vk.com/video_ext.php?oid=${encodeURIComponent(st.vkVideoId.split('_')[0])}&id=${encodeURIComponent(st.vkVideoId.split('_')[1])}&hd=2&autoplay=${st.autoplay?1:0}`;
+                                        } else if (st.vkPostUrl) {
+                                            src = st.vkPostUrl;
+                                        }
+                                        const ifr = document.createElement('iframe');
+                                        ifr.src = src;
+                                        ifr.allow = 'autoplay; fullscreen; encrypted-media;';
+                                        ifr.referrerPolicy = 'strict-origin-when-cross-origin';
+                                        ratio.appendChild(ifr); host.appendChild(ratio); streamPane.innerHTML=''; streamPane.appendChild(host);
+                                        streamPane.__inited = true;
+                                    } else {
+                                        streamPane.querySelector('.stream-skeleton')?.replaceChildren(document.createTextNode('Трансляция недоступна'));
+                                    }
+                                } catch(_) {}
+                            }
+                        };
+                        subtabs.appendChild(tabEl);
                     }
+                    // сохраняем информацию о трансляции (используется при ленивой инициализации)
                     streamPane.__streamInfo = ans;
                 } else if (existing) {
                     existing.remove();
