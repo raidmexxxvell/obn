@@ -2141,7 +2141,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else { dt.textContent = ''; }
         } catch(_) { dt.textContent = match.time || ''; }
 
-        // вкладки (добавим «Спецсобытия» для админа)
+    // вкладки (добавим «Спецсобытия» для админа и «Трансляция», если есть в конфиге)
         const subtabs = mdPane.querySelector('.modal-subtabs');
         mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach((el) => el.classList.remove('active'));
         // создаём/находим панель спецсобытий
@@ -2184,11 +2184,38 @@ document.addEventListener('DOMContentLoaded', () => {
                 existed.remove();
             }
         } catch(_) {}
+        // Вкладка «Трансляция»: создаём/находим и добавляем при наличии источника
+        let streamPane = document.getElementById('md-pane-stream');
+        if (!streamPane) {
+            streamPane = document.createElement('div');
+            streamPane.id = 'md-pane-stream';
+            streamPane.className = 'md-pane';
+            streamPane.style.display = 'none';
+            mdPane.querySelector('.modal-body')?.appendChild(streamPane);
+        }
+        // Очистка плеера при каждом открытии экрана (ленивая вставка при показе)
+        streamPane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
+        // При наличии конфига добавим кнопку-вкладку «Трансляция»
+        try {
+            const st = window.__STREAMS__?.findStream(match);
+            const existingStreamTab = subtabs?.querySelector('[data-mdtab="stream"]');
+            if (st) {
+                if (!existingStreamTab) {
+                    const tab = document.createElement('div');
+                    tab.className = 'subtab-item'; tab.setAttribute('data-mdtab','stream'); tab.textContent = 'Трансляция';
+                    subtabs.appendChild(tab);
+                }
+            } else if (existingStreamTab) {
+                existingStreamTab.remove();
+            }
+        } catch(_) {}
+
         // по умолчанию активируем «Команда 1»
         mdPane.querySelector('.modal-subtabs .subtab-item[data-mdtab="home"]').classList.add('active');
         homePane.style.display = '';
         awayPane.style.display = 'none';
         specialsPane.style.display = 'none';
+        streamPane.style.display = 'none';
 
         // заполнение составов
         const renderRoster = (pane, players) => {
@@ -2240,12 +2267,42 @@ document.addEventListener('DOMContentLoaded', () => {
                 mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach((x)=>x.classList.remove('active'));
                 btn.classList.add('active');
                 const key = btn.getAttribute('data-mdtab');
-                if (key === 'home') { homePane.style.display = ''; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; }
-                else if (key === 'away') { homePane.style.display = 'none'; awayPane.style.display = ''; specialsPane.style.display = 'none'; }
+                if (key === 'home') { homePane.style.display = ''; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; streamPane.style.display = 'none'; }
+                else if (key === 'away') { homePane.style.display = 'none'; awayPane.style.display = ''; specialsPane.style.display = 'none'; streamPane.style.display = 'none'; }
                 else if (key === 'specials') {
                     homePane.style.display = 'none'; awayPane.style.display = 'none'; specialsPane.style.display = '';
                     // отрисуем спецпанель внутри specialsPane
                     renderSpecialsPane(specialsPane, match);
+                    streamPane.style.display = 'none';
+                } else if (key === 'stream') {
+                    homePane.style.display = 'none'; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; streamPane.style.display = '';
+                    // Лениво вставляем VK iframe только при первом показе
+                    if (!streamPane.__inited) {
+                        try {
+                            const st = window.__STREAMS__?.findStream(match);
+                            if (st) {
+                                const host = document.createElement('div'); host.className = 'stream-wrap';
+                                const ratio = document.createElement('div'); ratio.className = 'stream-aspect';
+                                // Формирование src. Вариант 1: video id типа "-12345_67890"; Вариант 2: пост.
+                                let src = '';
+                                if (st.vkVideoId) {
+                                    // embed-плеер VK
+                                    src = `https://vk.com/video_ext.php?oid=${encodeURIComponent(st.vkVideoId.split('_')[0])}&id=${encodeURIComponent(st.vkVideoId.split('_')[1])}&hd=2&autoplay=${st.autoplay?1:0}`;
+                                } else if (st.vkPostUrl) {
+                                    // На случай ссылки на пост с видео — VK обычно редиректит на плеер
+                                    src = st.vkPostUrl;
+                                }
+                                const ifr = document.createElement('iframe');
+                                ifr.src = src;
+                                ifr.allow = 'autoplay; fullscreen; encrypted-media;';
+                                ifr.referrerPolicy = 'strict-origin-when-cross-origin';
+                                ratio.appendChild(ifr); host.appendChild(ratio); streamPane.innerHTML=''; streamPane.appendChild(host);
+                                streamPane.__inited = true;
+                            } else {
+                                streamPane.querySelector('.stream-skeleton')?.replaceChildren(document.createTextNode('Трансляция недоступна'));
+                            }
+                        } catch(_) {}
+                    }
                 }
             };
         });
