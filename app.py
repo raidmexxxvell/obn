@@ -9,18 +9,36 @@ from datetime import timedelta
 from urllib.parse import parse_qs, urlparse
 
 from flask import Flask, request, jsonify, render_template
+# Optional gzip/br compression via flask-compress (lazy/dynamic import to avoid hard dependency in dev)
+Compress = None
+try:
+    import importlib
+    if getattr(importlib, 'util', None) and importlib.util.find_spec('flask_compress') is not None:
+        _comp_mod = importlib.import_module('flask_compress')
+        Compress = getattr(_comp_mod, 'Compress', None)
+except Exception:
+    Compress = None
 
 import gspread
 from google.oauth2.service_account import Credentials
 
 from sqlalchemy import (
-    create_engine, Column, Integer, String, Text, DateTime, Date, func, case, and_
+    create_engine, Column, Integer, String, Text, DateTime, Date, func, case, and_, Index
 )
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 import threading
 
 # Flask app
 app = Flask(__name__, static_folder='static', template_folder='templates')
+if 'COMPRESS_DISABLE' not in os.environ:
+    if Compress is not None:
+        try:
+            app.config.setdefault('COMPRESS_MIMETYPES', ['text/html', 'text/css', 'application/json', 'application/javascript'])
+            app.config.setdefault('COMPRESS_LEVEL', 6)
+            app.config.setdefault('COMPRESS_MIN_SIZE', 1024)
+            Compress(app)
+        except Exception:
+            pass
 
 # Database
 import re
@@ -38,8 +56,23 @@ def _normalize_db_url(url: str) -> str:
 
 DATABASE_URL_RAW = os.environ.get('DATABASE_URL', '').strip()
 DATABASE_URL = _normalize_db_url(DATABASE_URL_RAW)
-engine = create_engine(DATABASE_URL) if DATABASE_URL else None
-SessionLocal = sessionmaker(bind=engine) if engine else None
+engine = None
+SessionLocal = None
+if DATABASE_URL:
+    # Пул подключений с pre_ping и таймаутами; параметры можно переопределить через переменные окружения
+    _pool_size = int(os.environ.get('DB_POOL_SIZE', '5'))
+    _max_overflow = int(os.environ.get('DB_MAX_OVERFLOW', '10'))
+    _pool_recycle = int(os.environ.get('DB_POOL_RECYCLE', '1800'))  # 30 минут
+    _pool_timeout = int(os.environ.get('DB_POOL_TIMEOUT', '30'))
+    engine = create_engine(
+        DATABASE_URL,
+        pool_pre_ping=True,
+        pool_size=_pool_size,
+        max_overflow=_max_overflow,
+        pool_recycle=_pool_recycle,
+        pool_timeout=_pool_timeout,
+    )
+    SessionLocal = sessionmaker(bind=engine)
 Base = declarative_base()
 
 # Caches and TTLs
@@ -401,6 +434,10 @@ class UserPref(Base):
 # Трансляции матчей (подтвержденные админом)
 class MatchStream(Base):
     __tablename__ = 'match_streams'
+    __table_args__ = (
+        # Часто ищем по home/away/date для конкретного матча
+        Index('idx_stream_home_away_date', 'home', 'away', 'date'),
+    )
     id = Column(Integer, primary_key=True, autoincrement=True)
     home = Column(Text, nullable=False)
     away = Column(Text, nullable=False)
@@ -413,6 +450,11 @@ class MatchStream(Base):
 # Комментарии под матчем (временные, TTL ~10 минут)
 class MatchComment(Base):
     __tablename__ = 'match_comments'
+    __table_args__ = (
+        # Фильтр по матчу и по времени создания для TTL-окна и лимитов
+        Index('idx_comment_match_time', 'home', 'away', 'date', 'created_at'),
+        Index('idx_comment_user_match_time', 'user_id', 'home', 'away', 'date', 'created_at'),
+    )
     id = Column(Integer, primary_key=True, autoincrement=True)
     home = Column(Text, nullable=False)
     away = Column(Text, nullable=False)
@@ -750,6 +792,54 @@ def api_admin_order_details(order_id: int):
             db.close()
     except Exception as e:
         app.logger.error(f"Admin order details error: {e}")
+        return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
+
+@app.route('/api/admin/orders/<int:order_id>/status', methods=['POST'])
+def api_admin_order_update_status(order_id: int):
+    """Админ: изменить статус заказа. Поля: initData, status(new|paid|cancelled).
+    При обновлении отправляет уведомление пользователю в Telegram (если настроен BOT_TOKEN).
+    """
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Unauthorized'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+        new_status = (request.form.get('status') or '').strip().lower()
+        if new_status not in ('new', 'paid', 'cancelled'):
+            return jsonify({'error': 'Некорректный статус'}), 400
+        if SessionLocal is None:
+            return jsonify({'error': 'БД недоступна'}), 500
+        db: Session = get_db()
+        try:
+            order = db.get(ShopOrder, int(order_id))
+            if not order:
+                return jsonify({'error': 'Заказ не найден'}), 404
+            prev = (order.status or 'new').lower()
+            if prev == new_status:
+                return jsonify({'status': 'ok', 'id': int(order.id), 'user_id': int(order.user_id), 'total': int(order.total or 0), 'status_new': new_status, 'status_prev': prev })
+            order.status = new_status
+            order.updated_at = datetime.now(timezone.utc)
+            db.commit()
+            # Отправим уведомление пользователю (не блокируем ответ)
+            try:
+                bot_token = os.environ.get('BOT_TOKEN', '')
+                if bot_token:
+                    text = f"Статус вашего заказа №{order.id} обновлён: {new_status.upper()}"
+                    import requests
+                    requests.post(
+                        f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                        json={"chat_id": int(order.user_id), "text": text}, timeout=5
+                    )
+            except Exception as e:
+                app.logger.warning(f"User notify failed: {e}")
+            return jsonify({'status': 'ok', 'id': int(order.id), 'user_id': int(order.user_id), 'total': int(order.total or 0), 'status_new': new_status, 'status_prev': prev })
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"Admin order update status error: {e}")
         return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
 
 def ensure_weekly_baselines(db: Session, period_start: datetime):
@@ -3067,6 +3157,23 @@ def get_achievements():
         markets_thresholds = [(4, 3), (3, 2), (2, 1)]
         weeks_thresholds = [(10, 3), (5, 2), (2, 1)]
 
+        # Вспомогательная функция для вычисления следующей цели (next_target) по текущему тиру
+        def _make_next_target_fn(thresholds: list[tuple]):
+            # thresholds в виде [(target, tier), ...]
+            mp = {int(tier): target for (target, tier) in thresholds}
+            # Гарантируем наличие по убыванию/возрастанию
+            return lambda current_tier: (mp.get(current_tier + 1) if (current_tier or 0) < 3 else None) or (mp.get(1) if (current_tier or 0) <= 0 else None)
+
+        next_streak = _make_next_target_fn(streak_thresholds)
+        next_credits = _make_next_target_fn(credits_thresholds)
+        next_level = _make_next_target_fn(level_thresholds)
+        next_invited = _make_next_target_fn(invited_thresholds)
+        next_betcount = _make_next_target_fn(betcount_thresholds)
+        next_betwins = _make_next_target_fn(betwins_thresholds)
+        next_bigodds = _make_next_target_fn(bigodds_thresholds)
+        next_markets = _make_next_target_fn(markets_thresholds)
+        next_weeks = _make_next_target_fn(weeks_thresholds)
+
         # Вычисляем текущие тиры
         streak_tier = compute_tier(user['consecutive_days'], streak_thresholds)
         credits_tier = compute_tier(user['credits'], credits_thresholds)
@@ -3169,57 +3276,57 @@ def get_achievements():
 
         # Серия дней (как было)
         if streak_tier:
-            achievements.append({ 'group': 'streak', 'tier': streak_tier, 'name': {1:'Бронза',2:'Серебро',3:'Золото'}[streak_tier], 'value': user['consecutive_days'], 'target': {1:7,2:30,3:120}[streak_tier], 'icon': {1:'bronze',2:'silver',3:'gold'}[streak_tier], 'unlocked': True })
+            achievements.append({ 'group': 'streak', 'tier': streak_tier, 'name': {1:'Бронза',2:'Серебро',3:'Золото'}[streak_tier], 'value': user['consecutive_days'], 'target': {1:7,2:30,3:120}[streak_tier], 'next_target': next_streak(streak_tier), 'icon': {1:'bronze',2:'silver',3:'gold'}[streak_tier], 'unlocked': True })
         else:
-            achievements.append({ 'group': 'streak', 'tier': 1, 'name': 'Бронза', 'value': user['consecutive_days'], 'target': 7, 'icon': 'bronze', 'unlocked': False })
+            achievements.append({ 'group': 'streak', 'tier': 1, 'name': 'Бронза', 'value': user['consecutive_days'], 'target': 7, 'next_target': next_streak(0), 'icon': 'bronze', 'unlocked': False })
 
         # Кредиты: 10k/50k/500k
         if credits_tier:
-            achievements.append({ 'group': 'credits', 'tier': credits_tier, 'name': {1:'Бедолага',2:'Мажор',3:'Олигарх'}[credits_tier], 'value': user['credits'], 'target': {1:10000,2:50000,3:500000}[credits_tier], 'icon': {1:'bronze',2:'silver',3:'gold'}[credits_tier], 'unlocked': True })
+            achievements.append({ 'group': 'credits', 'tier': credits_tier, 'name': {1:'Бедолага',2:'Мажор',3:'Олигарх'}[credits_tier], 'value': user['credits'], 'target': {1:10000,2:50000,3:500000}[credits_tier], 'next_target': next_credits(credits_tier), 'icon': {1:'bronze',2:'silver',3:'gold'}[credits_tier], 'unlocked': True })
         else:
-            achievements.append({ 'group': 'credits', 'tier': 1, 'name': 'Бедолага', 'value': user['credits'], 'target': 10000, 'icon': 'bronze', 'unlocked': False })
+            achievements.append({ 'group': 'credits', 'tier': 1, 'name': 'Бедолага', 'value': user['credits'], 'target': 10000, 'next_target': next_credits(0), 'icon': 'bronze', 'unlocked': False })
 
         # Уровень: 25/50/100
         if level_tier:
-            achievements.append({ 'group': 'level', 'tier': level_tier, 'name': {1:'Новобранец',2:'Ветеран',3:'Легенда'}[level_tier], 'value': user['level'], 'target': {1:25,2:50,3:100}[level_tier], 'icon': {1:'bronze',2:'silver',3:'gold'}[level_tier], 'unlocked': True })
+            achievements.append({ 'group': 'level', 'tier': level_tier, 'name': {1:'Новобранец',2:'Ветеран',3:'Легенда'}[level_tier], 'value': user['level'], 'target': {1:25,2:50,3:100}[level_tier], 'next_target': next_level(level_tier), 'icon': {1:'bronze',2:'silver',3:'gold'}[level_tier], 'unlocked': True })
         else:
-            achievements.append({ 'group': 'level', 'tier': 1, 'name': 'Новобранец', 'value': user['level'], 'target': 25, 'icon': 'bronze', 'unlocked': False })
+            achievements.append({ 'group': 'level', 'tier': 1, 'name': 'Новобранец', 'value': user['level'], 'target': 25, 'next_target': next_level(0), 'icon': 'bronze', 'unlocked': False })
 
         # Приглашённые: 10/50/150
         if invited_tier:
-            achievements.append({ 'group': 'invited', 'tier': invited_tier, 'name': {1:'Рекрутер',2:'Посол',3:'Легенда'}[invited_tier], 'value': invited_count, 'target': {1:10,2:50,3:150}[invited_tier], 'icon': {1:'bronze',2:'silver',3:'gold'}[invited_tier], 'unlocked': True })
+            achievements.append({ 'group': 'invited', 'tier': invited_tier, 'name': {1:'Рекрутер',2:'Посол',3:'Легенда'}[invited_tier], 'value': invited_count, 'target': {1:10,2:50,3:150}[invited_tier], 'next_target': next_invited(invited_tier), 'icon': {1:'bronze',2:'silver',3:'gold'}[invited_tier], 'unlocked': True })
         else:
-            achievements.append({ 'group': 'invited', 'tier': 1, 'name': 'Рекрутер', 'value': invited_count, 'target': 10, 'icon': 'bronze', 'unlocked': False })
+            achievements.append({ 'group': 'invited', 'tier': 1, 'name': 'Рекрутер', 'value': invited_count, 'target': 10, 'next_target': next_invited(0), 'icon': 'bronze', 'unlocked': False })
 
         # Количество ставок: 10/50/200
         if betcount_tier:
-            achievements.append({ 'group': 'betcount', 'tier': betcount_tier, 'name': {1:'Новичок ставок',2:'Профи ставок',3:'Марафонец'}[betcount_tier], 'value': bet_stats['total'], 'target': {1:10,2:50,3:200}[betcount_tier], 'icon': {1:'bronze',2:'silver',3:'gold'}[betcount_tier], 'unlocked': True })
+            achievements.append({ 'group': 'betcount', 'tier': betcount_tier, 'name': {1:'Новичок ставок',2:'Профи ставок',3:'Марафонец'}[betcount_tier], 'value': bet_stats['total'], 'target': {1:10,2:50,3:200}[betcount_tier], 'next_target': next_betcount(betcount_tier), 'icon': {1:'bronze',2:'silver',3:'gold'}[betcount_tier], 'unlocked': True })
         else:
-            achievements.append({ 'group': 'betcount', 'tier': 1, 'name': 'Новичок ставок', 'value': bet_stats['total'], 'target': 10, 'icon': 'bronze', 'unlocked': False })
+            achievements.append({ 'group': 'betcount', 'tier': 1, 'name': 'Новичок ставок', 'value': bet_stats['total'], 'target': 10, 'next_target': next_betcount(0), 'icon': 'bronze', 'unlocked': False })
 
         # Победы в ставках: 5/20/75
         if betwins_tier:
-            achievements.append({ 'group': 'betwins', 'tier': betwins_tier, 'name': {1:'Счастливчик',2:'Снайпер',3:'Чемпион'}[betwins_tier], 'value': bet_stats['won'], 'target': {1:5,2:20,3:75}[betwins_tier], 'icon': {1:'bronze',2:'silver',3:'gold'}[betwins_tier], 'unlocked': True })
+            achievements.append({ 'group': 'betwins', 'tier': betwins_tier, 'name': {1:'Счастливчик',2:'Снайпер',3:'Чемпион'}[betwins_tier], 'value': bet_stats['won'], 'target': {1:5,2:20,3:75}[betwins_tier], 'next_target': next_betwins(betwins_tier), 'icon': {1:'bronze',2:'silver',3:'gold'}[betwins_tier], 'unlocked': True })
         else:
-            achievements.append({ 'group': 'betwins', 'tier': 1, 'name': 'Счастливчик', 'value': bet_stats['won'], 'target': 5, 'icon': 'bronze', 'unlocked': False })
+            achievements.append({ 'group': 'betwins', 'tier': 1, 'name': 'Счастливчик', 'value': bet_stats['won'], 'target': 5, 'next_target': next_betwins(0), 'icon': 'bronze', 'unlocked': False })
 
         # Крупный коэффициент: 3.0/4.5/6.0
         if bigodds_tier:
-            achievements.append({ 'group': 'bigodds', 'tier': bigodds_tier, 'name': {1:'Рисковый',2:'Хайроллер',3:'Легенда кэфов'}[bigodds_tier], 'value': bet_stats['max_win_odds'], 'target': {1:3.0,2:4.5,3:6.0}[bigodds_tier], 'icon': {1:'bronze',2:'silver',3:'gold'}[bigodds_tier], 'unlocked': True })
+            achievements.append({ 'group': 'bigodds', 'tier': bigodds_tier, 'name': {1:'Рисковый',2:'Хайроллер',3:'Легенда кэфов'}[bigodds_tier], 'value': bet_stats['max_win_odds'], 'target': {1:3.0,2:4.5,3:6.0}[bigodds_tier], 'next_target': next_bigodds(bigodds_tier), 'icon': {1:'bronze',2:'silver',3:'gold'}[bigodds_tier], 'unlocked': True })
         else:
-            achievements.append({ 'group': 'bigodds', 'tier': 1, 'name': 'Рисковый', 'value': bet_stats['max_win_odds'], 'target': 3.0, 'icon': 'bronze', 'unlocked': False })
+            achievements.append({ 'group': 'bigodds', 'tier': 1, 'name': 'Рисковый', 'value': bet_stats['max_win_odds'], 'target': 3.0, 'next_target': next_bigodds(0), 'icon': 'bronze', 'unlocked': False })
 
         # Разнообразие рынков: 2/3/4
         if markets_tier:
-            achievements.append({ 'group': 'markets', 'tier': markets_tier, 'name': {1:'Универсал I',2:'Универсал II',3:'Универсал III'}[markets_tier], 'value': len(bet_stats['markets_used']), 'target': {1:2,2:3,3:4}[markets_tier], 'icon': {1:'bronze',2:'silver',3:'gold'}[markets_tier], 'unlocked': True })
+            achievements.append({ 'group': 'markets', 'tier': markets_tier, 'name': {1:'Универсал I',2:'Универсал II',3:'Универсал III'}[markets_tier], 'value': len(bet_stats['markets_used']), 'target': {1:2,2:3,3:4}[markets_tier], 'next_target': next_markets(markets_tier), 'icon': {1:'bronze',2:'silver',3:'gold'}[markets_tier], 'unlocked': True })
         else:
-            achievements.append({ 'group': 'markets', 'tier': 1, 'name': 'Универсал I', 'value': len(bet_stats['markets_used']), 'target': 2, 'icon': 'bronze', 'unlocked': False })
+            achievements.append({ 'group': 'markets', 'tier': 1, 'name': 'Универсал I', 'value': len(bet_stats['markets_used']), 'target': 2, 'next_target': next_markets(0), 'icon': 'bronze', 'unlocked': False })
 
         # Регулярность по неделям: 2/5/10
         if weeks_tier:
-            achievements.append({ 'group': 'weeks', 'tier': weeks_tier, 'name': {1:'Регуляр',2:'Постоянный',3:'Железный'}[weeks_tier], 'value': len(bet_stats['weeks_active']), 'target': {1:2,2:5,3:10}[weeks_tier], 'icon': {1:'bronze',2:'silver',3:'gold'}[weeks_tier], 'unlocked': True })
+            achievements.append({ 'group': 'weeks', 'tier': weeks_tier, 'name': {1:'Регуляр',2:'Постоянный',3:'Железный'}[weeks_tier], 'value': len(bet_stats['weeks_active']), 'target': {1:2,2:5,3:10}[weeks_tier], 'next_target': next_weeks(weeks_tier), 'icon': {1:'bronze',2:'silver',3:'gold'}[weeks_tier], 'unlocked': True })
         else:
-            achievements.append({ 'group': 'weeks', 'tier': 1, 'name': 'Регуляр', 'value': len(bet_stats['weeks_active']), 'target': 2, 'icon': 'bronze', 'unlocked': False })
+            achievements.append({ 'group': 'weeks', 'tier': 1, 'name': 'Регуляр', 'value': len(bet_stats['weeks_active']), 'target': 2, 'next_target': next_weeks(0), 'icon': 'bronze', 'unlocked': False })
         return jsonify({'achievements': achievements})
 
     except Exception as e:
@@ -4102,7 +4209,8 @@ def api_streams_get():
             win = int(request.args.get('window') or '60')
         except Exception:
             win = 60
-        win = max(15, min(240, win))
+        # минимальное окно 10 минут
+        win = max(10, min(240, win))
         # найдём матч и время старта
         start_ts = None
         try:
@@ -4173,14 +4281,24 @@ def api_match_comments_list():
             ).order_by(MatchComment.created_at.desc()).limit(100)
             rows_desc = q.all()
             rows = list(reversed(rows_desc))
-            items = [
-                {
-                    'user_id': int(r.user_id),
-                    'name': (db.get(User, int(r.user_id)).display_name if db.get(User, int(r.user_id)) else 'User'),
+            # Избегаем N+1: батч-достаем имена пользователей
+            user_ids = list({int(r.user_id) for r in rows})
+            names_map = {}
+            if user_ids:
+                for u in db.query(User).filter(User.user_id.in_(user_ids)).all():
+                    try:
+                        names_map[int(u.user_id)] = u.display_name or 'User'
+                    except Exception:
+                        pass
+            items = []
+            for r in rows:
+                uid = int(r.user_id)
+                items.append({
+                    'user_id': uid,
+                    'name': names_map.get(uid, 'User'),
                     'content': r.content,
                     'created_at': r.created_at.isoformat()
-                } for r in rows
-            ]
+                })
             # ETag и Last-Modified
             last_ts = rows[-1].created_at if rows else None
             # Версия как md5 по (last_ts + count)

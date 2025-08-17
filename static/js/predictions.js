@@ -49,10 +49,12 @@
         }
         const container = document.createElement('div');
         container.className = 'pred-tours-container';
+        let visibleMatchesTotal = 0;
         tours.forEach(t => {
           const tourEl = document.createElement('div'); tourEl.className = 'tour-block';
           const title = document.createElement('div'); title.className = 'tour-title'; title.textContent = t.title || `Тур ${t.tour||''}`; tourEl.appendChild(title);
-          (t.matches||[]).forEach(m => {
+          const tourMatches = (t.matches||[]).filter(m => !m.lock);
+          tourMatches.forEach(m => {
             const card = document.createElement('div'); card.className = 'match-card';
             try { card.dataset.home = m.home || ''; card.dataset.away = m.away || ''; } catch(_) {}
             const header = document.createElement('div'); header.className = 'match-header';
@@ -149,12 +151,19 @@
             card.appendChild(moreWrap);
             card.appendChild(extra);
             tourEl.appendChild(card);
+            visibleMatchesTotal++;
           });
-          container.appendChild(tourEl);
+          if (tourMatches.length > 0) {
+            container.appendChild(tourEl);
+          }
         });
-  toursEl.innerHTML = '';
-  toursEl.appendChild(container);
-  toursEl.dataset.hasContent = '1';
+        toursEl.innerHTML = '';
+        if (visibleMatchesTotal === 0) {
+          toursEl.innerHTML = '<div class="schedule-empty">Сейчас нет доступных матчей для прогнозов</div>';
+        } else {
+          toursEl.appendChild(container);
+          toursEl.dataset.hasContent = '1';
+        }
       };
 
       const cached = readCache();

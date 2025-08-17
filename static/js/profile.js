@@ -434,7 +434,14 @@ document.addEventListener('DOMContentLoaded', () => {
             progressWrap.className = 'achv-progress-container';
             const progressBar = document.createElement('div');
             progressBar.className = 'achv-progress';
-            const pct = Math.max(0, Math.min(100, Math.floor((Math.min(a.value||0, a.target||1) / (a.target||1)) * 100)));
+            // Показываем прогресс к следующему тиру (если доступен) на основании next_target с бэкенда.
+            const val = a.value || 0;
+            const curTarget = a.target || 1;
+            const tier = a.tier || (a.unlocked ? 1 : 0);
+            const nextTarget = (typeof a.next_target !== 'undefined' && a.next_target !== null) ? a.next_target : curTarget;
+            // Если тир < 3 и nextTarget > curTarget, считаем прогресс против следующей цели; иначе — против текущей
+            const denom = (tier && tier < 3 && Number(nextTarget) > Number(curTarget)) ? Number(nextTarget) : Number(curTarget);
+            const pct = Math.max(0, Math.min(100, Math.floor((Math.min(val, denom) / (denom || 1)) * 100)));
             progressBar.style.width = `${pct}%`;
             progressWrap.appendChild(progressBar);
 
@@ -788,7 +795,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const msg = document.getElementById('admin-streams-msg');
             const winInput = document.getElementById('admin-streams-window');
             const refreshBtn = document.getElementById('admin-streams-refresh');
-            const winMin = Math.max(15, Math.min(240, parseInt(winInput.value||'60',10)));
+            const winMin = Math.max(10, Math.min(240, parseInt(winInput.value||'60',10)));
             const now = Date.now();
             msg.textContent = 'Загружаю расписание...';
             try {
@@ -1110,12 +1117,39 @@ document.addEventListener('DOMContentLoaded', () => {
                 const userHref = uname ? `https://t.me/${encodeURIComponent(uname)}` : `https://t.me/user?id=${encodeURIComponent(userId)}`;
                 const items = String(o.items_preview || '');
                 const qty = Number(o.items_qty || 0);
+                // Статус + селект для изменения
+                const statusCell = (() => {
+                    const td = document.createElement('td');
+                    const sel = document.createElement('select');
+                    sel.className = 'order-status-select';
+                    const opts = [
+                        { v: 'new', t: 'new' },
+                        { v: 'paid', t: 'paid' },
+                        { v: 'cancelled', t: 'cancelled' }
+                    ];
+                    opts.forEach(opt => { const oEl = document.createElement('option'); oEl.value = opt.v; oEl.textContent = opt.t; if ((o.status||'new')===opt.v) oEl.selected = true; sel.appendChild(oEl); });
+                    sel.addEventListener('change', async () => {
+                        try {
+                            sel.disabled = true;
+                            const form = new FormData(); form.append('initData', (window.Telegram?.WebApp?.initData || '')); form.append('status', sel.value);
+                            const r = await fetch(`/api/admin/orders/${encodeURIComponent(o.id)}/status`, { method: 'POST', body: form });
+                            const d = await r.json().catch(()=>({}));
+                            if (!r.ok) { throw new Error(d && (d.message||d.error) || 'Ошибка сохранения'); }
+                            // ok
+                        } catch (e) {
+                            console.warn('update status failed', e);
+                            try { window.Telegram?.WebApp?.showAlert?.('Не удалось обновить статус'); } catch(_) {}
+                        } finally { sel.disabled = false; }
+                    });
+                    td.appendChild(sel); return td;
+                })();
                 tr.innerHTML = `<td>${escapeHtml(String(o.id||String(idx+1)))}</td>`+
                                `<td><a href="${userHref}" target="_blank" rel="noopener noreferrer" class="user-link">${escapeHtml(userLabel)}</a></td>`+
                                `<td>${escapeHtml(items)}</td>`+
                                `<td>${qty}</td>`+
                                `<td>${Number(o.total||0).toLocaleString()}</td>`+
                                `<td>${when}</td>`;
+                tr.appendChild(statusCell);
                 tbody.appendChild(tr);
             });
             const upd = document.getElementById('admin-orders-updated');
@@ -1167,7 +1201,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 const id = document.createElement('div'); id.className = 'cart-left'; id.textContent = `Заказ №${o.id}`;
                 const sum = document.createElement('div'); sum.className = 'cart-right'; sum.textContent = `${Number(o.total||0).toLocaleString()} кр.`;
                 const when = document.createElement('div'); when.style.flex='1'; when.style.textAlign='center'; when.style.color='var(--gray)'; when.textContent = (()=>{ try { return new Date(o.created_at).toLocaleString(); } catch(_) { return o.created_at || ''; } })();
-                line.append(id, when, sum);
+                // Статус
+                const st = document.createElement('div'); st.style.minWidth = '84px'; st.style.textAlign = 'right'; st.textContent = (o.status||'new');
+                line.append(id, when, sum, st);
                 wrap.appendChild(line);
             });
             pane.innerHTML = '';
