@@ -1851,7 +1851,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const name = (teamName || '').trim();
             const candidates = [];
             if (name) {
-                candidates.push(base + encodeURIComponent(name + '.png'));
                 const norm = name.toLowerCase().replace(/\s+/g, '').replace(/ё/g, 'е');
                 candidates.push(base + encodeURIComponent(norm + '.png'));
             }
