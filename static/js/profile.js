@@ -1660,7 +1660,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (isLive) {
                         const live = document.createElement('span'); live.className = 'live-badge';
                         const dot = document.createElement('span'); dot.className = 'live-dot';
-                        const lbl = document.createElement('span'); lbl.textContent = 'LIVE';
+                        const lbl = document.createElement('span'); lbl.textContent = 'В ЭФИРЕ';
                         live.append(dot, lbl);
                         header.appendChild(live);
                     }
@@ -1939,12 +1939,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const aName = document.createElement('div'); aName.className = 'team-name'; aName.setAttribute('data-team-name', m.away || ''); aName.textContent = withTeamCount(m.away || '');
                     away.append(aImg, aName);
 
-                    // Подсветка победителя: постоянное золотое кольцо + усиление при hover
-                    const toInt = (x) => { const n = parseInt(String(x).replace(/[^0-9-]/g,''), 10); return isNaN(n) ? null : n; };
-                    const nH = toInt(sH), nA = toInt(sA);
-                    if (nH != null && nA != null && nH !== nA) {
-                        if (nH > nA) hImg.classList.add('winner-ring'); else aImg.classList.add('winner-ring');
-                    }
+                    // Подсветка победителя отключена по требованию
 
                     center.append(home, score, away);
                     card.appendChild(center);
@@ -2316,7 +2311,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 existed.remove();
             }
         } catch(_) {}
-        // Вкладка «Трансляция»: создаём/находим; показываем, если сервер говорит, что доступна (подтверждена админом и по времени)
+    // Вкладка «Трансляция»: создаём/находим; показываем, если сервер говорит, что доступна (подтверждена админом и по времени)
         let streamPane = document.getElementById('md-pane-stream');
         if (!streamPane) {
             streamPane = document.createElement('div');
@@ -2345,12 +2340,32 @@ document.addEventListener('DOMContentLoaded', () => {
             }).catch(()=>{});
         } catch(_) {}
 
+        // Вкладка «События»: создаём/находим и показываем всем
+        let eventsPane = document.getElementById('md-pane-events');
+        if (!eventsPane) {
+            eventsPane = document.createElement('div');
+            eventsPane.id = 'md-pane-events';
+            eventsPane.className = 'md-pane';
+            eventsPane.style.display = 'none';
+            mdPane.querySelector('.modal-body')?.appendChild(eventsPane);
+        }
+        // Гарантируем наличие вкладки
+        try {
+            const existedEvents = subtabs?.querySelector('[data-mdtab="events"]');
+            if (!existedEvents) {
+                const ev = document.createElement('div');
+                ev.className = 'subtab-item'; ev.setAttribute('data-mdtab','events'); ev.textContent = 'События';
+                subtabs.appendChild(ev);
+            }
+        } catch(_) {}
+
         // по умолчанию активируем «Команда 1»
         mdPane.querySelector('.modal-subtabs .subtab-item[data-mdtab="home"]').classList.add('active');
         homePane.style.display = '';
         awayPane.style.display = 'none';
-        specialsPane.style.display = 'none';
-        streamPane.style.display = 'none';
+    specialsPane.style.display = 'none';
+    streamPane.style.display = 'none';
+    if (typeof eventsPane !== 'undefined') eventsPane.style.display = 'none';
 
         // заполнение составов
         const renderRoster = (pane, players) => {
@@ -2389,26 +2404,26 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (s?.status === 'live') {
                         const live = document.createElement('span'); live.className = 'live-badge';
                         const dot = document.createElement('span'); dot.className = 'live-dot';
-                        const lbl = document.createElement('span'); lbl.textContent = 'LIVE';
+                        const lbl = document.createElement('span'); lbl.textContent = 'В ЭФИРЕ';
                         live.append(dot, lbl);
                         dt.appendChild(live);
                     }
                 }).catch(()=>{});
         } catch(_) {}
 
-        // переключение вкладок
+    // переключение вкладок
     mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach((btn) => {
             btn.onclick = () => {
                 mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach((x)=>x.classList.remove('active'));
                 btn.classList.add('active');
                 const key = btn.getAttribute('data-mdtab');
-                if (key === 'home') { homePane.style.display = ''; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; streamPane.style.display = 'none'; }
-                else if (key === 'away') { homePane.style.display = 'none'; awayPane.style.display = ''; specialsPane.style.display = 'none'; streamPane.style.display = 'none'; }
+        if (key === 'home') { homePane.style.display = ''; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; streamPane.style.display = 'none'; if (eventsPane) eventsPane.style.display = 'none'; }
+        else if (key === 'away') { homePane.style.display = 'none'; awayPane.style.display = ''; specialsPane.style.display = 'none'; streamPane.style.display = 'none'; if (eventsPane) eventsPane.style.display = 'none'; }
                 else if (key === 'specials') {
                     homePane.style.display = 'none'; awayPane.style.display = 'none'; specialsPane.style.display = '';
                     // отрисуем спецпанель внутри specialsPane
                     renderSpecialsPane(specialsPane, match);
-                    streamPane.style.display = 'none';
+                    streamPane.style.display = 'none'; if (eventsPane) eventsPane.style.display = 'none';
                 } else if (key === 'stream') {
                     homePane.style.display = 'none'; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; streamPane.style.display = '';
                     // Лениво вставляем VK iframe только при первом показе
@@ -2447,6 +2462,9 @@ document.addEventListener('DOMContentLoaded', () => {
                             try { streamPane.__startCommentsPoll(); } catch(_) {}
                         }
                     }
+                } else if (key === 'events') {
+                    homePane.style.display = 'none'; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; streamPane.style.display = 'none'; if (eventsPane) eventsPane.style.display = '';
+                    try { renderEventsPane(eventsPane, match, details?.events || null); } catch(_) {}
                     }
             };
         });
@@ -2521,7 +2539,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const row = document.createElement('div'); row.className = 'comment-item';
                     const meta = document.createElement('div'); meta.className = 'comment-meta';
                     const ts = (()=>{ try { const d = new Date(it.created_at); return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); } catch(_) { return ''; } })();
-                    meta.textContent = `${escapeHtml(it.name || 'User')} • ${ts}`;
+                    meta.textContent = `${escapeHtml(it.name || 'Игрок')} • ${ts}`;
                     const body = document.createElement('div'); body.className = 'comment-text'; body.textContent = it.content || '';
                     row.append(meta, body); listEl.appendChild(row);
                 });
@@ -2657,6 +2675,133 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Рендер событий игроков (для обеих команд) + админ-форма добавления
+    function renderEventsPane(host, match, cachedEvents) {
+        const tg = window.Telegram?.WebApp || null;
+        host.innerHTML = '';
+        const wrap = document.createElement('div');
+        wrap.className = 'events-wrap';
+
+        const mkSide = (title) => {
+            const col = document.createElement('div');
+            col.className = 'events-col';
+            const h = document.createElement('div'); h.className = 'events-title'; h.textContent = title;
+            const list = document.createElement('div'); list.className = 'events-list';
+            col.append(h, list);
+            return { col, list };
+        };
+        const homeBlock = mkSide('Команда 1');
+        const awayBlock = mkSide('Команда 2');
+        const grid = document.createElement('div'); grid.className = 'events-grid'; grid.style.display='grid'; grid.style.gridTemplateColumns='1fr 1fr'; grid.style.gap='12px';
+        grid.append(homeBlock.col, awayBlock.col);
+        wrap.appendChild(grid);
+
+        const renderList = (listEl, items) => {
+            listEl.innerHTML = '';
+            if (!items || !items.length) {
+                const empty = document.createElement('div'); empty.className = 'empty'; empty.textContent = 'Нет событий';
+                listEl.appendChild(empty); return;
+            }
+            items.forEach(e => {
+                const row = document.createElement('div'); row.className = 'event-item';
+                const left = document.createElement('div'); left.className = 'event-left';
+                const right = document.createElement('div'); right.className = 'event-right';
+                left.textContent = (e.minute!=null? `${e.minute}'` : '');
+                const typeLabel = { goal:'Гол', assist:'Пас', yellow:'Желтая', red:'Красная' }[e.type] || e.type;
+                right.textContent = `${typeLabel}: ${e.player}${e.note? ' — ' + e.note : ''}`;
+                row.style.display='flex'; row.style.gap='8px'; row.style.alignItems='center';
+                row.append(left, right); listEl.appendChild(row);
+            });
+        };
+
+        const applyData = (data) => {
+            try {
+                renderList(homeBlock.list, data?.home || []);
+                renderList(awayBlock.list, data?.away || []);
+            } catch(_) {
+                renderList(homeBlock.list, []); renderList(awayBlock.list, []);
+            }
+        };
+
+        // начальный рендер
+        if (cachedEvents) applyData(cachedEvents);
+
+        // актуализируем с сервера
+        const refresh = () => {
+            const url = `/api/match/events/list?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}`;
+            fetch(url).then(r=>r.json()).then(d => applyData(d?.items)).catch(()=>{});
+        };
+        refresh();
+
+        // Админ-форма
+        try {
+            const adminId = document.body.getAttribute('data-admin');
+            const currentId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id ? String(window.Telegram.WebApp.initDataUnsafe.user.id) : '';
+            const isAdmin = !!(adminId && currentId && String(adminId) === currentId);
+            if (isAdmin) {
+                const form = document.createElement('div'); form.className = 'admin-panel';
+                form.style.marginTop='12px'; form.style.padding='8px'; form.style.border='1px solid rgba(255,255,255,0.1)'; form.style.borderRadius='10px';
+                form.innerHTML = `
+                    <div style="margin-bottom:6px; font-weight:600;">Добавить событие</div>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                        <label>Сторона:
+                            <select id="ev-team"><option value="home">Команда 1</option><option value="away">Команда 2</option></select>
+                        </label>
+                        <label>Минута:
+                            <input type="number" id="ev-minute" min="0" max="200" placeholder="мин" style="width:80px;" />
+                        </label>
+                        <label>Игрок:
+                            <input type="text" id="ev-player" placeholder="ФИО" />
+                        </label>
+                        <label>Тип:
+                            <select id="ev-type">
+                                <option value="goal">Гол</option>
+                                <option value="assist">Пас</option>
+                                <option value="yellow">Желтая</option>
+                                <option value="red">Красная</option>
+                            </select>
+                        </label>
+                        <label>Заметка:
+                            <input type="text" id="ev-note" placeholder="необязательно" />
+                        </label>
+                        <button class="details-btn" id="ev-save">Добавить</button>
+                    </div>
+                `;
+                wrap.appendChild(form);
+                const btn = form.querySelector('#ev-save');
+                btn.addEventListener('click', () => {
+                    const minuteRaw = form.querySelector('#ev-minute').value;
+                    const payload = new FormData();
+                    payload.append('initData', tg?.initData || '');
+                    payload.append('home', match.home || '');
+                    payload.append('away', match.away || '');
+                    payload.append('team', form.querySelector('#ev-team').value);
+                    const minute = minuteRaw!=='' ? String(parseInt(minuteRaw,10)) : '';
+                    if (minute!=='') payload.append('minute', minute);
+                    payload.append('player', form.querySelector('#ev-player').value.trim());
+                    payload.append('type', form.querySelector('#ev-type').value);
+                    const noteVal = form.querySelector('#ev-note').value.trim(); if (noteVal) payload.append('note', noteVal);
+                    btn.disabled = true; const old = btn.textContent; btn.textContent = 'Сохранение...';
+                    fetch('/api/match/events/add', { method: 'POST', body: payload })
+                        .then(r=>r.json())
+                        .then(d => {
+                            if (d?.error) { try { tg?.showAlert?.(d.error); } catch(_) {} return; }
+                            // очистим поля и обновим список
+                            form.querySelector('#ev-minute').value='';
+                            form.querySelector('#ev-player').value='';
+                            form.querySelector('#ev-type').value='goal';
+                            form.querySelector('#ev-note').value='';
+                            refresh();
+                        })
+                        .catch(err => { console.error('events/add error', err); try { tg?.showAlert?.('Ошибка сохранения'); } catch(_) {} })
+                        .finally(()=>{ btn.disabled=false; btn.textContent = old; });
+                });
+            }
+        } catch(_) {}
+
+        host.appendChild(wrap);
+    }
+
     // Удалён каталог достижений
 
     // Кэш для реферала
@@ -2787,8 +2932,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 lastLiveKeys = currentLive;
             } catch(_) {}
         };
-        setInterval(scan, 30000); // каждые 30 секунд мягкий опрос клиентского кэша
-        // тестовая кнопка для админа
+    setInterval(scan, 30000); // каждые 30 секунд мягкий опрос клиентского кэша
         document.addEventListener('DOMContentLoaded', () => {
             try {
                 const adminId = document.body.getAttribute('data-admin');

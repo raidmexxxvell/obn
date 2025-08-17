@@ -64,7 +64,7 @@
             if (isLiveNow(m)) {
               const live = document.createElement('span'); live.className = 'live-badge';
               const dot = document.createElement('span'); dot.className = 'live-dot';
-              const lbl = document.createElement('span'); lbl.textContent = 'LIVE';
+              const lbl = document.createElement('span'); lbl.textContent = 'В ЭФИРЕ';
               live.append(dot, lbl); header.appendChild(live);
             }
             card.appendChild(header);

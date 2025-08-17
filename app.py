@@ -33,12 +33,29 @@ app = Flask(__name__, static_folder='static', template_folder='templates')
 if 'COMPRESS_DISABLE' not in os.environ:
     if Compress is not None:
         try:
-            app.config.setdefault('COMPRESS_MIMETYPES', ['text/html', 'text/css', 'application/json', 'application/javascript'])
+            # Включаем сжатие для частых типов; бротли/гзип берёт на себя библиотека
+            app.config.setdefault('COMPRESS_MIMETYPES', [
+                'text/html','text/css','application/json','application/javascript','text/javascript',
+                'image/svg+xml'
+            ])
             app.config.setdefault('COMPRESS_LEVEL', 6)
             app.config.setdefault('COMPRESS_MIN_SIZE', 1024)
+            # Если доступно br, библиотека использует его автоматически через Accept-Encoding
             Compress(app)
         except Exception:
             pass
+
+# Долгий кэш для статики (/static/*)
+@app.after_request
+def _add_static_cache_headers(resp):
+    try:
+        p = request.path or ''
+        if p.startswith('/static/'):
+            # годовой кэш + immutable; версии файлов должны меняться при изменениях
+            resp.headers.setdefault('Cache-Control', 'public, max-age=31536000, immutable')
+    except Exception:
+        pass
+    return resp
 
 # Database
 import re
@@ -410,6 +427,18 @@ class MatchSpecials(Base):
     redcard_yes = Column(Integer, default=None)   # 1=yes, 0=no, None=не задано
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
+class MatchPlayerEvent(Base):
+    __tablename__ = 'match_player_events'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    home = Column(Text, nullable=False)
+    away = Column(Text, nullable=False)
+    team = Column(String(8), nullable=False)  # 'home' | 'away'
+    minute = Column(Integer, nullable=True)
+    player = Column(Text, nullable=False)
+    type = Column(String(16), nullable=False)  # 'goal'|'assist'|'yellow'|'red'
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
 class MatchFlags(Base):
     __tablename__ = 'match_flags'
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -500,6 +529,9 @@ class ShopOrder(Base):
     status = Column(String(16), default='new')  # new | cancelled | paid (на будущее)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    # Техническое поле для идемпотентности возврата при отмене
+    # (храним метку времени когда вернули; если уже был возврат, больше не возвращаем)
+    
 
 class ShopOrderItem(Base):
     __tablename__ = 'shop_order_items'
@@ -818,16 +850,27 @@ def api_admin_order_update_status(order_id: int):
             if not order:
                 return jsonify({'error': 'Заказ не найден'}), 404
             prev = (order.status or 'new').lower()
-            if prev == new_status:
-                return jsonify({'status': 'ok', 'id': int(order.id), 'user_id': int(order.user_id), 'total': int(order.total or 0), 'status_new': new_status, 'status_prev': prev })
-            order.status = new_status
-            order.updated_at = datetime.now(timezone.utc)
+            # Возврат кредитов только при переходе в cancelled впервые
+            if new_status == 'cancelled' and prev != 'cancelled':
+                u = db.get(User, int(order.user_id))
+                if u:
+                    u.credits = int(u.credits or 0) + int(order.total or 0)
+                    u.updated_at = datetime.now(timezone.utc)
+                    try:
+                        mirror_user_to_sheets(u)
+                    except Exception as e:
+                        app.logger.warning(f"Mirror after refund failed: {e}")
+            if prev != new_status:
+                order.status = new_status
+                order.updated_at = datetime.now(timezone.utc)
             db.commit()
             # Отправим уведомление пользователю (не блокируем ответ)
             try:
                 bot_token = os.environ.get('BOT_TOKEN', '')
                 if bot_token:
                     text = f"Статус вашего заказа №{order.id} обновлён: {new_status.upper()}"
+                    if new_status == 'cancelled' and prev != 'cancelled':
+                        text += f"\nКредиты возвращены: {int(order.total or 0)}"
                     import requests
                     requests.post(
                         f"https://api.telegram.org/bot{bot_token}/sendMessage",
@@ -1417,7 +1460,7 @@ def mirror_user_to_sheets(db_user: 'User'):
     if not row_num:
         new_row = [
             str(db_user.user_id),
-            db_user.display_name or 'User',
+            db_user.display_name or 'Игрок',
             db_user.tg_username or '',
             str(db_user.credits or 0),
             str(db_user.xp or 0),
@@ -1438,7 +1481,7 @@ def mirror_user_to_sheets(db_user: 'User'):
         try:
             _metrics_inc('sheet_writes', 1)
             sheet.batch_update([
-                {'range': f'B{row_num}', 'values': [[db_user.display_name or 'User']]},
+                {'range': f'B{row_num}', 'values': [[db_user.display_name or 'Игрок']]},
                 {'range': f'C{row_num}', 'values': [[db_user.tg_username or '']]},
                 {'range': f'D{row_num}', 'values': [[str(db_user.credits or 0)]]},
                 {'range': f'E{row_num}', 'values': [[str(db_user.xp or 0)]]},
@@ -1459,7 +1502,7 @@ def _to_int(val, default=0):
 def serialize_user(db_user: 'User'):
     return {
         'user_id': db_user.user_id,
-        'display_name': db_user.display_name or 'User',
+    'display_name': db_user.display_name or 'Игрок',
         'tg_username': db_user.tg_username or '',
         'credits': int(db_user.credits or 0),
         'xp': int(db_user.xp or 0),
@@ -1735,13 +1778,16 @@ def _build_schedule_payload_from_sheet():
 
     flush_curr()
 
-    # ближайшие 3 тура (как в api)
-    today = datetime.now().date()
+    # ближайшие 3 тура (как в api), исключая матчи, завершённые более 3 часов назад
+    now_local = datetime.now()
+    today = now_local.date()
     def tour_is_upcoming(t):
         for m in t.get('matches', []):
             try:
                 if m.get('datetime'):
-                    if datetime.fromisoformat(m['datetime']).date() >= today:
+                    dt = datetime.fromisoformat(m['datetime'])
+                    # исключаем матчи, завершенные >3ч назад (грубая эвристика: 2 часа длительность + буфер)
+                    if dt + timedelta(hours=3) >= now_local:
                         return True
                 elif m.get('date'):
                     if datetime.fromisoformat(m['date']).date() >= today:
@@ -1750,6 +1796,23 @@ def _build_schedule_payload_from_sheet():
                 continue
         return False
     upcoming = [t for t in tours if tour_is_upcoming(t)]
+    # Внутри каждого тура также отфильтруем сами матчи по этому правилу
+    for t in upcoming:
+        new_matches = []
+        for m in t.get('matches', []):
+            try:
+                keep = False
+                if m.get('datetime'):
+                    dt = datetime.fromisoformat(m['datetime'])
+                    keep = (dt + timedelta(hours=3) >= now_local)
+                elif m.get('date'):
+                    d = datetime.fromisoformat(m['date']).date()
+                    keep = (d >= today)
+                if keep:
+                    new_matches.append(m)
+            except Exception:
+                new_matches.append(m)
+        t['matches'] = new_matches
     def tour_sort_key(t):
         try:
             return (datetime.fromisoformat(t.get('start_at') or '2100-01-01T00:00:00'), t.get('tour') or 10**9)
@@ -2108,7 +2171,7 @@ def _build_leaderboards_payloads(db: Session) -> dict:
         pct = round((won / total) * 100, 1) if total > 0 else 0.0
         rows_pred.append({
             'user_id': int(r.user_id),
-            'display_name': r.display_name or 'User',
+            'display_name': r.display_name or 'Игрок',
             'tg_username': r.tg_username or '',
             'bets_total': total,
             'bets_won': won,
@@ -2124,7 +2187,7 @@ def _build_leaderboards_payloads(db: Session) -> dict:
     for u in db.query(User).all():
         base = bases.get(int(u.user_id), int(u.credits or 0))
         gain = int(u.credits or 0) - base
-        rows_rich.append({'user_id': int(u.user_id), 'display_name': u.display_name or 'User', 'tg_username': u.tg_username or '', 'gain': int(gain)})
+    rows_rich.append({'user_id': int(u.user_id), 'display_name': u.display_name or 'Игрок', 'tg_username': u.tg_username or '', 'gain': int(gain)})
     rows_rich.sort(key=lambda x: (-x['gain'], x['display_name']))
     rows_rich = rows_rich[:10]
 
@@ -2132,7 +2195,7 @@ def _build_leaderboards_payloads(db: Session) -> dict:
     rows_serv = []
     for u in db.query(User).all():
         score = int(u.xp or 0) + int(u.level or 0) * 100 + int(u.consecutive_days or 0) * 5
-        rows_serv.append({ 'user_id': int(u.user_id), 'display_name': u.display_name or 'User', 'tg_username': u.tg_username or '', 'xp': int(u.xp or 0), 'level': int(u.level or 1), 'streak': int(u.consecutive_days or 0), 'score': score })
+    rows_serv.append({ 'user_id': int(u.user_id), 'display_name': u.display_name or 'Игрок', 'tg_username': u.tg_username or '', 'xp': int(u.xp or 0), 'level': int(u.level or 1), 'streak': int(u.consecutive_days or 0), 'score': score })
     rows_serv.sort(key=lambda x: (-x['score'], -x['level'], -x['xp']))
     rows_serv = rows_serv[:10]
 
@@ -2288,7 +2351,7 @@ def api_leader_top_predictors():
             pct = round((won / total) * 100, 1) if total > 0 else 0.0
             rows.append({
                 'user_id': int(r.user_id),
-                'display_name': r.display_name or 'User',
+                'display_name': r.display_name or 'Игрок',
                 'tg_username': r.tg_username or '',
                 'bets_total': total,
                 'bets_won': won,
@@ -2356,7 +2419,7 @@ def api_leader_top_rich():
             gain = int(u.credits or 0) - base
             rows.append({
                 'user_id': int(u.user_id),
-                'display_name': u.display_name or 'User',
+                'display_name': u.display_name or 'Игрок',
                 'tg_username': u.tg_username or '',
                 'gain': int(gain)
             })
@@ -2419,7 +2482,7 @@ def api_leader_server_leaders():
             score = int(u.xp or 0) + int(u.level or 0) * 100 + int(u.consecutive_days or 0) * 5
             rows.append({
                 'user_id': int(u.user_id),
-                'display_name': u.display_name or 'User',
+                'display_name': u.display_name or 'Игрок',
                 'tg_username': u.tg_username or '',
                 'xp': int(u.xp or 0),
                 'level': int(u.level or 1),
@@ -2502,7 +2565,7 @@ def api_leader_prizes():
         for r in q1:
             total = int(r.bets_total or 0); won = int(r.bets_won or 0)
             pct = round((won / total) * 100, 1) if total > 0 else 0.0
-            tmp.append({'user_id': int(r.user_id), 'display_name': r.display_name or 'User', 'tg_username': (r.tg_username or ''), 'winrate': pct, 'total': total})
+            tmp.append({'user_id': int(r.user_id), 'display_name': r.display_name or 'Игрок', 'tg_username': (r.tg_username or ''), 'winrate': pct, 'total': total})
         tmp.sort(key=lambda x: (-x['winrate'], -x['total'], x['display_name']))
         preds = tmp[:3]
 
@@ -2514,7 +2577,7 @@ def api_leader_prizes():
         for u in db.query(User).all():
             base = bases.get(int(u.user_id), int(u.credits or 0))
             gain = int(u.credits or 0) - base
-            tmp_rich.append({ 'user_id': int(u.user_id), 'display_name': u.display_name or 'User', 'tg_username': (u.tg_username or ''), 'value': int(gain) })
+            tmp_rich.append({ 'user_id': int(u.user_id), 'display_name': u.display_name or 'Игрок', 'tg_username': (u.tg_username or ''), 'value': int(gain) })
         tmp_rich.sort(key=lambda x: (-x['value'], x['display_name']))
         rich = tmp_rich[:3]
 
@@ -2523,7 +2586,7 @@ def api_leader_prizes():
         tmp2 = []
         for u in users:
             score = int(u.xp or 0) + int(u.level or 0) * 100 + int(u.consecutive_days or 0) * 5
-            tmp2.append({ 'user_id': int(u.user_id), 'display_name': u.display_name or 'User', 'tg_username': (u.tg_username or ''), 'score': score })
+            tmp2.append({ 'user_id': int(u.user_id), 'display_name': u.display_name or 'Игрок', 'tg_username': (u.tg_username or ''), 'score': score })
         tmp2.sort(key=lambda x: -x['score'])
         serv = tmp2[:3]
     finally:
@@ -3945,9 +4008,29 @@ def api_match_details():
 
         # Версионируем содержимое через хеш, чтобы поддержать ETag/кэш
         import hashlib, json as _json
+        # Подтянем события игроков из БД (если доступна)
+        events = {'home': [], 'away': []}
+        if SessionLocal is not None:
+            try:
+                dbx = get_db()
+                try:
+                    rows = dbx.query(MatchPlayerEvent).filter(MatchPlayerEvent.home==home, MatchPlayerEvent.away==away).order_by(MatchPlayerEvent.minute.asc().nulls_last()).all()
+                    for e in rows:
+                        side = 'home' if (e.team or 'home') == 'home' else 'away'
+                        events[side].append({
+                            'minute': (int(e.minute) if e.minute is not None else None),
+                            'player': e.player,
+                            'type': e.type,
+                            'note': e.note or ''
+                        })
+                finally:
+                    dbx.close()
+            except Exception:
+                events = {'home': [], 'away': []}
         payload_core = {
             'teams': {'home': home_data['team'], 'away': away_data['team']},
-            'rosters': {'home': home_data['players'], 'away': away_data['players']}
+            'rosters': {'home': home_data['players'], 'away': away_data['players']},
+            'events': events
         }
         etag = hashlib.md5(_json.dumps(payload_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
         # Сохраняем в кеш
@@ -3959,6 +4042,75 @@ def api_match_details():
     except Exception as e:
         app.logger.error(f"Ошибка получения составов: {str(e)}")
         return jsonify({'error': 'Не удалось загрузить составы'}), 500
+
+@app.route('/api/match/events/add', methods=['POST'])
+def api_match_events_add():
+    """Админ добавляет событие игрока: поля initData, home, away, team(home|away), minute?, player, type(goal|assist|yellow|red), note?"""
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+        home = (request.form.get('home') or '').strip()
+        away = (request.form.get('away') or '').strip()
+        team = (request.form.get('team') or 'home').strip().lower()
+        try:
+            minute = int(request.form.get('minute')) if request.form.get('minute') not in (None, '') else None
+        except Exception:
+            minute = None
+        player = (request.form.get('player') or '').strip()
+        etype = (request.form.get('type') or '').strip().lower()
+        note = (request.form.get('note') or '').strip()
+        if not home or not away or not player or etype not in ('goal','assist','yellow','red'):
+            return jsonify({'error': 'Некорректные данные'}), 400
+        if team not in ('home','away'):
+            team = 'home'
+        if SessionLocal is None:
+            return jsonify({'error': 'БД недоступна'}), 500
+        db: Session = get_db()
+        try:
+            row = MatchPlayerEvent(home=home, away=away, team=team, minute=minute, player=player, type=etype, note=(note or None))
+            db.add(row)
+            db.commit()
+            return jsonify({'status': 'ok', 'id': int(row.id)})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"Ошибка events/add: {e}")
+        return jsonify({'error': 'Не удалось сохранить событие'}), 500
+
+@app.route('/api/match/events/list', methods=['GET'])
+def api_match_events_list():
+    """Список событий для матча. Параметры: home, away."""
+    try:
+        home = (request.args.get('home') or '').strip()
+        away = (request.args.get('away') or '').strip()
+        if not home or not away:
+            return jsonify({'items': {'home': [], 'away': []}})
+        if SessionLocal is None:
+            return jsonify({'items': {'home': [], 'away': []}})
+        db: Session = get_db()
+        try:
+            rows = db.query(MatchPlayerEvent).filter(MatchPlayerEvent.home==home, MatchPlayerEvent.away==away).order_by(MatchPlayerEvent.minute.asc().nulls_last(), MatchPlayerEvent.id.asc()).all()
+            out = {'home': [], 'away': []}
+            for e in rows:
+                side = 'home' if (e.team or 'home') == 'home' else 'away'
+                out[side].append({
+                    'id': int(e.id),
+                    'minute': (int(e.minute) if e.minute is not None else None),
+                    'player': e.player,
+                    'type': e.type,
+                    'note': e.note or ''
+                })
+            return jsonify({'items': out})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"Ошибка events/list: {e}")
+        return jsonify({'items': {'home': [], 'away': []}})
 
 @app.route('/api/league-table/refresh', methods=['POST'])
 def api_league_table_refresh():

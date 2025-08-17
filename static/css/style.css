@@ -817,8 +817,9 @@ body.theme-blb .share-btn {
 .pager-btn:disabled { opacity: .5; cursor: not-allowed; }
 .pager-title { font-weight: 900; font-size: 16px; letter-spacing: .3px; background: linear-gradient(90deg, var(--secondary), var(--primary)); -webkit-background-clip: text; background-clip: text; color: transparent; }
 
-.winner-ring { border: 2px solid rgba(234,179,8,0.95) !important; box-shadow: none !important; }
-.winner-ring:hover { box-shadow: none; transform: none; }
+/* winner-ring отключён */
+/* .winner-ring { border: 2px solid rgba(234,179,8,0.95) !important; box-shadow: none !important; }
+.winner-ring:hover { box-shadow: none; transform: none; } */
 
 /* Modal */
 .modal { position: fixed; inset: 0; z-index: 2000; }
