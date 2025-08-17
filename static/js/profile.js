@@ -2339,24 +2339,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }).catch(()=>{});
         } catch(_) {}
 
-        // Вкладка «События»: создаём/находим и показываем всем
-        let eventsPane = document.getElementById('md-pane-events');
-        if (!eventsPane) {
-            eventsPane = document.createElement('div');
-            eventsPane.id = 'md-pane-events';
-            eventsPane.className = 'md-pane';
-            eventsPane.style.display = 'none';
-            mdPane.querySelector('.modal-body')?.appendChild(eventsPane);
-        }
-        // Гарантируем наличие вкладки
-        try {
-            const existedEvents = subtabs?.querySelector('[data-mdtab="events"]');
-            if (!existedEvents) {
-                const ev = document.createElement('div');
-                ev.className = 'subtab-item'; ev.setAttribute('data-mdtab','events'); ev.textContent = 'События';
-                subtabs.appendChild(ev);
-            }
-        } catch(_) {}
+    // События будут отображаться внутри вкладок составов
 
         // по умолчанию активируем «Команда 1»
         mdPane.querySelector('.modal-subtabs .subtab-item[data-mdtab="home"]').classList.add('active');
@@ -2366,34 +2349,131 @@ document.addEventListener('DOMContentLoaded', () => {
     streamPane.style.display = 'none';
     if (typeof eventsPane !== 'undefined') eventsPane.style.display = 'none';
 
-        // заполнение составов
-        const renderRoster = (pane, players) => {
+        // заполнение составов — табличный вид с событиями
+        const renderRosterTable = (pane, players, side, existingEvents) => {
             pane.innerHTML = '';
-            const ul = document.createElement('ul');
-            ul.className = 'roster-list';
+            const table = document.createElement('table');
+            table.className = 'roster-table';
+            table.style.width = '100%';
+            table.style.borderCollapse = 'collapse';
+            const mkTh = (content) => { const th = document.createElement('th'); th.style.border='1px solid rgba(255,255,255,0.15)'; th.style.padding='6px'; th.style.textAlign='left'; th.append(content); return th; };
+            const mkTd = () => { const td = document.createElement('td'); td.style.border='1px solid rgba(255,255,255,0.15)'; td.style.padding='6px'; td.style.textAlign='center'; return td; };
+            const thead = document.createElement('thead');
+            const trh = document.createElement('tr');
+            const nameTh = document.createElement('th'); nameTh.textContent = 'Фамилия Имя'; nameTh.style.border='1px solid rgba(255,255,255,0.15)'; nameTh.style.padding='6px'; nameTh.style.textAlign='left';
+            const iconImg = (srcHint) => { const img = document.createElement('img'); img.style.width='18px'; img.style.height='18px'; img.style.objectFit='contain'; img.alt='';
+                const candidates = [srcHint, '/static/img/icons/photo.png', '/static/img/placeholderlogo.png'].filter(Boolean);
+                let i=0; const next=()=>{ if(i>=candidates.length) return; img.onerror=()=>{ i++; next(); }; img.src=candidates[i]; }; next();
+                return img; };
+            const thYellow = mkTh(iconImg('/static/img/icons/yellow.png'));
+            const thRed = mkTh(iconImg('/static/img/icons/red.png'));
+            const thAssist = mkTh(iconImg('/static/img/shop/boots.png'));
+            const thGoal = mkTh(iconImg('/static/img/shop/ball.png'));
+            trh.append(nameTh, thYellow, thRed, thAssist, thGoal); thead.appendChild(trh);
+            const tbody = document.createElement('tbody');
+            const adminId = document.body.getAttribute('data-admin');
+            const currentId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id ? String(window.Telegram.WebApp.initDataUnsafe.user.id) : '';
+            const isAdmin = !!(adminId && currentId && String(adminId) === currentId);
+            const tg = window.Telegram?.WebApp || null;
+            // быстрый индекс событий: player(lower) -> Set(types)
+            const evIdx = (() => {
+                const idx = new Map();
+                try {
+                    const list = existingEvents && existingEvents[side] ? existingEvents[side] : [];
+                    list.forEach(e => {
+                        const key = (e.player||'').trim().toLowerCase();
+                        if (!idx.has(key)) idx.set(key, new Set());
+                        idx.get(key).add(e.type);
+                    });
+                } catch(_) {}
+                return idx;
+            })();
+            const createCell = (player, type) => {
+                const td = mkTd();
+                const key = (player||'').trim().toLowerCase();
+                const has = evIdx.get(key) && evIdx.get(key).has(type);
+                if (!isAdmin) {
+                    if (has) {
+                        const img = document.createElement('img'); img.style.width='18px'; img.style.height='18px'; img.style.objectFit='contain';
+                        const srcHint = (type==='yellow')?'/static/img/icons/yellow.png':(type==='red')?'/static/img/icons/red.png':(type==='assist')?'/static/img/shop/boots.png':'/static/img/shop/ball.png';
+                        const candidates=[srcHint, '/static/img/icons/photo.png', '/static/img/placeholderlogo.png'];
+                        let i=0; const next=()=>{ if(i>=candidates.length) return; img.onerror=()=>{ i++; next(); }; img.src=candidates[i]; }; next();
+                        td.appendChild(img);
+                    } else {
+                        // пусто для пользователя, если события нет
+                        td.textContent='';
+                    }
+                    return td;
+                }
+                // Админ: селект «—/ДА» + иконка справа, если уже есть
+                const box = document.createElement('div'); box.style.display='flex'; box.style.gap='6px'; box.style.alignItems='center'; box.style.justifyContent='center';
+                const sel = document.createElement('select');
+                const optNo = document.createElement('option'); optNo.value=''; optNo.textContent='—';
+                const optYes = document.createElement('option'); optYes.value='yes'; optYes.textContent='ДА';
+                sel.append(optNo, optYes);
+                if (has) sel.value='yes';
+                const icon = document.createElement('img'); icon.style.width='18px'; icon.style.height='18px'; icon.style.objectFit='contain'; icon.style.opacity = has ? '1' : '0.2';
+                const srcHint = (type==='yellow')?'/static/img/icons/yellow.png':(type==='red')?'/static/img/icons/red.png':(type==='assist')?'/static/img/shop/boots.png':'/static/img/shop/ball.png';
+                const candidates=[srcHint, '/static/img/icons/photo.png', '/static/img/placeholderlogo.png'];
+                let i=0; const next=()=>{ if(i>=candidates.length) return; icon.onerror=()=>{ i++; next(); }; icon.src=candidates[i]; }; next();
+                sel.addEventListener('change', () => {
+                    if (sel.value === 'yes' && !has) {
+                        // отправляем событие
+                        try {
+                            const fd = new FormData();
+                            fd.append('initData', tg?.initData || '');
+                            fd.append('home', match.home || '');
+                            fd.append('away', match.away || '');
+                            fd.append('team', side);
+                            fd.append('player', player || '');
+                            fd.append('type', type);
+                            fetch('/api/match/events/add', { method: 'POST', body: fd })
+                                .then(r=>r.json())
+                                .then(d => {
+                                    if (d?.error) { try { tg?.showAlert?.(d.error); } catch(_) {} return; }
+                                    icon.style.opacity = '1';
+                                })
+                                .catch(err => { console.error('events/add', err); try { tg?.showAlert?.('Ошибка сохранения'); } catch(_) {} })
+                        } catch(_) {}
+                    } else if (sel.value === '' && has) {
+                        // сейчас удаление не поддерживается
+                        try { tg?.showAlert?.('Сброс события пока не поддерживается'); } catch(_) {}
+                        sel.value = 'yes';
+                    }
+                });
+                box.append(sel, icon); td.appendChild(box); return td;
+            };
+            // заголовок
+            table.appendChild(thead);
+            // строки
             if (!players || players.length === 0) {
-                const li = document.createElement('li');
-                li.className = 'empty';
-                li.textContent = 'Нет данных';
-                ul.appendChild(li);
+                const tr = document.createElement('tr');
+                const td = document.createElement('td'); td.colSpan = 5; td.style.padding='10px'; td.style.textAlign='center'; td.style.border='1px solid rgba(255,255,255,0.15)'; td.textContent = 'Нет данных';
+                tr.appendChild(td); tbody.appendChild(tr);
             } else {
-                players.forEach(p => { const li = document.createElement('li'); li.textContent = p; ul.appendChild(li); });
+                players.forEach(pName => {
+                    const tr = document.createElement('tr');
+                    const tdName = document.createElement('td'); tdName.style.border='1px solid rgba(255,255,255,0.15)'; tdName.style.padding='6px'; tdName.style.textAlign='left'; tdName.textContent = pName;
+                    const tdY = createCell(pName, 'yellow');
+                    const tdR = createCell(pName, 'red');
+                    const tdA = createCell(pName, 'assist');
+                    const tdG = createCell(pName, 'goal');
+                    tr.append(tdName, tdY, tdR, tdA, tdG);
+                    tbody.appendChild(tr);
+                });
             }
-            pane.appendChild(ul);
+            table.appendChild(tbody);
+            pane.appendChild(table);
         };
         try {
             const homeList = Array.isArray(details?.rosters?.home) ? details.rosters.home : [];
             const awayList = Array.isArray(details?.rosters?.away) ? details.rosters.away : [];
-            if (homeList.length || awayList.length) {
-                renderRoster(homePane, homeList);
-                renderRoster(awayPane, awayList);
-            } else {
-                renderRoster(homePane, []);
-                renderRoster(awayPane, []);
-            }
+            const ev = details?.events || { home: [], away: [] };
+            renderRosterTable(homePane, homeList, 'home', ev);
+            renderRosterTable(awayPane, awayList, 'away', ev);
         } catch(_) {
-            renderRoster(homePane, []);
-            renderRoster(awayPane, []);
+            renderRosterTable(homePane, [], 'home', {home:[],away:[]});
+            renderRosterTable(awayPane, [], 'away', {home:[],away:[]});
         }
 
         // Если доступно API статуса — отметим LIVE индикатором в заголовке деталей
@@ -2416,13 +2496,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach((x)=>x.classList.remove('active'));
                 btn.classList.add('active');
                 const key = btn.getAttribute('data-mdtab');
-        if (key === 'home') { homePane.style.display = ''; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; streamPane.style.display = 'none'; if (eventsPane) eventsPane.style.display = 'none'; }
-        else if (key === 'away') { homePane.style.display = 'none'; awayPane.style.display = ''; specialsPane.style.display = 'none'; streamPane.style.display = 'none'; if (eventsPane) eventsPane.style.display = 'none'; }
+    if (key === 'home') { homePane.style.display = ''; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; streamPane.style.display = 'none'; }
+    else if (key === 'away') { homePane.style.display = 'none'; awayPane.style.display = ''; specialsPane.style.display = 'none'; streamPane.style.display = 'none'; }
                 else if (key === 'specials') {
                     homePane.style.display = 'none'; awayPane.style.display = 'none'; specialsPane.style.display = '';
                     // отрисуем спецпанель внутри specialsPane
                     renderSpecialsPane(specialsPane, match);
-                    streamPane.style.display = 'none'; if (eventsPane) eventsPane.style.display = 'none';
+                    streamPane.style.display = 'none';
                 } else if (key === 'stream') {
                     homePane.style.display = 'none'; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; streamPane.style.display = '';
                     // Лениво вставляем VK iframe только при первом показе
@@ -2461,9 +2541,6 @@ document.addEventListener('DOMContentLoaded', () => {
                             try { streamPane.__startCommentsPoll(); } catch(_) {}
                         }
                     }
-                } else if (key === 'events') {
-                    homePane.style.display = 'none'; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; streamPane.style.display = 'none'; if (eventsPane) eventsPane.style.display = '';
-                    try { renderEventsPane(eventsPane, match, details?.events || null); } catch(_) {}
                     }
             };
         });
