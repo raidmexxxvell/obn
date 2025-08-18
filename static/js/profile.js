@@ -586,8 +586,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (tab === 'ufo') {
                     const now = Date.now();
                     if (now - _lastUfoTap < 350) {
-            // двойной тап: открыть полку выбора лиг
-            try { toggleLeagueShelf(); } catch(_) {}
+            // двойной тап: открыть боковое меню лиг
+            try { openLeagueDrawer(); } catch(_) {}
                         _lastUfoTap = 0;
                         return;
                     }
@@ -664,7 +664,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         leagueBtn?.addEventListener('click', () => {
             // Открываем полку выбора лиг по нажатию на мини-кнопку
-            try { openLeagueShelf(); } catch(_) {}
+            try { openLeagueDrawer(); } catch(_) {}
         });
         // Стартовая вкладка: Главная
         try {
@@ -1500,39 +1500,21 @@ document.addEventListener('DOMContentLoaded', () => {
             server: document.getElementById('leader-pane-server'),
             prizes: document.getElementById('leader-pane-prizes'),
         };
-        // бейдж недели: вычислим старт периода (понедельник 03:00 МСК) и конец
+    // бейдж периода: для прогнозистов показываем неделю, для богатства — месяц. Здесь общий monthly бейдж.
         try {
             const badge = document.getElementById('leader-week-badge');
             if (badge) {
-                const now = new Date();
-                // переводим now в МСК (UTC+3) без учёта DST (как на сервере)
-                const mskNow = new Date(now.getTime() + 3*60*60*1000);
-                const wd = mskNow.getUTCDay(); // 0-вс,1-пн,.. 6-сб для UTC-времени, но на mskNow смещение уже учтено
-                // найдём понедельник этой недели в МСК
-                const diffDays = (wd === 0 ? 6 : (wd - 1)); // сколько дней от пн
-                const monday = new Date(Date.UTC(mskNow.getUTCFullYear(), mskNow.getUTCMonth(), mskNow.getUTCDate(), 3, 0, 0));
-                monday.setUTCDate(monday.getUTCDate() - diffDays);
-                // если текущее mskNow ещё до понедельника 03:00 — берём предыдущую неделю
-                const mondayCut = new Date(Date.UTC(mskNow.getUTCFullYear(), mskNow.getUTCMonth(), mskNow.getUTCDate(), 3, 0, 0));
-                if (mskNow < mondayCut) {
-                    monday.setUTCDate(monday.getUTCDate() - 7);
-                }
-                const periodStartUtc = new Date(monday.getTime() - 3*60*60*1000); // вернёмся в UTC для читаемости
-                const periodEndUtc = new Date(periodStartUtc.getTime() + 7*24*60*60*1000);
-                const fmt = (d) => `${d.getDate().toString().padStart(2,'0')}.${(d.getMonth()+1).toString().padStart(2,'0')}`;
-                // ISO номер недели считаем по МСК-дате начала периода
-                const mskStart = new Date(periodStartUtc.getTime() + 3*60*60*1000);
-                const getISOWeek = (date) => {
-                    // преобразуем к четвергу той же недели для вычисления номера
-                    const tmp = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-                    const day = tmp.getUTCDay() || 7; // 1..7
-                    tmp.setUTCDate(tmp.getUTCDate() + 4 - day);
-                    const yearStart = new Date(Date.UTC(tmp.getUTCFullYear(), 0, 1));
-                    const weekNo = Math.ceil((((tmp - yearStart) / 86400000) + 1) / 7);
-                    return weekNo;
-                };
-                const weekNo = getISOWeek(mskStart);
-                badge.textContent = `Неделя №${weekNo}: ${fmt(periodStartUtc)} — ${fmt(new Date(periodEndUtc.getTime()-1))}`;
+        const now = new Date();
+        // Переводим now в МСК (UTC+3) без учёта DST
+        const mskNow = new Date(now.getTime() + 3*60*60*1000);
+        // Начало месяца в МСК 03:00
+        const monthStartMsk = new Date(Date.UTC(mskNow.getUTCFullYear(), mskNow.getUTCMonth(), 1, 3, 0, 0));
+        // Конец месяца: начало следующего месяца минус 1 день
+        const nextMonthStartMsk = new Date(Date.UTC(mskNow.getUTCFullYear(), mskNow.getUTCMonth()+1, 1, 3, 0, 0));
+        const periodStartUtc = new Date(monthStartMsk.getTime() - 3*60*60*1000);
+        const periodEndUtc = new Date(nextMonthStartMsk.getTime() - 3*60*60*1000 - 1);
+        const fmt = (d) => `${d.getDate().toString().padStart(2,'0')}.${(d.getMonth()+1).toString().padStart(2,'0')}`;
+        badge.textContent = `Месяц: ${fmt(periodStartUtc)} — ${fmt(periodEndUtc)}`;
             }
         } catch(_) {}
         tabs.forEach(btn => {
@@ -1647,7 +1629,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 host.innerHTML = '';
                 const blocks = [
                     { key: 'predictors', title: 'Топ прогнозистов' },
-                    { key: 'rich', title: 'Топ богачей' },
+                    { key: 'rich', title: 'Лидеры месяца' },
                     { key: 'server', title: 'Лидеры сервера' },
                 ];
                 // загрузим аватарки победителей одним запросом
@@ -2387,6 +2369,38 @@ document.addEventListener('DOMContentLoaded', () => {
     function toggleLeagueShelf() {
         const shelf = document.getElementById('league-shelf');
         if (shelf) closeLeagueShelf(); else openLeagueShelf();
+    }
+
+    // Боковой drawer лиг
+    function openLeagueDrawer() {
+        const drawer = document.getElementById('league-drawer');
+        const nav = document.getElementById('bottom-nav');
+        if (!drawer) return;
+        // скрыть нижнее меню быстро
+        if (nav) { nav.style.transition = 'transform .12s ease, opacity .12s ease'; nav.style.transform = 'translateY(100%)'; nav.style.opacity = '0'; }
+        drawer.style.display = 'block';
+        requestAnimationFrame(() => { drawer.style.transform = 'translateX(0)'; drawer.setAttribute('aria-hidden', 'false'); });
+        const onClick = (e) => {
+            const btn = e.target.closest('.drawer-item');
+            if (!btn) return;
+            const key = btn.getAttribute('data-league');
+            // анимация перехода
+            if (key === 'UFO') selectUFOLeague(false, true); else if (key === 'BLB') selectBLBLeague(true);
+            // закрываем drawer на 2-й секунде плавно и возвращаем меню
+            setTimeout(() => { closeLeagueDrawer(); }, 2000);
+        };
+        drawer.addEventListener('click', onClick, { once: true });
+        // клик вне — закрытие
+        const onDoc = (e) => { if (!drawer.contains(e.target)) closeLeagueDrawer(); };
+        setTimeout(() => document.addEventListener('click', onDoc, { capture: true, once: true }), 0);
+    }
+    function closeLeagueDrawer() {
+        const drawer = document.getElementById('league-drawer');
+        const nav = document.getElementById('bottom-nav');
+        if (!drawer) return;
+        drawer.style.transform = 'translateX(100%)';
+        setTimeout(() => { drawer.style.display = 'none'; drawer.setAttribute('aria-hidden', 'true'); }, 280);
+        if (nav) { nav.style.transform = 'translateY(0)'; nav.style.opacity = '1'; nav.style.transition = ''; }
     }
 
     function initBLBSubtabs() {

@@ -20,7 +20,7 @@ body {
     background: linear-gradient(135deg, var(--dark), var(--darker));
     color: var(--light);
     min-height: 100vh;
-    padding: 16px 12px 64px; /* компактнее, чтобы поместилось */
+    padding: 16px 0 64px; /* без боковых полей */
     line-height: 1.6;
     margin: 0;
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -34,25 +34,24 @@ body {
     .orientation-overlay { display: block; }
 }
 
-.container {
-    max-width: 600px;
-    margin: 0 auto;
-}
+.container { max-width: 600px; margin: 0 auto; padding: 0 12px; } /* внутренние отступы переносим в контейнер */
 .nav {
     position: fixed;
-    left: 50%;
-    transform: translateX(-50%);
+    left: 0;
+    right: 0;
     bottom: 0;
-    width: min(600px, calc(100% - 24px));
+    width: 100vw;
     background: rgba(10, 18, 40, 0.92);
     backdrop-filter: blur(12px);
-    border-radius: 16px 16px 0 0;
+    border-radius: 0; /* без закруглений */
     padding: 10px 10px calc(10px + env(safe-area-inset-bottom, 0px));
     display: flex;
     justify-content: space-between;
     z-index: 1000;
     box-shadow: 0 -8px 22px rgba(0,0,0,0.35);
-    border: 1px solid rgba(255,255,255,0.06);
+    border-top: 1px solid rgba(255,255,255,0.06);
+    border-left: none;
+    border-right: none;
     border-bottom: none;
     overflow: hidden;
 }

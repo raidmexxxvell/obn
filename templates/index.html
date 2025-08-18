@@ -269,6 +269,16 @@
         <!-- Контент плашки подставляет JS -->
     </div>
 
+    <!-- Боковое меню лиг -->
+    <aside id="league-drawer" aria-hidden="true" style="display:none; position: fixed; top: 0; right: 0; bottom: 0; width: 78%; max-width: 360px; background: rgba(10,18,40,0.98); border-left: 1px solid rgba(255,255,255,0.08); box-shadow: -12px 0 24px rgba(0,0,0,0.45); transform: translateX(100%); transition: transform .28s ease-out; z-index: 1500;">
+        <div class="drawer-header" style="padding: 14px 14px 8px; font-weight: 800; font-size: 16px;">Футбол</div>
+        <div class="drawer-sep" style="height: 1px; background: rgba(255,255,255,0.08);"></div>
+        <div class="drawer-list" id="league-drawer-list" style="padding: 8px; display: grid; gap: 8px;">
+            <button class="drawer-item" data-league="UFO" style="display:flex; align-items:center; gap:10px; padding:10px 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); color:#fff; border-radius: 10px; font-weight: 800; cursor:pointer;">🛸 <span>НЛО</span></button>
+            <button class="drawer-item" data-league="BLB" style="display:flex; align-items:center; gap:10px; padding:10px 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); color:#fff; border-radius: 10px; font-weight: 800; cursor:pointer;">❔ <span>БЛБ</span></button>
+        </div>
+    </aside>
+
     <!-- Экран перехода между лигами (анимация заливки и логотип) -->
     <div id="league-transition" style="display:none;">
         <!-- наполняется через JS -->
@@ -300,11 +310,11 @@
         <div class="leaderboard-wrap">
             <div class="subtabs" id="leader-subtabs">
                 <div class="subtab-item active" data-ltab="predictors">Топ прогнозистов</div>
-                <div class="subtab-item" data-ltab="rich">Топ богачей</div>
+                <div class="subtab-item" data-ltab="rich">Лидеры месяца</div>
                 <div class="subtab-item" data-ltab="server">Лидеры сервера</div>
                 <div class="subtab-item" data-ltab="prizes">Призы</div>
             </div>
-            <div id="leader-week-badge" class="leader-week-badge" style="text-align:center; color: var(--gray); font-size: 12px; margin: 4px 0 0;">Неделя: —</div>
+            <div id="leader-week-badge" class="leader-week-badge" style="text-align:center; color: var(--gray); font-size: 12px; margin: 4px 0 0;">Период: —</div>
             <div id="leader-pane-predictors" class="leader-pane">
                 <div class="league-table-wrap">
                     <table class="league-table" id="lb-predictors">

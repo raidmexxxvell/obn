@@ -109,6 +109,53 @@ MATCH_DETAILS_TTL = 30  # сек
 RANKS_CACHE = {'data': None, 'ts': 0}
 RANKS_TTL = 600  # 10 минут
 
+# Командные силы (1..10) для усложнения коэффициентов. Можно переопределить через BET_TEAM_STRENGTHS_JSON.
+# Ключи должны быть нормализованы: нижний регистр, без пробелов и знаков, 'ё' -> 'е'.
+TEAM_STRENGTHS_BASE = {
+    # Топ-кластер
+    'полет': 9,
+    'дождь': 8,
+    'фкобнинск': 8,
+    'ювелиры': 8,
+    # Середина/низ
+    'звезда': 6,
+    'киборги': 6,
+    'серпантин': 5,
+    'креатив': 4,
+    'фкsetka4real': 4,
+}
+
+def _norm_team_key(s: str) -> str:
+    try:
+        s = (s or '').strip().lower().replace('\u00A0', ' ').replace('ё', 'е')
+        return ''.join(ch for ch in s if ch.isalnum())
+    except Exception:
+        return ''
+
+def _load_team_strengths() -> dict[str, float]:
+    """Возвращает словарь нормализованное_имя -> сила (1..N, по умолчанию 1..10).
+    Разрешает переопределение через переменную окружения BET_TEAM_STRENGTHS_JSON (map name->int/float).
+    Имя команды нормализуется тем же способом, что и для таблицы лиги.
+    """
+    strengths = dict(TEAM_STRENGTHS_BASE)
+    raw = os.environ.get('BET_TEAM_STRENGTHS_JSON', '').strip()
+    if raw:
+        try:
+            data = json.loads(raw)
+            if isinstance(data, dict):
+                for k, v in data.items():
+                    nk = _norm_team_key(k)
+                    try:
+                        val = float(v)
+                    except Exception:
+                        continue
+                    # допустим только разумный диапазон 1..20
+                    if nk:
+                        strengths[nk] = max(1.0, min(20.0, val))
+        except Exception as e:
+            app.logger.warning(f"BET_TEAM_STRENGTHS_JSON parse failed: {e}")
+    return strengths
+
 # ---------------------- METRICS ----------------------
 METRICS_LOCK = threading.Lock()
 METRICS = {
@@ -172,6 +219,29 @@ def _week_period_start_msk_to_utc(now_utc: datetime|None = None) -> datetime:
     # Вернуть в UTC
     return week_monday_msk - timedelta(hours=3)
 
+def _month_period_start_msk_to_utc(now_utc: datetime|None = None) -> datetime:
+    """Возвращает UTC-временную метку начала текущего месяца по МСК (1-е число 03:00 МСК).
+    Если сейчас до 03:00 МСК первого дня — берём предыдущий месяц.
+    """
+    if now_utc is None:
+        now_utc = datetime.now(timezone.utc)
+    # Переведём в «логическую МСК» как UTC+3 без DST
+    msk = now_utc + timedelta(hours=3)
+    # Кандидат: 1-е число текущего месяца, 03:00 МСК
+    first_msk = datetime(msk.year, msk.month, 1, 3, 0, 0, tzinfo=timezone.utc)
+    # Преобразуем этот момент назад в UTC
+    first_utc = first_msk - timedelta(hours=3)
+    # Если ещё не наступило 03:00 МСК 1-го — значит период прошлого месяца
+    if msk < first_msk:
+        # Предыдущий месяц
+        prev_year = msk.year
+        prev_month = msk.month - 1
+        if prev_month == 0:
+            prev_month = 12
+            prev_year -= 1
+        prev_first_msk = datetime(prev_year, prev_month, 1, 3, 0, 0, tzinfo=timezone.utc)
+        first_utc = prev_first_msk - timedelta(hours=3)
+    return first_utc
 # Betting config
 BET_MIN_STAKE = int(os.environ.get('BET_MIN_STAKE', '10'))
 BET_MAX_STAKE = int(os.environ.get('BET_MAX_STAKE', '10000'))
@@ -534,6 +604,14 @@ class CommentCounter(Base):
 
 class WeeklyCreditBaseline(Base):
     __tablename__ = 'weekly_credit_baselines'
+    user_id = Column(Integer, primary_key=True)
+    period_start = Column(DateTime(timezone=True), primary_key=True)
+    credits_base = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+# Месячные базовые снимки кредитов (для лидерборда «богачей» по месяцу)
+class MonthlyCreditBaseline(Base):
+    __tablename__ = 'monthly_credit_baselines'
     user_id = Column(Integer, primary_key=True)
     period_start = Column(DateTime(timezone=True), primary_key=True)
     credits_base = Column(Integer, default=0)
@@ -959,6 +1037,28 @@ def ensure_weekly_baselines(db: Session, period_start: datetime):
                     db.add(WeeklyCreditBaseline(user_id=int(uid), period_start=period_start, credits_base=int(credits or 0), created_at=now))
                 db.commit()
 
+def ensure_monthly_baselines(db: Session, period_start: datetime):
+    """Создаёт снимок credits для всех пользователей в начале месяца (если ещё не создан).
+    Также добавляет недостающие снимки для новых пользователей в середине месяца.
+    """
+    existing_count = db.query(MonthlyCreditBaseline).filter(MonthlyCreditBaseline.period_start == period_start).count()
+    if existing_count == 0:
+        users = db.query(User.user_id, User.credits).all()
+        now = datetime.now(timezone.utc)
+        for u in users:
+            db.add(MonthlyCreditBaseline(user_id=int(u.user_id), period_start=period_start, credits_base=int(u.credits or 0), created_at=now))
+        db.commit()
+    else:
+        user_ids = [uid for (uid,) in db.query(User.user_id).all()]
+        if user_ids:
+            existing_ids = set(uid for (uid,) in db.query(MonthlyCreditBaseline.user_id).filter(MonthlyCreditBaseline.period_start == period_start).all())
+            missing = [uid for uid in user_ids if uid not in existing_ids]
+            if missing:
+                now = datetime.now(timezone.utc)
+                for uid, credits in db.query(User.user_id, User.credits).filter(User.user_id.in_(missing)).all():
+                    db.add(MonthlyCreditBaseline(user_id=int(uid), period_start=period_start, credits_base=int(credits or 0), created_at=now))
+                db.commit()
+
 if engine is not None:
     try:
         Base.metadata.create_all(engine)
@@ -1162,12 +1262,16 @@ def _dc_tau(x: int, y: int, lam: float, mu: float, rho: float) -> float:
     return 1.0
 
 def _estimate_goal_rates(home: str, away: str) -> tuple[float, float]:
-    """Грубая оценка ожидаемых голов (lam, mu) на основе средней тотал-результативности, домашнего преимущества и разницы сил по таблице.
-    Настройка через env:
+    """Грубая оценка ожидаемых голов (lam, mu) с учётом:
+    - базового тотала, домашнего преимущества;
+    - разницы сил по таблице (ранги) и по явным силам команд (TEAM_STRENGTHS / BET_TEAM_STRENGTHS_JSON).
+    Настройки через env:
     - BET_BASE_TOTAL (средний тотал, по умолчанию 4.2)
     - BET_HOME_ADV (доля в пользу дома, по умолчанию 0.10)
-    - BET_RANK_SHARE_SCALE (склоняет долю в пользу более сильной команды, 0.03)
-    - BET_RANK_TOTAL_SCALE (увеличивает общий тотал при большой разнице, 0.015)
+    - BET_RANK_SHARE_SCALE (влияние рангов на долю голов, 0.03)
+    - BET_RANK_TOTAL_SCALE (влияние рангов на общий тотал, 0.015)
+    - BET_STR_SHARE_SCALE (влияние сил на долю голов, 0.02)
+    - BET_STR_TOTAL_SCALE (влияние сил на общий тотал, 0.010)
     - BET_MIN_RATE (минимум для lam/mu), BET_MAX_RATE
     """
     try:
@@ -1187,6 +1291,14 @@ def _estimate_goal_rates(home: str, away: str) -> tuple[float, float]:
     except Exception:
         total_scale = 0.015
     try:
+        str_share_scale = float(os.environ.get('BET_STR_SHARE_SCALE', '0.02'))
+    except Exception:
+        str_share_scale = 0.02
+    try:
+        str_total_scale = float(os.environ.get('BET_STR_TOTAL_SCALE', '0.010'))
+    except Exception:
+        str_total_scale = 0.010
+    try:
         min_rate = float(os.environ.get('BET_MIN_RATE', '0.15'))
         max_rate = float(os.environ.get('BET_MAX_RATE', '5.0'))
     except Exception:
@@ -1195,9 +1307,9 @@ def _estimate_goal_rates(home: str, away: str) -> tuple[float, float]:
     def clamp(x, a, b):
         return max(a, min(b, x))
     def norm(s: str) -> str:
-        s = (s or '').strip().lower().replace('\u00A0',' ').replace('ё','е')
-        return ''.join(ch for ch in s if ch.isalnum())
+        return _norm_team_key(s)
 
+    # Ранги из таблицы (занятые позиции: меньше — сильнее)
     ranks = _load_league_ranks()
     rh = ranks.get(norm(home))
     ra = ranks.get(norm(away))
@@ -1211,12 +1323,38 @@ def _estimate_goal_rates(home: str, away: str) -> tuple[float, float]:
 
     sh = rank_strength(rh)
     sa = rank_strength(ra)
-    # Разница сил
-    diff = sh - sa
-    # Общий тотал — чуть выше при неравных командах
-    mu_total = base_total * (1.0 + clamp(abs(diff) * total_scale, 0.0, 0.30))
-    # Доля голов хозяев
-    share_home = clamp(0.5 + home_adv + diff * share_scale, 0.15, 0.85)
+
+    # Явные силы команд из словаря
+    strengths = _load_team_strengths()
+    sh2 = strengths.get(norm(home))
+    sa2 = strengths.get(norm(away))
+    # Нормируем в [0..1] относительно диапазона сил
+    if sh2 is not None and sa2 is not None:
+        try:
+            s_vals = list(strengths.values()) or [1.0, 10.0]
+            s_min, s_max = min(s_vals), max(s_vals)
+            span = max(1e-6, float(s_max - s_min))
+            shn = (float(sh2) - s_min) / span
+            san = (float(sa2) - s_min) / span
+        except Exception:
+            shn = san = 0.5
+    else:
+        shn = san = 0.5
+
+    # Совокупная разница сил: учитываем обе компоненты
+    diff_rank = sh - sa
+    diff_str = shn - san
+
+    # Общий тотал — растёт при большей неравности
+    mu_total = base_total
+    mu_total *= (1.0 + clamp(abs(diff_rank) * total_scale, 0.0, 0.30))
+    mu_total *= (1.0 + clamp(abs(diff_str) * str_total_scale, 0.0, 0.30))
+
+    # Доля голов хозяев: базовая 0.5 + дом.преимущество + вклад рангов и сил
+    share_home = 0.5 + home_adv
+    share_home += diff_rank * share_scale
+    share_home += diff_str * str_share_scale
+    share_home = clamp(share_home, 0.15, 0.85)
     lam = clamp(mu_total * share_home, min_rate, max_rate)
     mu = clamp(mu_total * (1.0 - share_home), min_rate, max_rate)
     return lam, mu
@@ -1312,16 +1450,36 @@ def _compute_specials_odds(home: str, away: str, market: str) -> dict:
     elif market == 'redcard':
         base_yes = float(os.environ.get('BET_BASE_REDCARD', '0.22'))
     def norm(s: str) -> str:
-        s = (s or '').strip().lower().replace('\u00A0',' ').replace('ё','е')
-        return ''.join(ch for ch in s if ch.isalnum())
+        return _norm_team_key(s)
     ranks = _load_league_ranks()
     rh = ranks.get(norm(home))
     ra = ranks.get(norm(away))
+    # Поправка от рангов
     adj = 0.0
     if rh and ra:
         # Небольшая прибавка вероятности в дерби/неравных матчах
         delta = abs(rh - ra)
-        adj = min(0.06, delta * 0.004)
+        adj += min(0.06, delta * 0.004)
+    # Поправка от явных сил команд
+    try:
+        str_adj_scale = float(os.environ.get('BET_STR_SPECIALS_SCALE', '0.020'))
+    except Exception:
+        str_adj_scale = 0.020
+    strengths = _load_team_strengths()
+    sh2 = strengths.get(norm(home))
+    sa2 = strengths.get(norm(away))
+    if sh2 is not None and sa2 is not None:
+        try:
+            s_vals = list(strengths.values()) or [1.0, 10.0]
+            s_min, s_max = min(s_vals), max(s_vals)
+            span = max(1e-6, float(s_max - s_min))
+            shn = (float(sh2) - s_min) / span
+            san = (float(sa2) - s_min) / span
+            delta_str = abs(shn - san)
+        except Exception:
+            delta_str = 0.0
+        # Немного повышаем вероятность события при большой разнице сил
+        adj += min(0.08, delta_str * str_adj_scale)
     p_yes = max(0.02, min(0.97, base_yes + adj))
     p_no = max(0.02, 1.0 - p_yes)
     overround = 1.0 + BET_MARGIN
@@ -2227,9 +2385,10 @@ def _build_betting_tours_payload():
     return { 'tours': tours, 'updated_at': datetime.now(timezone.utc).isoformat() }
 
 def _build_leaderboards_payloads(db: Session) -> dict:
-    # predictors
+    # predictors (неделя), rich (месяц)
     won_case = case((Bet.status == 'won', 1), else_=0)
-    period_start = _week_period_start_msk_to_utc()
+    week_start = _week_period_start_msk_to_utc()
+    month_start = _month_period_start_msk_to_utc()
     q = (
         db.query(
             User.user_id.label('user_id'),
@@ -2239,7 +2398,7 @@ def _build_leaderboards_payloads(db: Session) -> dict:
             func.sum(won_case).label('bets_won')
         )
         .join(Bet, Bet.user_id == User.user_id)
-        .filter(Bet.placed_at >= period_start)
+    .filter(Bet.placed_at >= week_start)
         .group_by(User.user_id, User.display_name, User.tg_username)
         .having(func.count(Bet.id) > 0)
     )
@@ -2259,14 +2418,14 @@ def _build_leaderboards_payloads(db: Session) -> dict:
     rows_pred.sort(key=lambda x: (-x['winrate'], -x['bets_total'], x['display_name']))
     rows_pred = rows_pred[:10]
 
-    # rich
-    ensure_weekly_baselines(db, period_start)
-    bases = { int(r.user_id): int(r.credits_base or 0) for r in db.query(WeeklyCreditBaseline).filter(WeeklyCreditBaseline.period_start == period_start).all() }
+    # rich (месячный прирост кредитов)
+    ensure_monthly_baselines(db, month_start)
+    bases = { int(r.user_id): int(r.credits_base or 0) for r in db.query(MonthlyCreditBaseline).filter(MonthlyCreditBaseline.period_start == month_start).all() }
     rows_rich = []
     for u in db.query(User).all():
         base = bases.get(int(u.user_id), int(u.credits or 0))
         gain = int(u.credits or 0) - base
-    rows_rich.append({'user_id': int(u.user_id), 'display_name': u.display_name or 'Игрок', 'tg_username': u.tg_username or '', 'gain': int(gain)})
+        rows_rich.append({'user_id': int(u.user_id), 'display_name': u.display_name or 'Игрок', 'tg_username': u.tg_username or '', 'gain': int(gain)})
     rows_rich.sort(key=lambda x: (-x['gain'], x['display_name']))
     rows_rich = rows_rich[:10]
 
@@ -2274,7 +2433,7 @@ def _build_leaderboards_payloads(db: Session) -> dict:
     rows_serv = []
     for u in db.query(User).all():
         score = int(u.xp or 0) + int(u.level or 0) * 100 + int(u.consecutive_days or 0) * 5
-    rows_serv.append({ 'user_id': int(u.user_id), 'display_name': u.display_name or 'Игрок', 'tg_username': u.tg_username or '', 'xp': int(u.xp or 0), 'level': int(u.level or 1), 'streak': int(u.consecutive_days or 0), 'score': score })
+        rows_serv.append({ 'user_id': int(u.user_id), 'display_name': u.display_name or 'Игрок', 'tg_username': u.tg_username or '', 'xp': int(u.xp or 0), 'level': int(u.level or 1), 'streak': int(u.consecutive_days or 0), 'score': score })
     rows_serv.sort(key=lambda x: (-x['score'], -x['level'], -x['xp']))
     rows_serv = rows_serv[:10]
 
@@ -2465,7 +2624,7 @@ def api_leader_top_predictors():
 
 @app.route('/api/leaderboard/top-rich')
 def api_leader_top_rich():
-    """Топ-10 по приросту кредитов за текущую неделю (с понедельника 03:00 МСК)."""
+    """Топ-10 по приросту кредитов за текущий месяц (с 1-го числа 03:00 МСК)."""
     if SessionLocal is not None:
         db = get_db()
         try:
@@ -2497,12 +2656,12 @@ def api_leader_top_rich():
         return jsonify({'items': [], 'updated_at': None}), 200
     db: Session = get_db()
     try:
-        period_start = _week_period_start_msk_to_utc()
-        ensure_weekly_baselines(db, period_start)
+        period_start = _month_period_start_msk_to_utc()
+        ensure_monthly_baselines(db, period_start)
         # прирост = current_credits - baseline
         users = db.query(User).all()
         # получим baseline'ы пачкой
-        bases = { (int(r.user_id)): int(r.credits_base or 0) for r in db.query(WeeklyCreditBaseline).filter(WeeklyCreditBaseline.period_start == period_start).all() }
+        bases = {int(r.user_id): int(r.credits_base or 0) for r in db.query(MonthlyCreditBaseline).filter(MonthlyCreditBaseline.period_start == period_start).all()}
         rows = []
         for u in users:
             base = bases.get(int(u.user_id), int(u.credits or 0))
@@ -2511,18 +2670,18 @@ def api_leader_top_rich():
                 'user_id': int(u.user_id),
                 'display_name': u.display_name or 'Игрок',
                 'tg_username': u.tg_username or '',
-                'gain': int(gain)
+                'gain': int(gain),
             })
         # сортировка по gain убыв.
         rows.sort(key=lambda x: (-x['gain'], x['display_name']))
         rows = rows[:10]
         payload = {'items': rows}
         etag = _etag_for_payload(payload)
-        LEADER_RICH_CACHE = { 'data': rows, 'ts': time.time(), 'etag': etag }
+        LEADER_RICH_CACHE = {'data': rows, 'ts': time.time(), 'etag': etag}
         client_etag = request.headers.get('If-None-Match')
         if client_etag and client_etag == etag:
             return ('', 304)
-        resp = jsonify({ 'items': rows, 'updated_at': datetime.now(timezone.utc).isoformat(), 'version': etag })
+        resp = jsonify({'items': rows, 'updated_at': datetime.now(timezone.utc).isoformat(), 'version': etag})
         resp.headers['ETag'] = etag
         resp.headers['Cache-Control'] = 'public, max-age=3600, stale-while-revalidate=600'
         return resp
@@ -2659,10 +2818,10 @@ def api_leader_prizes():
         tmp.sort(key=lambda x: (-x['winrate'], -x['total'], x['display_name']))
         preds = tmp[:3]
 
-        # rich — недельный прирост кредитов с понедельника 03:00 МСК
-        period_start = _week_period_start_msk_to_utc()
-        ensure_weekly_baselines(db, period_start)
-        bases = { int(r.user_id): int(r.credits_base or 0) for r in db.query(WeeklyCreditBaseline).filter(WeeklyCreditBaseline.period_start == period_start).all() }
+        # rich — месячный прирост кредитов с 1-го числа 03:00 МСК
+        period_start = _month_period_start_msk_to_utc()
+        ensure_monthly_baselines(db, period_start)
+        bases = { int(r.user_id): int(r.credits_base or 0) for r in db.query(MonthlyCreditBaseline).filter(MonthlyCreditBaseline.period_start == period_start).all() }
         tmp_rich = []
         for u in db.query(User).all():
             base = bases.get(int(u.user_id), int(u.credits or 0))
@@ -3518,6 +3677,11 @@ def telegram_webhook_stub(maybe_token: str):
     # If someone posts to /<bot_token> path (common webhook pattern), just 200 OK noop to stop 404 spam
     if ':' in maybe_token and len(maybe_token) >= 40:
         return jsonify({'status': 'noop'}), 200
+
+# Простой ping endpoint для keepalive
+@app.route('/ping')
+def ping():
+    return jsonify({'pong': True, 'ts': datetime.now(timezone.utc).isoformat()}), 200
     return jsonify({'error': 'not found'}), 404
 
 @app.route('/api/league-table', methods=['GET'])
@@ -5131,5 +5295,26 @@ if __name__ == '__main__':
         start_background_sync()
     except Exception as _e:
         print(f"[WARN] Background sync not started: {_e}")
+    # Автопинг для поддержания контейнера в онлайне (Render/др.)
+    try:
+        import threading, requests
+        def self_ping_loop():
+            url_env = os.environ.get('RENDER_URL') or ''
+            base = url_env.rstrip('/') if url_env else None
+            while True:
+                try:
+                    target = (base + '/ping') if base else None
+                    if target:
+                        requests.get(target, timeout=5)
+                    else:
+                        # локальный пинг (если базовый URL неизвестен)
+                        requests.get('http://127.0.0.1:' + str(int(os.environ.get('PORT', 5000))) + '/ping', timeout=3)
+                except Exception:
+                    pass
+                finally:
+                    time.sleep(300)
+        threading.Thread(target=self_ping_loop, daemon=True).start()
+    except Exception as _e:
+        print(f"[WARN] Self-ping thread not started: {_e}")
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
