@@ -676,12 +676,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const homeItem = document.querySelector('.nav-item[data-tab="home"]');
             if (homeItem) homeItem.classList.add('active');
             const home = document.getElementById('tab-home');
+            const prof = document.getElementById('tab-profile');
             const ufo = document.getElementById('tab-ufo');
             const preds = document.getElementById('tab-predictions');
             const lead = document.getElementById('tab-leaderboard');
             const shop = document.getElementById('tab-shop');
             const admin = document.getElementById('tab-admin');
-            [home, ufo, preds, lead, shop, admin].forEach(el => { if (el) el.style.display = 'none'; });
+            [home, prof, ufo, preds, lead, shop, admin].forEach(el => { if (el) el.style.display = 'none'; });
             if (home) home.style.display = '';
         } catch(_) {}
 
@@ -974,7 +975,9 @@ document.addEventListener('DOMContentLoaded', () => {
         let slides = Array.isArray(window.__HOME_ADS__) ? window.__HOME_ADS__.slice() : null;
         if (!slides || slides.length === 0) {
             slides = [
-                { img: '/static/img/achievements/credits-gold.png', title: 'Здесь может быть ваша лига — нажми', action: 'BLB' }
+                { img: '/static/img/achievements/credits-gold.png', title: 'Здесь может быть ваша лига — нажми', action: 'BLB' },
+                { img: '/static/img/achievements/placeholder.png', title: '', action: '' },
+                { img: '/static/img/achievements/placeholder.png', title: '', action: '' }
             ];
         }
         // Рендер слайдов
@@ -1007,6 +1010,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         const admin = document.getElementById('tab-admin');
                         [home, ufo, preds, lead, shop, admin].forEach(el => { if (el) el.style.display = 'none'; });
                         if (ufo) ufo.style.display = '';
+                        // Подсказка: маленькая стрелка к нижнему меню на вкладку лиги + подпись «щёлкни два раза»
+                        try { showLeagueHint(); } catch(_) {}
                     } else if (act === 'UFO') {
                         selectUFOLeague(false, true);
                         document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -1020,6 +1025,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         const admin = document.getElementById('tab-admin');
                         [home, ufo, preds, lead, shop, admin].forEach(el => { if (el) el.style.display = 'none'; });
                         if (ufo) ufo.style.display = '';
+                        try { showLeagueHint(); } catch(_) {}
                     }
                 } catch(_) {}
             });
@@ -2339,6 +2345,59 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (panes[key]) panes[key].style.display = '';
             });
         });
+    }
+
+    // Подсказка: стрелка к нижнему меню (вкладка ЛИГИ/НЛО) с текстом «щёлкни два раза»
+    function showLeagueHint() {
+        try {
+            // Если уже показана — не дублируем
+            if (document.getElementById('league-hint-tip')) return;
+            const target = document.querySelector('.nav-item[data-tab="ufo"]');
+            const nav = document.querySelector('nav.nav');
+            if (!target || !nav) return;
+            const r = target.getBoundingClientRect();
+            const rn = nav.getBoundingClientRect();
+            const tip = document.createElement('div');
+            tip.id = 'league-hint-tip';
+            tip.style.position = 'fixed';
+            tip.style.zIndex = '1200';
+            tip.style.pointerEvents = 'none';
+            // Контейнер с текстом над стрелкой
+            const label = document.createElement('div');
+            label.textContent = 'щёлкни два раза';
+            label.style.position = 'absolute';
+            label.style.left = '50%';
+            label.style.transform = 'translateX(-50%)';
+            label.style.bottom = '28px';
+            label.style.fontSize = '11px';
+            label.style.fontWeight = '800';
+            label.style.color = '#fff';
+            label.style.textShadow = '0 1px 2px rgba(0,0,0,.6)';
+            // Стрелка
+            const arrow = document.createElement('div');
+            arrow.style.width = '0';
+            arrow.style.height = '0';
+            arrow.style.borderLeft = '6px solid transparent';
+            arrow.style.borderRight = '6px solid transparent';
+            arrow.style.borderTop = '10px solid #fff';
+            arrow.style.filter = 'drop-shadow(0 1px 2px rgba(0,0,0,.6))';
+            arrow.style.position = 'absolute';
+            arrow.style.left = '50%';
+            arrow.style.transform = 'translateX(-50%)';
+            arrow.style.bottom = '14px';
+            tip.appendChild(label);
+            tip.appendChild(arrow);
+            document.body.appendChild(tip);
+            // Позиционирование по центру иконки лиги
+            const centerX = r.left + r.width / 2;
+            tip.style.left = `${Math.round(centerX)}px`;
+            tip.style.bottom = `${Math.round((window.innerHeight - rn.top) + 6)}px`;
+            // Убрать подсказку по любому клику/тапу по нижнему меню
+            const cleanup = () => { try { tip.remove(); } catch(_) {} document.removeEventListener('click', onDocClick, true); };
+            const onDocClick = (e) => { if (e.target.closest('nav.nav')) cleanup(); };
+            document.addEventListener('click', onDocClick, true);
+            setTimeout(cleanup, 6000);
+        } catch(_) {}
     }
 
     // ---------- MATCH DETAILS SCREEN (in-app, not modal) ----------
