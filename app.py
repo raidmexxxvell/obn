@@ -410,6 +410,15 @@ class Referral(Base):
 
 class Bet(Base):
     __tablename__ = 'bets'
+    __table_args__ = (
+        # Часто используемые выборки:
+        # - суточная сумма по пользователю: (user_id, placed_at)
+        # - открытые ставки по матчу: (home, away, status)
+        # - проверки времени матча: (home, away, match_datetime)
+        Index('idx_bet_user_placed_at', 'user_id', 'placed_at'),
+        Index('idx_bet_match_status', 'home', 'away', 'status'),
+        Index('idx_bet_match_datetime', 'home', 'away', 'match_datetime'),
+    )
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, index=True, nullable=False)
     tour = Column(Integer, nullable=True)
@@ -427,6 +436,10 @@ class Bet(Base):
 
 class MatchSpecials(Base):
     __tablename__ = 'match_specials'
+    __table_args__ = (
+        # Ищем по home/away — держим индекс
+        Index('idx_specials_home_away', 'home', 'away'),
+    )
     id = Column(Integer, primary_key=True, autoincrement=True)
     home = Column(Text, nullable=False)
     away = Column(Text, nullable=False)
@@ -437,6 +450,10 @@ class MatchSpecials(Base):
 
 class MatchScore(Base):
     __tablename__ = 'match_scores'
+    __table_args__ = (
+        # Ищем/обновляем по матчу — индекс
+        Index('idx_score_home_away', 'home', 'away'),
+    )
     id = Column(Integer, primary_key=True, autoincrement=True)
     home = Column(Text, nullable=False)
     away = Column(Text, nullable=False)
@@ -540,6 +557,11 @@ class UserLimits(Base):
 # ---------------------- SHOP: ORDERS MODELS ----------------------
 class ShopOrder(Base):
     __tablename__ = 'shop_orders'
+    __table_args__ = (
+        # Частые выборки: мои заказы (user_id, created_at) и список для админа (created_at)
+        Index('idx_shop_order_user_created', 'user_id', 'created_at'),
+        Index('idx_shop_order_created', 'created_at'),
+    )
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, index=True, nullable=False)
     total = Column(Integer, nullable=False)

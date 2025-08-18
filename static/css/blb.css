@@ -25,10 +25,21 @@ body.theme-blb .top-bar .league-title {
 /* Кнопки и акценты */
 body.theme-blb .details-btn,
 body.theme-blb .checkin-button,
-body.theme-blb .refresh-btn {
+body.theme-blb .refresh-btn,
+/* App-like buttons под BLB */
+body.theme-blb .app-btn {
   background: linear-gradient(180deg, #e5c45a, #c7a22c);
   color: #1a1a1a;
   border: none;
+}
+/* Варианты для .app-btn */
+body.theme-blb .app-btn.neutral {
+  background: linear-gradient(180deg, #e0e0e0, #cfcfcf);
+  color: #111;
+}
+body.theme-blb .app-btn.danger {
+  background: linear-gradient(180deg, #ff8a8a, #f04444);
+  color: #1a1a1a;
 }
 
 /* Навигация снизу: легкий золотистый контур */
