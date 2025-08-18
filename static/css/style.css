@@ -915,3 +915,40 @@ body.theme-blb .share-btn {
 
 /* Админ: подвкладки */
 #admin-subtabs .subtab-item { padding: 8px 6px; }
+
+/* App-like buttons */
+.app-btn {
+    appearance: none;
+    background: linear-gradient(180deg, var(--btn-primary, #48caff) 0%, var(--btn-secondary, #2ee9d7) 100%);
+    color: #0b1220;
+    border: 0;
+    border-radius: 12px;
+    padding: 10px 14px;
+    font-weight: 900;
+    letter-spacing: 0.2px;
+    box-shadow: 0 2px 0 rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.08);
+    transition: transform .06s ease, box-shadow .12s ease, opacity .2s ease;
+}
+.app-btn:active { transform: translateY(1px); box-shadow: 0 1px 0 rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.06); }
+.app-btn[disabled] { opacity: .6; cursor: progress; }
+
+/* Variants */
+.app-btn.neutral {
+    background: linear-gradient(180deg, #d7dde2 0%, #c7d0d8 100%);
+}
+.app-btn.danger {
+    background: linear-gradient(180deg, #ff6b6b 0%, #f53844 100%);
+}
+
+/* Status badge */
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.12);
+    color: #fff;
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+}

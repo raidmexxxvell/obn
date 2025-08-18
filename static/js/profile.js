@@ -1118,14 +1118,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 const items = String(o.items_preview || '');
                 const qty = Number(o.items_qty || 0);
                 // Статус + селект для изменения
-                const statusCell = (() => {
+        const statusCell = (() => {
                     const td = document.createElement('td');
                     const sel = document.createElement('select');
                     sel.className = 'order-status-select';
                     const opts = [
-                        { v: 'new', t: 'new' },
-                        { v: 'paid', t: 'paid' },
-                        { v: 'cancelled', t: 'cancelled' }
+            { v: 'new', t: 'Новый' },
+            { v: 'paid', t: 'Оплачен' },
+            { v: 'cancelled', t: 'Отменён' }
                     ];
                     opts.forEach(opt => { const oEl = document.createElement('option'); oEl.value = opt.v; oEl.textContent = opt.t; if ((o.status||'new')===opt.v) oEl.selected = true; sel.appendChild(oEl); });
                     sel.addEventListener('change', async () => {
@@ -1196,13 +1196,14 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!orders.length) { pane.innerHTML = '<div style="padding:12px; color: var(--gray);">Заказов пока нет.</div>'; return; }
             const wrap = document.createElement('div');
             wrap.className = 'cart-list';
+            const statusRu = (s) => ({ new: 'Новый', paid: 'Оплачен', cancelled: 'Отменён' }[s] || s);
             orders.forEach(o => {
                 const line = document.createElement('div'); line.className = 'cart-line';
                 const id = document.createElement('div'); id.className = 'cart-left'; id.textContent = `Заказ №${o.id}`;
                 const sum = document.createElement('div'); sum.className = 'cart-right'; sum.textContent = `${Number(o.total||0).toLocaleString()} кр.`;
                 const when = document.createElement('div'); when.style.flex='1'; when.style.textAlign='center'; when.style.color='var(--gray)'; when.textContent = (()=>{ try { return new Date(o.created_at).toLocaleString(); } catch(_) { return o.created_at || ''; } })();
                 // Статус
-                const st = document.createElement('div'); st.style.minWidth = '84px'; st.style.textAlign = 'right'; st.textContent = (o.status||'new');
+                const st = document.createElement('div'); st.style.minWidth = '84px'; st.style.textAlign = 'right'; st.textContent = statusRu(o.status||'new');
                 line.append(id, when, sum, st);
                 wrap.appendChild(line);
             });
@@ -2350,7 +2351,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (typeof eventsPane !== 'undefined') eventsPane.style.display = 'none';
 
         // заполнение составов — табличный вид с событиями
-        const renderRosterTable = (pane, players, side, existingEvents) => {
+    const renderRosterTable = (pane, players, side, existingEvents) => {
             pane.innerHTML = '';
             const table = document.createElement('table');
             table.className = 'roster-table';
@@ -2367,8 +2368,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 return img; };
             const thYellow = mkTh(iconImg('/static/img/icons/yellow.png'));
             const thRed = mkTh(iconImg('/static/img/icons/red.png'));
-            const thAssist = mkTh(iconImg('/static/img/shop/boots.png'));
-            const thGoal = mkTh(iconImg('/static/img/shop/ball.png'));
+            const thAssist = mkTh(iconImg('/static/img/icons/assist.png'));
+            const thGoal = mkTh(iconImg('/static/img/icons/goal.png'));
             trh.append(nameTh, thYellow, thRed, thAssist, thGoal); thead.appendChild(trh);
             const tbody = document.createElement('tbody');
             const adminId = document.body.getAttribute('data-admin');
@@ -2388,7 +2389,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 } catch(_) {}
                 return idx;
             })();
-            const createCell = (player, type) => {
+            const highlightRow = (tr, key) => {
+                try {
+                    const hasAny = !!(evIdx.get(key) && evIdx.get(key).size > 0);
+                    tr.style.transition = 'background-color 120ms ease';
+                    tr.style.backgroundColor = hasAny ? 'rgba(255,255,255,0.06)' : '';
+                } catch(_) {}
+            };
+            const createCell = (player, type, trRef) => {
                 const td = mkTd();
                 const key = (player||'').trim().toLowerCase();
                 const has = evIdx.get(key) && evIdx.get(key).has(type);
@@ -2432,13 +2440,32 @@ document.addEventListener('DOMContentLoaded', () => {
                                 .then(d => {
                                     if (d?.error) { try { tg?.showAlert?.(d.error); } catch(_) {} return; }
                                     icon.style.opacity = '1';
+                                    // пометим наличие локально, чтобы следующий клик мог удалить
+                                    if (!evIdx.has(key)) evIdx.set(key, new Set()); evIdx.get(key).add(type);
+                                    highlightRow(trRef, key);
                                 })
                                 .catch(err => { console.error('events/add', err); try { tg?.showAlert?.('Ошибка сохранения'); } catch(_) {} })
                         } catch(_) {}
-                    } else if (sel.value === '' && has) {
-                        // сейчас удаление не поддерживается
-                        try { tg?.showAlert?.('Сброс события пока не поддерживается'); } catch(_) {}
-                        sel.value = 'yes';
+                    } else if (sel.value === '' && (has || (evIdx.get(key) && evIdx.get(key).has(type)))) {
+                        // удаляем событие
+                        try {
+                            const fd = new FormData();
+                            fd.append('initData', tg?.initData || '');
+                            fd.append('home', match.home || '');
+                            fd.append('away', match.away || '');
+                            fd.append('team', side);
+                            fd.append('player', player || '');
+                            fd.append('type', type);
+                            fetch('/api/match/events/remove', { method: 'POST', body: fd })
+                                .then(r=>r.json())
+                                .then(d => {
+                                    if (d?.error) { try { tg?.showAlert?.(d.error); } catch(_) {} sel.value='yes'; return; }
+                                    icon.style.opacity = '0.2';
+                                    if (evIdx.get(key)) evIdx.get(key).delete(type);
+                                    highlightRow(trRef, key);
+                                })
+                                .catch(err => { console.error('events/remove', err); try { tg?.showAlert?.('Ошибка удаления'); } catch(_) {} sel.value='yes'; })
+                        } catch(_) {}
                     }
                 });
                 box.append(sel, icon); td.appendChild(box); return td;
@@ -2454,11 +2481,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 players.forEach(pName => {
                     const tr = document.createElement('tr');
                     const tdName = document.createElement('td'); tdName.style.border='1px solid rgba(255,255,255,0.15)'; tdName.style.padding='6px'; tdName.style.textAlign='left'; tdName.textContent = pName;
-                    const tdY = createCell(pName, 'yellow');
-                    const tdR = createCell(pName, 'red');
-                    const tdA = createCell(pName, 'assist');
-                    const tdG = createCell(pName, 'goal');
+                    const tdY = createCell(pName, 'yellow', tr);
+                    const tdR = createCell(pName, 'red', tr);
+                    const tdA = createCell(pName, 'assist', tr);
+                    const tdG = createCell(pName, 'goal', tr);
                     tr.append(tdName, tdY, tdR, tdA, tdG);
+                    // начальная подсветка
+                    const key = (pName||'').trim().toLowerCase();
+                    highlightRow(tr, key);
                     tbody.appendChild(tr);
                 });
             }
@@ -2471,7 +2501,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const ev = details?.events || { home: [], away: [] };
             renderRosterTable(homePane, homeList, 'home', ev);
             renderRosterTable(awayPane, awayList, 'away', ev);
-        } catch(_) {
+    } catch(_) {
             renderRosterTable(homePane, [], 'home', {home:[],away:[]});
             renderRosterTable(awayPane, [], 'away', {home:[],away:[]});
         }
@@ -2673,12 +2703,20 @@ document.addEventListener('DOMContentLoaded', () => {
         shell.className = 'admin-panel';
         shell.style.marginTop = '8px'; shell.style.padding = '8px'; shell.style.border = '1px solid rgba(255,255,255,0.1)'; shell.style.borderRadius = '10px';
     const title = document.createElement('div'); title.style.marginBottom = '6px'; title.textContent = 'Спецсобытия матча';
-    // Блок статуса матча: scheduled|live|finished
+    // Авто-статус (только отображение)
     const statusRow = document.createElement('div'); statusRow.style.display='flex'; statusRow.style.gap='8px'; statusRow.style.alignItems='center'; statusRow.style.marginBottom='6px';
     const sLab = document.createElement('div'); sLab.textContent = 'Статус:';
-    const sSel = document.createElement('select'); sSel.innerHTML = '<option value="scheduled">Запланирован</option><option value="live">Матч идет</option><option value="finished">Матч завершен</option>';
-    const sBtn = document.createElement('button'); sBtn.className = 'details-btn'; sBtn.textContent = 'Применить статус';
-    statusRow.append(sLab, sSel, sBtn);
+    const sBadge = document.createElement('span'); sBadge.className = 'status-badge';
+    const updStatus = async () => {
+        try {
+            const r = await fetch(`/api/match/status/get?home=${encodeURIComponent(m.home||'')}&away=${encodeURIComponent(m.away||'')}`);
+            const d = await r.json();
+            let txt = 'Запланирован';
+            if (d?.status === 'live') txt = 'Матч идет'; else if (d?.status === 'finished') txt = 'Матч завершен'; else if (d?.soon) txt = 'Скоро начнется';
+            sBadge.textContent = txt;
+        } catch(_) { sBadge.textContent = '—'; }
+    };
+    statusRow.append(sLab, sBadge);
         const row1 = document.createElement('div'); row1.style.display='flex'; row1.style.gap='8px'; row1.style.alignItems='center';
         const lab1 = document.createElement('div'); lab1.textContent = 'Пенальти:';
         const sel1 = document.createElement('select'); sel1.innerHTML = '<option value="">—</option><option value="1">Да</option><option value="0">Нет</option>';
@@ -2687,17 +2725,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const lab2 = document.createElement('div'); lab2.textContent = 'Красная:';
         const sel2 = document.createElement('select'); sel2.innerHTML = '<option value="">—</option><option value="1">Да</option><option value="0">Нет</option>';
         row2.append(lab2, sel2);
-        const actions = document.createElement('div'); actions.style.marginTop='8px';
-        const save = document.createElement('button'); save.className = 'details-btn'; save.textContent = 'Сохранить и рассчитать';
-        actions.append(save);
-        shell.append(title, statusRow, row1, row2, actions);
+    const actions = document.createElement('div'); actions.style.marginTop='8px'; actions.style.display='flex'; actions.style.gap='8px'; actions.style.flexWrap='wrap';
+    const savePenalty = document.createElement('button'); savePenalty.className = 'app-btn neutral'; savePenalty.textContent = 'Сохранить и рассчитать пенальти';
+    const saveRed = document.createElement('button'); saveRed.className = 'app-btn neutral'; saveRed.textContent = 'Сохранить и рассчитать красную';
+    const settleMatchBtn = document.createElement('button'); settleMatchBtn.className = 'app-btn danger'; settleMatchBtn.textContent = 'Рассчитать матч';
+    actions.append(savePenalty, saveRed, settleMatchBtn);
+    shell.append(title, statusRow, row1, row2, actions);
         host.appendChild(shell);
 
-        // Инициализируем селектор статуса текущим значением
-        try {
-            fetch(`/api/match/status/get?home=${encodeURIComponent(m.home||'')}&away=${encodeURIComponent(m.away||'')}`)
-                .then(r=>r.json()).then(s => { if (s?.status) sSel.value = s.status; }).catch(()=>{});
-        } catch(_) {}
+    // Инициализируем авто-статус и периодически обновляем во время открытия модалки
+    updStatus();
+    const stId = setInterval(updStatus, 30000);
+    try { host.__onclose = () => clearInterval(stId); } catch(_) {}
 
         // Загрузим текущее состояние
         fetch(`/api/specials/get?home=${encodeURIComponent(m.home||'')}&away=${encodeURIComponent(m.away||'')}`)
@@ -2707,47 +2746,97 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (d.redcard_yes === 1) sel2.value = '1'; else if (d.redcard_yes === 0) sel2.value = '0'; else sel2.value='';
             }).catch(()=>{});
 
-        // Сохранение статуса
-        sBtn.addEventListener('click', () => {
+    // Удалено ручное управление статусом: статусы вычисляются автоматически на сервере
+
+        // Хелпер: сохранить флаг и рассчитать конкретный рынок
+        const saveAndSettle = async (market) => {
             const fd = new FormData();
             fd.append('initData', tg?.initData || '');
             fd.append('home', m.home || '');
             fd.append('away', m.away || '');
-            fd.append('status', sSel.value || 'scheduled');
-            sBtn.disabled = true; const old = sBtn.textContent; sBtn.textContent = 'Сохранение...';
-            fetch('/api/match/status/set', { method: 'POST', body: fd })
-                .then(r => r.json())
-                .then(resp => {
-                    if (resp?.error) { try { tg?.showAlert?.(resp.error); } catch(_) {} return; }
-                    try { tg?.showAlert?.('Статус обновлён'); } catch(_) {}
-                    // Обновим LIVE стор для индикации и уведомления
-                    try {
-                        if (!window.__LIVE_STATUS) window.__LIVE_STATUS = { pairs: new Set(), ts: 0 };
-                        const key = `${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}`;
-                        if (sSel.value === 'live') { window.__LIVE_STATUS.pairs.add(key); }
-                        if (sSel.value === 'finished') { window.__LIVE_STATUS.pairs.delete(key); }
-                    } catch(_) {}
-                })
-                .catch(err => { console.error('match status set error', err); try { tg?.showAlert?.('Ошибка сохранения статуса'); } catch(_) {} })
-                .finally(()=>{ sBtn.disabled=false; sBtn.textContent = old; });
+            if (market === 'penalty') {
+                if (sel1.value === '') { try { tg?.showAlert?.('Укажите значение для Пенальти'); } catch(_) {} return; }
+                fd.append('penalty_yes', sel1.value);
+            } else if (market === 'redcard') {
+                if (sel2.value === '') { try { tg?.showAlert?.('Укажите значение для Красной карточки'); } catch(_) {} return; }
+                fd.append('redcard_yes', sel2.value);
+            }
+            const btn = market === 'penalty' ? savePenalty : saveRed;
+            const old = btn.textContent; btn.disabled = true; btn.textContent = 'Сохранение...';
+            try {
+                const r = await fetch('/api/specials/set', { method: 'POST', body: fd });
+                const d = await r.json().catch(()=>({}));
+                if (!r.ok || d?.error) { throw new Error(d?.error || 'Ошибка сохранения'); }
+                // затем точечный расчёт
+                const fd2 = new FormData();
+                fd2.append('initData', tg?.initData || '');
+                fd2.append('home', m.home || '');
+                fd2.append('away', m.away || '');
+                fd2.append('market', market);
+                const r2 = await fetch('/api/specials/settle', { method: 'POST', body: fd2 });
+                const d2 = await r2.json().catch(()=>({}));
+                if (!r2.ok || d2?.error) { throw new Error(d2?.error || 'Ошибка расчёта'); }
+                try { tg?.showAlert?.(`Готово: изменено ${d2.changed||0}, выиграло ${d2.won||0}, проиграло ${d2.lost||0}`); } catch(_) {}
+            } catch (e) {
+                console.error('specials save/settle error', e);
+                try { tg?.showAlert?.(e?.message || 'Ошибка операции'); } catch(_) {}
+            } finally {
+                btn.disabled = false; btn.textContent = old;
+            }
+        };
+        savePenalty.addEventListener('click', () => saveAndSettle('penalty'));
+        saveRed.addEventListener('click', () => saveAndSettle('redcard'));
+
+        // Подтверждение перед полным расчётом матча
+        const confirmSettle = () => new Promise((resolve) => {
+            let ov = document.querySelector('.modal-overlay');
+            if (!ov) {
+                ov = document.createElement('div');
+                ov.className = 'modal-overlay';
+                ov.style.position = 'fixed'; ov.style.inset = '0'; ov.style.background = 'rgba(0,0,0,0.6)'; ov.style.zIndex = '9999';
+                ov.style.display = 'flex'; ov.style.alignItems = 'center'; ov.style.justifyContent = 'center';
+                const box = document.createElement('div'); box.className = 'modal-box';
+                box.style.background = 'rgba(20,24,34,0.98)'; box.style.border = '1px solid rgba(255,255,255,0.12)'; box.style.borderRadius = '14px';
+                box.style.width = 'min(92vw, 420px)'; box.style.padding = '14px'; box.style.boxShadow = '0 10px 30px rgba(0,0,0,0.4)';
+                box.innerHTML = `
+                    <div style="font-weight:700; font-size:16px; margin-bottom:8px;">Завершить и рассчитать матч?</div>
+                    <div style="opacity:.9; font-size:13px; line-height:1.35; margin-bottom:12px;">
+                        Действие необратимо. Будут рассчитаны все ставки по матчу, а незаполненные спецсобытия зафиксируются как «Нет».
+                    </div>
+                    <div style="display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap;">
+                        <button class="app-btn neutral" id="ms-cancel">Отмена</button>
+                        <button class="app-btn danger" id="ms-ok">Да, рассчитать</button>
+                    </div>
+                `;
+                ov.appendChild(box); document.body.appendChild(ov);
+                box.querySelector('#ms-cancel').onclick = () => { ov.remove(); resolve(false); };
+                box.querySelector('#ms-ok').onclick = () => { ov.remove(); resolve(true); };
+            } else {
+                resolve(false);
+            }
         });
 
-        save.addEventListener('click', () => {
-            const fd = new FormData();
-            fd.append('initData', tg?.initData || '');
-            fd.append('home', m.home || '');
-            fd.append('away', m.away || '');
-            if (sel1.value !== '') fd.append('penalty_yes', sel1.value);
-            if (sel2.value !== '') fd.append('redcard_yes', sel2.value);
-            save.disabled = true; const old = save.textContent; save.textContent = 'Сохранение...';
-            fetch('/api/specials/set', { method: 'POST', body: fd })
-                .then(r => r.json())
-                .then(resp => {
-                    if (resp?.error) { try { tg?.showAlert?.(resp.error); } catch(_) {} return; }
-                    try { tg?.showAlert?.('Сохранено. Расчёт запущен.'); } catch(_) {}
-                })
-                .catch(err => { console.error('specials set error', err); try { tg?.showAlert?.('Ошибка сохранения'); } catch(_) {} })
-                .finally(()=>{ save.disabled=false; save.textContent = old; });
+        // Полный расчёт матча с подтверждением
+        settleMatchBtn.addEventListener('click', async () => {
+            const ok = await confirmSettle();
+            if (!ok) return;
+            const tg = window.Telegram?.WebApp || null;
+            const btn = settleMatchBtn; const old = btn.textContent; btn.disabled = true; btn.textContent = 'Расчет...';
+            try {
+                const fd = new FormData();
+                fd.append('initData', tg?.initData || '');
+                fd.append('home', m.home || '');
+                fd.append('away', m.away || '');
+                const r = await fetch('/api/match/settle', { method: 'POST', body: fd });
+                const d = await r.json().catch(()=>({}));
+                if (!r.ok || d?.error) throw new Error(d?.error || 'Ошибка расчёта матча');
+                try { tg?.showAlert?.(`Готово: изменено ${d.changed||0}, выиграло ${d.won||0}, проиграло ${d.lost||0}`); } catch(_) {}
+            } catch(e) {
+                console.error('match settle error', e);
+                try { tg?.showAlert?.(e?.message || 'Ошибка расчёта'); } catch(_) {}
+            } finally {
+                btn.disabled = false; btn.textContent = old;
+            }
         });
     }
 
@@ -2771,6 +2860,56 @@ document.addEventListener('DOMContentLoaded', () => {
         const grid = document.createElement('div'); grid.className = 'events-grid'; grid.style.display='grid'; grid.style.gridTemplateColumns='1fr 1fr'; grid.style.gap='12px';
         grid.append(homeBlock.col, awayBlock.col);
         wrap.appendChild(grid);
+
+        // Админский блок редактирования счёта (live), не влияет на ставки до завершения матча
+        try {
+            const adminId = document.body.getAttribute('data-admin');
+            const currentId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id ? String(window.Telegram.WebApp.initDataUnsafe.user.id) : '';
+            const isAdmin = !!(adminId && currentId && String(adminId) === currentId);
+            if (isAdmin) {
+                const scoreBox = document.createElement('div');
+                scoreBox.className = 'admin-panel';
+                scoreBox.style.marginTop='12px'; scoreBox.style.padding='8px'; scoreBox.style.border='1px solid rgba(255,255,255,0.1)'; scoreBox.style.borderRadius='10px';
+                scoreBox.innerHTML = `
+                    <div style="margin-bottom:6px; font-weight:600;">Счёт матча (только отображение)</div>
+                    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                        <label>Команда 1: <input type="number" id="sc-h" min="0" style="width:80px;" /></label>
+                        <label>Команда 2: <input type="number" id="sc-a" min="0" style="width:80px;" /></label>
+                        <button class="app-btn" id="sc-save">Сохранить счёт</button>
+                        <div class="hint">Ставки будут рассчитаны только после нажатия «Рассчитать матч».</div>
+                    </div>
+                `;
+                wrap.appendChild(scoreBox);
+                const inpH = scoreBox.querySelector('#sc-h');
+                const inpA = scoreBox.querySelector('#sc-a');
+                const btn = scoreBox.querySelector('#sc-save');
+                // загрузим текущий счёт
+                fetch(`/api/match/score/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}`)
+                    .then(r=>r.json()).then(d => {
+                        if (typeof d.score_home === 'number') inpH.value = d.score_home;
+                        if (typeof d.score_away === 'number') inpA.value = d.score_away;
+                    }).catch(()=>{});
+                btn.addEventListener('click', async () => {
+                    const tg = window.Telegram?.WebApp || null;
+                    const fd = new FormData();
+                    fd.append('initData', tg?.initData || '');
+                    fd.append('home', match.home || '');
+                    fd.append('away', match.away || '');
+                    if (inpH.value !== '') fd.append('score_home', inpH.value);
+                    if (inpA.value !== '') fd.append('score_away', inpA.value);
+                    btn.disabled = true; const old = btn.textContent; btn.textContent = 'Сохранение...';
+                    try {
+                        const r = await fetch('/api/match/score/set', { method: 'POST', body: fd });
+                        const d = await r.json().catch(()=>({}));
+                        if (!r.ok || d?.error) throw new Error(d?.error || 'Ошибка сохранения счёта');
+                        try { tg?.showAlert?.('Счёт сохранён'); } catch(_) {}
+                    } catch(e) {
+                        console.error('score set error', e);
+                        try { tg?.showAlert?.(e?.message || 'Ошибка'); } catch(_) {}
+                    } finally { btn.disabled=false; btn.textContent = old; }
+                });
+            }
+        } catch(_) {}
 
         const renderList = (listEl, items) => {
             listEl.innerHTML = '';

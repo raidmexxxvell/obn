@@ -178,7 +178,7 @@ BET_MAX_STAKE = int(os.environ.get('BET_MAX_STAKE', '10000'))
 BET_DAILY_MAX_STAKE = int(os.environ.get('BET_DAILY_MAX_STAKE', '50000'))
 BET_MARGIN = float(os.environ.get('BET_MARGIN', '0.06'))  # 6% маржа по умолчанию
 _LAST_SETTLE_TS = 0
-BET_MATCH_DURATION_MINUTES = int(os.environ.get('BET_MATCH_DURATION_MINUTES', '60'))  # длительность матча для авторасчёта спецрынков
+BET_MATCH_DURATION_MINUTES = int(os.environ.get('BET_MATCH_DURATION_MINUTES', '120'))  # длительность матча для авторасчёта спецрынков (по умолчанию 2 часа)
 BET_LOCK_AHEAD_MINUTES = int(os.environ.get('BET_LOCK_AHEAD_MINUTES', '5'))  # за сколько минут до начала матча закрывать ставки
 
 
@@ -307,8 +307,16 @@ def api_betting_place():
             break
     if not found:
         return jsonify({'error': 'Матч не найден'}), 404
-    if match_dt and match_dt <= datetime.now():
-        return jsonify({'error': 'Ставки на начавшийся матч недоступны'}), 400
+    if match_dt:
+        now_local = datetime.now()
+        if match_dt <= now_local:
+            return jsonify({'error': 'Ставки на начавшийся матч недоступны'}), 400
+        # Закрываем прием ставок за BET_LOCK_AHEAD_MINUTES до старта
+        try:
+            if match_dt - timedelta(minutes=BET_LOCK_AHEAD_MINUTES) <= now_local:
+                return jsonify({'error': 'Ставки закрыты перед началом матча'}), 400
+        except Exception:
+            pass
 
     db: Session = get_db()
     try:
@@ -425,6 +433,15 @@ class MatchSpecials(Base):
     # Фиксация факта события в матче
     penalty_yes = Column(Integer, default=None)   # 1=yes, 0=no, None=не задано
     redcard_yes = Column(Integer, default=None)   # 1=yes, 0=no, None=не задано
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+class MatchScore(Base):
+    __tablename__ = 'match_scores'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    home = Column(Text, nullable=False)
+    away = Column(Text, nullable=False)
+    score_home = Column(Integer, nullable=True)
+    score_away = Column(Integer, nullable=True)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 class MatchPlayerEvent(Base):
@@ -2082,6 +2099,8 @@ def start_background_sync():
     except Exception as e:
         app.logger.warning(f"Failed to start background sync: {e}")
 
+# (removed) Background settle worker per new requirement
+
 # ---------------------- Builders for betting tours and leaderboards ----------------------
 def _build_betting_tours_payload():
     # Build nearest tour with odds, markets, and locks for each match
@@ -2259,38 +2278,49 @@ def api_match_status_set():
 
 @app.route('/api/match/status/get', methods=['GET'])
 def api_match_status_get():
+    """Авто: scheduled/soon/live/finished по времени начала матча.
+    soon: за 10 минут до старта.
+    finished: строго через BET_MATCH_DURATION_MINUTES после старта.
+    """
     home = (request.args.get('home') or '').strip()
     away = (request.args.get('away') or '').strip()
-    if SessionLocal is None:
-        return jsonify({'status':'scheduled'})
-    db = get_db()
-    try:
-        row = db.query(MatchFlags).filter(MatchFlags.home==home, MatchFlags.away==away).first()
-        if not row:
-            return jsonify({'status':'scheduled'})
-        return jsonify({'status': row.status, 'live_started_at': row.live_started_at.isoformat() if row.live_started_at else ''})
-    finally:
-        db.close()
+    dt = _get_match_datetime(home, away)
+    now = datetime.now()
+    if not dt:
+        return jsonify({'status':'scheduled', 'soon': False, 'live_started_at': ''})
+    if (dt - timedelta(minutes=10)) <= now < dt:
+        return jsonify({'status':'scheduled', 'soon': True, 'live_started_at': ''})
+    if dt <= now < dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
+        return jsonify({'status':'live', 'soon': False, 'live_started_at': dt.isoformat()})
+    if now >= dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
+        return jsonify({'status':'finished', 'soon': False, 'live_started_at': dt.isoformat()})
+    return jsonify({'status':'scheduled', 'soon': False, 'live_started_at': ''})
 
 @app.route('/api/match/status/live', methods=['GET'])
 def api_match_status_live():
-    """Список текущих live-матчей по флагам (для индикаторов и клиентских уведомлений)."""
-    if SessionLocal is None:
-        return jsonify({'items': []})
-    db = get_db()
-    try:
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=6)
-        rows = db.query(MatchFlags).filter(MatchFlags.status=='live', MatchFlags.updated_at >= cutoff).all()
-        items = []
-        for r in rows:
-            items.append({
-                'home': r.home,
-                'away': r.away,
-                'live_started_at': r.live_started_at.isoformat() if r.live_started_at else ''
-            })
-        return jsonify({'items': items, 'updated_at': datetime.now(timezone.utc).isoformat()})
-    finally:
-        db.close()
+    """Список live-матчей по расписанию (без ручных флагов)."""
+    items = []
+    now = datetime.now()
+    if SessionLocal is not None:
+        db = get_db()
+        try:
+            snap = _snapshot_get(db, 'betting-tours')
+            payload = snap and snap.get('payload')
+            tours = payload and payload.get('tours') or []
+            for t in tours:
+                for m in (t.get('matches') or []):
+                    dt_str = m.get('datetime')
+                    if not dt_str:
+                        continue
+                    try:
+                        dtm = datetime.fromisoformat(dt_str)
+                    except Exception:
+                        continue
+                    if dtm <= now < dtm + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
+                        items.append({ 'home': m.get('home',''), 'away': m.get('away',''), 'live_started_at': dtm.isoformat() })
+        finally:
+            db.close()
+    return jsonify({'items': items, 'updated_at': datetime.now(timezone.utc).isoformat()})
 
 @app.route('/api/leaderboard/top-predictors')
 def api_leader_top_predictors():
@@ -3790,6 +3820,68 @@ def _get_match_total_goals(home: str, away: str):
                 return h + a
     return None
 
+@app.route('/api/match/score/get', methods=['GET'])
+def api_match_score_get():
+    """Текущий счёт матча из БД (live правки админа). Параметры: home, away."""
+    try:
+        home = (request.args.get('home') or '').strip()
+        away = (request.args.get('away') or '').strip()
+        if not home or not away:
+            return jsonify({'error': 'home/away обязательны'}), 400
+        if SessionLocal is None:
+            return jsonify({'score_home': None, 'score_away': None})
+        db: Session = get_db()
+        try:
+            row = db.query(MatchScore).filter(MatchScore.home==home, MatchScore.away==away).first()
+            return jsonify({'score_home': (None if not row else row.score_home), 'score_away': (None if not row else row.score_away), 'updated_at': (row.updated_at.isoformat() if row else '')})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"match/score/get error: {e}")
+        return jsonify({'score_home': None, 'score_away': None})
+
+@app.route('/api/match/score/set', methods=['POST'])
+def api_match_score_set():
+    """Админ меняет текущий счёт (не влияет на ставки до завершения матча). Поля: initData, home, away, score_home, score_away."""
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+        home = (request.form.get('home') or '').strip()
+        away = (request.form.get('away') or '').strip()
+        try:
+            sh = int(request.form.get('score_home')) if request.form.get('score_home') not in (None, '') else None
+        except Exception:
+            sh = None
+        try:
+            sa = int(request.form.get('score_away')) if request.form.get('score_away') not in (None, '') else None
+        except Exception:
+            sa = None
+        if not home or not away:
+            return jsonify({'error': 'home/away обязательны'}), 400
+        if SessionLocal is None:
+            return jsonify({'error': 'БД недоступна'}), 500
+        db: Session = get_db()
+        try:
+            row = db.query(MatchScore).filter(MatchScore.home==home, MatchScore.away==away).first()
+            if not row:
+                row = MatchScore(home=home, away=away)
+                db.add(row)
+            row.score_home = sh
+            row.score_away = sa
+            row.updated_at = datetime.now(timezone.utc)
+            db.commit()
+            return jsonify({'status': 'ok', 'score_home': row.score_home, 'score_away': row.score_away})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"match/score/set error: {e}")
+        return jsonify({'error': 'Не удалось сохранить счёт'}), 500
+
 def _get_special_result(home: str, away: str, market: str):
     """Возвращает True/False для исхода спецрынка, если зафиксирован, иначе None.
     market: 'penalty' | 'redcard'
@@ -3808,6 +3900,39 @@ def _get_special_result(home: str, away: str, market: str):
         return None
     finally:
         db.close()
+
+def _get_match_datetime(home: str, away: str):
+    """Вернуть datetime матча из снапшота туров или из листа (ISO в naive datetime)."""
+    # 1) betting-tours snapshot
+    if SessionLocal is not None:
+        db = get_db()
+        try:
+            snap = _snapshot_get(db, 'betting-tours')
+            payload = snap and snap.get('payload')
+            tours = payload and payload.get('tours') or []
+            for t in tours:
+                for m in (t.get('matches') or []):
+                    if m.get('home') == home and m.get('away') == away:
+                        dt_str = m.get('datetime')
+                        if dt_str:
+                            try:
+                                return datetime.fromisoformat(dt_str)
+                            except Exception:
+                                pass
+        finally:
+            db.close()
+    # 2) fallback to sheet
+    tours = _load_all_tours_from_sheet()
+    for t in tours:
+        for m in t.get('matches', []):
+            if m.get('home') == home and m.get('away') == away:
+                dt_str = m.get('datetime')
+                if dt_str:
+                    try:
+                        return datetime.fromisoformat(dt_str)
+                    except Exception:
+                        pass
+    return None
 
 def _settle_open_bets():
     if SessionLocal is None:
@@ -3849,14 +3974,15 @@ def _settle_open_bets():
                 if res is None:
                     finished = False
                     if b.match_datetime:
+                        # Если знаем время начала — ждём строго окончания окна (2 часа по умолчанию)
                         try:
                             end_dt = b.match_datetime + timedelta(minutes=BET_MATCH_DURATION_MINUTES)
                         except Exception:
                             end_dt = b.match_datetime
                         if end_dt <= now:
                             finished = True
-                    if not finished:
-                        # нет уверенности по времени — ориентируемся на появление результата/счёта
+                    else:
+                        # Если не знаем время начала, допускаем завершение по факту появления результата/счёта
                         r = _get_match_result(b.home, b.away)
                         if r is not None:
                             finished = True
@@ -4081,6 +4207,51 @@ def api_match_events_add():
     except Exception as e:
         app.logger.error(f"Ошибка events/add: {e}")
         return jsonify({'error': 'Не удалось сохранить событие'}), 500
+
+@app.route('/api/match/events/remove', methods=['POST'])
+def api_match_events_remove():
+    """Удалить последнее событие указанного типа по игроку и стороне (только админ).
+    Поля: initData, home, away, team(home|away), player, type(goal|assist|yellow|red)
+    """
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+        home = (request.form.get('home') or '').strip()
+        away = (request.form.get('away') or '').strip()
+        team = (request.form.get('team') or 'home').strip().lower()
+        player = (request.form.get('player') or '').strip()
+        etype = (request.form.get('type') or '').strip().lower()
+        if not home or not away or not player or etype not in ('goal','assist','yellow','red'):
+            return jsonify({'error': 'Некорректные данные'}), 400
+        if team not in ('home','away'):
+            team = 'home'
+        if SessionLocal is None:
+            return jsonify({'error': 'БД недоступна'}), 500
+        db: Session = get_db()
+        try:
+            row = db.query(MatchPlayerEvent).filter(
+                MatchPlayerEvent.home==home,
+                MatchPlayerEvent.away==away,
+                MatchPlayerEvent.team==team,
+                MatchPlayerEvent.player==player,
+                MatchPlayerEvent.type==etype
+            ).order_by(MatchPlayerEvent.id.desc()).first()
+            if not row:
+                return jsonify({'status': 'ok', 'removed': 0})
+            rid = int(row.id)
+            db.delete(row)
+            db.commit()
+            return jsonify({'status': 'ok', 'removed': 1, 'id': rid})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"Ошибка events/remove: {e}")
+        return jsonify({'error': 'Не удалось удалить событие'}), 500
 
 @app.route('/api/match/events/list', methods=['GET'])
 def api_match_events_list():
@@ -4655,11 +4826,6 @@ def api_specials_set():
                 row.redcard_yes = r_yes
             row.updated_at = when
             db.commit()
-            # после фиксации — сразу пробуем рассчитать соответствующие ставки
-            try:
-                _settle_open_bets()
-            except Exception as se:
-                app.logger.warning(f"Auto-settle after specials set failed: {se}")
             return jsonify({'status': 'ok', 'home': home, 'away': away, 'penalty_yes': row.penalty_yes, 'redcard_yes': row.redcard_yes, 'updated_at': when.isoformat()})
         finally:
             db.close()
@@ -4691,6 +4857,206 @@ def api_specials_get():
     except Exception as e:
         app.logger.error(f"Ошибка specials/get: {e}")
         return jsonify({'error': 'Не удалось получить данные'}), 500
+
+# Точечный расчёт спецрынков по одному матчу и одному рынку
+@app.route('/api/specials/settle', methods=['POST'])
+def api_specials_settle():
+    """Админ: рассчитать ставки по спецрынку (penalty|redcard) для конкретного матча.
+    Поля: initData, home, away, market ('penalty'|'redcard').
+    """
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+        home = (request.form.get('home') or '').strip()
+        away = (request.form.get('away') or '').strip()
+        market = (request.form.get('market') or '').strip().lower()
+        if not home or not away or market not in ('penalty','redcard'):
+            return jsonify({'error': 'home/away/market обязательны'}), 400
+        if SessionLocal is None:
+            return jsonify({'error': 'БД недоступна'}), 500
+
+        db: Session = get_db()
+        try:
+            now = datetime.now()
+            # Получим открытые ставки по матчу и рынку
+            bets = db.query(Bet).filter(
+                Bet.status == 'open',
+                Bet.home == home,
+                Bet.away == away,
+                Bet.market == market
+            ).all()
+            changed = 0
+            won_cnt = 0
+            lost_cnt = 0
+            for b in bets:
+                # Аналог логики из _settle_open_bets для спецрынков
+                res = _get_special_result(home, away, market)
+                if res is None:
+                    finished = False
+                    if b.match_datetime:
+                        try:
+                            end_dt = b.match_datetime + timedelta(minutes=BET_MATCH_DURATION_MINUTES)
+                        except Exception:
+                            end_dt = b.match_datetime
+                        if end_dt <= now:
+                            finished = True
+                    if not finished:
+                        r = _get_match_result(home, away)
+                        if r is not None:
+                            finished = True
+                        else:
+                            tg = _get_match_total_goals(home, away)
+                            if tg is not None:
+                                finished = True
+                    if not finished:
+                        # матч ещё не завершён и события не зафиксированы — пропустим
+                        continue
+                    res = False
+
+                won = ((res is True) and b.selection == 'yes') or ((res is False) and b.selection == 'no')
+                if won:
+                    try:
+                        odd = float(b.odds or '2.0')
+                    except Exception:
+                        odd = 2.0
+                    payout = int(round(b.stake * odd))
+                    b.status = 'won'
+                    b.payout = payout
+                    u = db.get(User, b.user_id)
+                    if u:
+                        u.credits = int(u.credits or 0) + payout
+                        u.updated_at = datetime.now(timezone.utc)
+                    won_cnt += 1
+                else:
+                    b.status = 'lost'
+                    b.payout = 0
+                    lost_cnt += 1
+                b.updated_at = datetime.now(timezone.utc)
+                changed += 1
+            if changed:
+                db.commit()
+            return jsonify({'status':'ok', 'changed': changed, 'won': won_cnt, 'lost': lost_cnt})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"Ошибка specials/settle: {e}")
+        return jsonify({'error': 'Не удалось выполнить расчёт'}), 500
+
+# Полный расчёт матча (все рынки): вызывается админом во время матча (ничего не изменит, если данные не готовы)
+# и после 2 часов от начала матча должен закрыть все открытые ставки по этому матчу.
+@app.route('/api/match/settle', methods=['POST'])
+def api_match_settle():
+    """Админ: рассчитать все открытые ставки по матчу (1x2, totals, specials). Спецрынки не пересчитываются,
+    если были ранее закрыты отдельной кнопкой. Требует initData админа. Поля: initData, home, away."""
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+        home = (request.form.get('home') or '').strip()
+        away = (request.form.get('away') or '').strip()
+        if not home or not away:
+            return jsonify({'error': 'home/away обязательны'}), 400
+        if SessionLocal is None:
+            return jsonify({'error': 'БД недоступна'}), 500
+
+        db: Session = get_db()
+        try:
+            now = datetime.now()
+            # Если в снапшоте results нет финального счёта, а админ правил live-скоры — запишем результаты в снапшот
+            try:
+                # читаем текущий snapshot results
+                snap = _snapshot_get(db, 'results') if SessionLocal is not None else None
+                payload = (snap and snap.get('payload')) or {'results': [], 'updated_at': datetime.now(timezone.utc).isoformat()}
+                results = payload.get('results') or []
+                exists = any((r.get('home')==home and r.get('away')==away) for r in results)
+                if not exists:
+                    ms = db.query(MatchScore).filter(MatchScore.home==home, MatchScore.away==away).first()
+                    if ms and (ms.score_home is not None) and (ms.score_away is not None):
+                        results.append({'home': home, 'away': away, 'score_home': int(ms.score_home), 'score_away': int(ms.score_away)})
+                        payload['results'] = results
+                        payload['updated_at'] = datetime.now(timezone.utc).isoformat()
+                        _snapshot_set(db, 'results', payload)
+            except Exception:
+                pass
+            open_bets = db.query(Bet).filter(Bet.status=='open', Bet.home==home, Bet.away==away).all()
+            changed = 0
+            won_cnt = 0
+            lost_cnt = 0
+            for b in open_bets:
+                # Блокируем ранний расчёт до старта
+                if b.match_datetime and b.match_datetime > now:
+                    continue
+                res_known = False
+                won = False
+                if b.market == '1x2':
+                    res = _get_match_result(b.home, b.away)
+                    if res is None:
+                        continue
+                    res_known = True
+                    won = (res == b.selection)
+                elif b.market == 'totals':
+                    parts = (b.selection or '').split('_', 1)
+                    if len(parts) != 2:
+                        continue
+                    side, line_str = parts[0], parts[1]
+                    try:
+                        line = float(line_str)
+                    except Exception:
+                        continue
+                    total = _get_match_total_goals(b.home, b.away)
+                    if total is None:
+                        continue
+                    res_known = True
+                    won = (total > line) if side == 'over' else (total < line)
+                elif b.market in ('penalty','redcard'):
+                    # Спецрынки: если админ уже зафиксировал и рассчитал раньше — их ставки уже не open
+                    res = _get_special_result(b.home, b.away, b.market)
+                    if res is None:
+                        # По кнопке "Матч завершён" — финализируем как "Нет" (событие не было зафиксировано)
+                        res = False
+                    res_known = True
+                    won = ((res is True) and b.selection == 'yes') or ((res is False) and b.selection == 'no')
+                else:
+                    continue
+
+                if not res_known:
+                    continue
+                if won:
+                    try:
+                        odd = float(b.odds or '2.0')
+                    except Exception:
+                        odd = 2.0
+                    payout = int(round(b.stake * odd))
+                    b.status = 'won'
+                    b.payout = payout
+                    u = db.get(User, b.user_id)
+                    if u:
+                        u.credits = int(u.credits or 0) + payout
+                        u.updated_at = datetime.now(timezone.utc)
+                    won_cnt += 1
+                else:
+                    b.status = 'lost'
+                    b.payout = 0
+                    lost_cnt += 1
+                b.updated_at = datetime.now(timezone.utc)
+                changed += 1
+            if changed:
+                db.commit()
+            return jsonify({'status':'ok', 'changed': changed, 'won': won_cnt, 'lost': lost_cnt})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"Ошибка match/settle: {e}")
+        return jsonify({'error': 'Не удалось выполнить расчёт матча'}), 500
 
 if __name__ == '__main__':
     # Стартуем фоновой синхронизатор при локальном запуске
