@@ -200,10 +200,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 .catch(err => console.error('Init error', err));
         }, 400); // минимальное время показа
 
-        // Автопинг сервера каждые 5 минут, чтобы не засыпал
-        setInterval(() => {
-            fetch(`/health?_=${Date.now()}`, { cache: 'no-store' }).catch(() => {});
-        }, 5 * 60 * 1000);
+    // Автопинг сервера каждые 3-5 минут, с учётом видимости вкладки (в фоне браузер может душить таймеры)
+    let _pingTimer = null;
+    const pingOnce = () => fetch(`/health?_=${Date.now()}`, { cache: 'no-store' }).catch(() => {});
+    const armPing = () => { if (_pingTimer) clearInterval(_pingTimer); _pingTimer = setInterval(pingOnce, 3 * 60 * 1000); };
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { pingOnce(); armPing(); } });
+    armPing(); pingOnce();
 
         // Если текущий пользователь — владелец, показываем вкладку Админ
         try {
@@ -570,6 +572,16 @@ document.addEventListener('DOMContentLoaded', () => {
             if (tab === 'ufo') item.setAttribute('data-throttle', '0'); else item.setAttribute('data-throttle', '600');
             item.addEventListener('click', () => {
                 const tab = item.getAttribute('data-tab');
+                // Если открыт экран деталей матча — закрываем его при любом переходе по нижнему меню
+                try {
+                    const mdPane = document.getElementById('ufo-match-details');
+                    const sched = document.getElementById('ufo-schedule');
+                    if (mdPane && mdPane.style.display !== 'none') {
+                        mdPane.style.display = 'none';
+                        if (sched) sched.style.display = '';
+                        const st = document.getElementById('ufo-subtabs'); if (st) st.style.display = '';
+                    }
+                } catch(_) {}
                 // Обработка двойного тапа для НЛО
                 if (tab === 'ufo') {
                     const now = Date.now();
@@ -585,13 +597,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
                 item.classList.add('active');
+    const home = document.getElementById('tab-home');
     const prof = document.getElementById('tab-profile');
         const ufo = document.getElementById('tab-ufo');
         const preds = document.getElementById('tab-predictions');
         const lead = document.getElementById('tab-leaderboard');
     const shop = document.getElementById('tab-shop');
     const admin = document.getElementById('tab-admin');
-    [prof, ufo, preds, lead, shop, admin].forEach(el => { if (el) el.style.display = 'none'; });
+    [home, prof, ufo, preds, lead, shop, admin].forEach(el => { if (el) el.style.display = 'none'; });
+    if (tab === 'home' && home) home.style.display = '';
     if (tab === 'profile' && prof) prof.style.display = '';
     if (tab === 'ufo' && ufo) {
         ufo.style.display = '';
@@ -599,6 +613,9 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const act = getActiveLeague();
             if (act === 'BLB') selectBLBLeague(false); else selectUFOLeague(true, false);
+            // При входе в НЛО — всегда показываем «Таблица» и скрываем детали матча
+            const sub = document.querySelector('#ufo-subtabs .subtab-item[data-subtab="table"]');
+            if (sub) sub.click();
         } catch(_) {}
     }
     if (tab === 'predictions' && preds) {
@@ -653,20 +670,23 @@ document.addEventListener('DOMContentLoaded', () => {
             if (act === 'BLB') selectUFOLeague(false, true); else selectBLBLeague(true);
             bottomNav?.classList.remove('nav--show-league');
         });
-        // Стартовая вкладка: Профиль
+        // Стартовая вкладка: Главная
         try {
             document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-            const profItem = document.querySelector('.nav-item[data-tab="profile"]');
-            if (profItem) profItem.classList.add('active');
-            const prof = document.getElementById('tab-profile');
+            const homeItem = document.querySelector('.nav-item[data-tab="home"]');
+            if (homeItem) homeItem.classList.add('active');
+            const home = document.getElementById('tab-home');
             const ufo = document.getElementById('tab-ufo');
             const preds = document.getElementById('tab-predictions');
             const lead = document.getElementById('tab-leaderboard');
             const shop = document.getElementById('tab-shop');
             const admin = document.getElementById('tab-admin');
-            [prof, ufo, preds, lead, shop, admin].forEach(el => { if (el) el.style.display = 'none'; });
-            if (prof) prof.style.display = '';
+            [home, ufo, preds, lead, shop, admin].forEach(el => { if (el) el.style.display = 'none'; });
+            if (home) home.style.display = '';
         } catch(_) {}
+
+    // Инициализация рекламной карусели на Главной
+    try { initHomeAdsCarousel(); } catch(_) {}
 
         // подвкладки НЛО
     const subtabItems = document.querySelectorAll('#ufo-subtabs .subtab-item');
@@ -679,6 +699,12 @@ document.addEventListener('DOMContentLoaded', () => {
         subtabItems.forEach(btn => {
             btn.setAttribute('data-throttle', '600');
             btn.addEventListener('click', () => {
+                // При переключении подвкладок — убеждаемся, что экран деталей скрыт
+                try {
+                    const mdPane = document.getElementById('ufo-match-details');
+                    const sched = document.getElementById('ufo-schedule');
+                    if (mdPane && mdPane.style.display !== 'none') { mdPane.style.display = 'none'; if (sched) sched.style.display=''; const st = document.getElementById('ufo-subtabs'); if (st) st.style.display=''; }
+                } catch(_) {}
                 const key = btn.getAttribute('data-subtab');
                 subtabItems.forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
@@ -936,6 +962,100 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // ---------- Главная: рекламная карусель ----------
+    function initHomeAdsCarousel() {
+        const track = document.getElementById('ads-track');
+        const dots = document.getElementById('ads-dots');
+        const box = document.getElementById('ads-carousel');
+        if (!track || !dots || !box) return;
+        // Слайды можно задать глобально в index.html через window.__HOME_ADS__
+        // Пример:
+        // window.__HOME_ADS__ = [ { img:'/static/img/foto.png', title:'Здесь может быть ваша лига — нажми', action:'BLB' } ]
+        let slides = Array.isArray(window.__HOME_ADS__) ? window.__HOME_ADS__.slice() : null;
+        if (!slides || slides.length === 0) {
+            slides = [
+                { img: '/static/img/achievements/credits-gold.png', title: 'Здесь может быть ваша лига — нажми', action: 'BLB' }
+            ];
+        }
+        // Рендер слайдов
+        track.innerHTML = '';
+        dots.innerHTML = '';
+        slides.forEach((s, idx) => {
+            const slide = document.createElement('div');
+            slide.className = 'ads-slide';
+            const img = document.createElement('img');
+            img.loading = 'lazy';
+            img.alt = s.title || '';
+            img.src = s.img;
+            const overlay = document.createElement('div'); overlay.className = 'ads-overlay'; overlay.textContent = s.title || '';
+            slide.append(img, overlay);
+            slide.addEventListener('click', () => {
+                try {
+                    if (s.href) { window.open(s.href, '_blank'); return; }
+                    const act = (s.action || '').toUpperCase();
+                    if (act === 'BLB') {
+                        selectBLBLeague(true);
+                        // перейти на вкладку НЛО
+                        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+                        const navUfo = document.querySelector('.nav-item[data-tab="ufo"]');
+                        if (navUfo) navUfo.classList.add('active');
+                        const home = document.getElementById('tab-home');
+                        const ufo = document.getElementById('tab-ufo');
+                        const preds = document.getElementById('tab-predictions');
+                        const lead = document.getElementById('tab-leaderboard');
+                        const shop = document.getElementById('tab-shop');
+                        const admin = document.getElementById('tab-admin');
+                        [home, ufo, preds, lead, shop, admin].forEach(el => { if (el) el.style.display = 'none'; });
+                        if (ufo) ufo.style.display = '';
+                    } else if (act === 'UFO') {
+                        selectUFOLeague(false, true);
+                        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+                        const navUfo = document.querySelector('.nav-item[data-tab="ufo"]');
+                        if (navUfo) navUfo.classList.add('active');
+                        const home = document.getElementById('tab-home');
+                        const ufo = document.getElementById('tab-ufo');
+                        const preds = document.getElementById('tab-predictions');
+                        const lead = document.getElementById('tab-leaderboard');
+                        const shop = document.getElementById('tab-shop');
+                        const admin = document.getElementById('tab-admin');
+                        [home, ufo, preds, lead, shop, admin].forEach(el => { if (el) el.style.display = 'none'; });
+                        if (ufo) ufo.style.display = '';
+                    }
+                } catch(_) {}
+            });
+            track.appendChild(slide);
+            const dot = document.createElement('div'); dot.className = 'ads-dot' + (idx===0?' active':'');
+            dots.appendChild(dot);
+        });
+        // Авто-листание каждые 3 сек (если слайдов больше одного)
+        let index = 0;
+        const apply = () => {
+            // Прокручиваем через scrollLeft (адаптивно)
+            const w = box.clientWidth;
+            track.scrollTo({ left: index * w, behavior: 'smooth' });
+            // Обновляем точки
+            const dlist = Array.from(dots.children);
+            dlist.forEach((d,i) => d.classList.toggle('active', i===index));
+        };
+        let timer = null;
+        const arm = () => { if (slides.length <= 1) return; if (timer) clearInterval(timer); timer = setInterval(() => { index = (index + 1) % slides.length; apply(); }, 3000); };
+        arm();
+        // Свайп-поддержка
+        let startX = 0; let scx = 0; let dragging = false;
+        track.addEventListener('touchstart', (e) => { if (!e.touches || !e.touches[0]) return; startX = e.touches[0].clientX; scx = track.scrollLeft; dragging = true; if (timer) clearInterval(timer); }, { passive: true });
+        track.addEventListener('touchmove', (e) => { if (!dragging || !e.touches || !e.touches[0]) return; const dx = startX - e.touches[0].clientX; track.scrollLeft = scx + dx; }, { passive: true });
+        track.addEventListener('touchend', (e) => {
+            if (!dragging) return; dragging = false;
+            const w = box.clientWidth; const cur = Math.round(track.scrollLeft / Math.max(1,w));
+            index = Math.max(0, Math.min(slides.length - 1, cur));
+            apply(); arm();
+        }, { passive: true });
+        // На ресайз подправим позицию
+        window.addEventListener('resize', () => { apply(); });
+        // Инициал
+        apply();
+    }
+
     // Подвкладки Магазина — инициализация сразу (без вложенного DOMContentLoaded)
     let _shopInited = false;
     function initShopUI() {
@@ -1039,8 +1159,11 @@ document.addEventListener('DOMContentLoaded', () => {
         cards.forEach((card, i) => {
             const id = card.getAttribute('data-id') || `item_${i+1}`;
             const name = card.getAttribute('data-name') || (card.querySelector('.store-name')?.textContent || `Товар ${i+1}`);
-            const priceAttr = card.getAttribute('data-price') || '0';
-            const price = parseInt(String(priceAttr).replace(/[^0-9]/g,''), 10) || 0;
+            // Все цены фиксированы на 300
+            const price = 300;
+            // Обновим видимую цену на карточке
+            const priceEl = card.querySelector('.store-price');
+            if (priceEl) priceEl.textContent = `${price.toLocaleString()} кредитов`;
             catalogue.push({ id, name, price });
             const btn = card.querySelector('button');
             if (btn) {
@@ -1582,19 +1705,20 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!cached) pane.innerHTML = '<div class="schedule-loading">Загрузка расписания...</div>';
 
         // Хелпер: загрузка логотипа команды с фолбэками по названию
-    const loadTeamLogo = (imgEl, teamName) => {
+        const loadTeamLogo = (imgEl, teamName) => {
             const base = '/static/img/team-logos/';
             const name = (teamName || '').trim();
             const candidates = [];
             if (name) {
         // 1) нормализованное: нижний регистр, без пробелов/ё->е
         const norm = name.toLowerCase().replace(/\s+/g, '').replace(/ё/g, 'е');
-        candidates.push(base + encodeURIComponent(norm + '.png'));
+        const ver = `?v=${Date.now()}`;
+        candidates.push(base + encodeURIComponent(norm + '.png') + ver);
         // 2) при желании можно попытаться точным именем (закомментировано для избежания 404-спама)
         // candidates.push(base + encodeURIComponent(name + '.png'));
             }
-            // 3) дефолт
-            candidates.push(base + 'default.png');
+            // 3) дефолт (с версией)
+            candidates.push(base + 'default.png' + `?v=${Date.now()}`);
 
             let idx = 0;
             const tryNext = () => {
@@ -1847,15 +1971,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const cached = readCache();
     if (!cached) pane.innerHTML = '<div class="schedule-loading">Загрузка результатов...</div>';
 
-        const loadTeamLogo = (imgEl, teamName) => {
+    const loadTeamLogo = (imgEl, teamName) => {
             const base = '/static/img/team-logos/';
             const name = (teamName || '').trim();
             const candidates = [];
             if (name) {
                 const norm = name.toLowerCase().replace(/\s+/g, '').replace(/ё/g, 'е');
-                candidates.push(base + encodeURIComponent(norm + '.png'));
+        candidates.push(base + encodeURIComponent(norm + '.png') + `?v=${Date.now()}`);
             }
-            candidates.push(base + 'default.png');
+        candidates.push(base + 'default.png' + `?v=${Date.now()}`);
             let idx = 0;
             const tryNext = () => { if (idx >= candidates.length) return; imgEl.onerror = () => { idx++; tryNext(); }; imgEl.src = candidates[idx]; };
             tryNext();
@@ -2238,15 +2362,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const awayPane = document.getElementById('md-pane-away');
 
         // логотипы
-        const setLogo = (imgEl, name) => {
+    const setLogo = (imgEl, name) => {
             const base = '/static/img/team-logos/';
             const candidates = [];
             if (name) {
                 const norm = name.toLowerCase().replace(/\s+/g, '').replace(/ё/g, 'е');
-                candidates.push(base + encodeURIComponent(norm + '.png'));
+        candidates.push(base + encodeURIComponent(norm + '.png') + `?v=${Date.now()}`);
                 // candidates.push(base + encodeURIComponent(name + '.png'));
             }
-            candidates.push(base + 'default.png');
+        candidates.push(base + 'default.png' + `?v=${Date.now()}`);
             let i = 0;
             const next = () => { if (i >= candidates.length) return; imgEl.onerror = () => { i++; next(); }; imgEl.src = candidates[i]; };
             next();

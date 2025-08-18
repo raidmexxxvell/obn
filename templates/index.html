@@ -29,6 +29,22 @@
             <div class="league-title">Лига Обнинска</div>
             <img class="league-logo" src="/static/img/logo.png" alt="Логотип лиги">
         </div>
+        <!-- Новая стартовая вкладка Главная -->
+        <div id="tab-home">
+            <div class="ads-wrap">
+                <div class="ads-carousel" id="ads-carousel">
+                    <div class="ads-track" id="ads-track">
+                        <!-- Слайды наполнятся через JS; по умолчанию один заглушечный -->
+                    </div>
+                    <div class="ads-dots" id="ads-dots"></div>
+                </div>
+            </div>
+            <div class="ufo-content" id="home-content">
+                <div class="ufo-pane" id="home-pane" style="min-height: 120px; display: flex; align-items: center; justify-content: center; color: var(--gray);">
+                    <!-- Пусто: стилизовано как панели лиг; можно заполнить позже -->
+                </div>
+            </div>
+        </div>
         <div id="tab-profile">
         <div class="profile-header">
             <div class="profile-avatar" id="user-avatar">
@@ -201,6 +217,10 @@
                 <span class="text" id="nav-league-text">НЛО</span>
             </button>
         </div>
+        <div class="nav-item active" data-tab="home">
+            <div class="nav-icon">🏠</div>
+            <div class="nav-label">Главная</div>
+        </div>
         <div class="nav-item" data-tab="ufo">
             <div class="nav-icon">🛸</div>
             <div class="nav-label">НЛО</div>
@@ -223,7 +243,7 @@
             <div class="nav-label">Админ</div>
         </div>
         {% endif %}
-        <div class="nav-item active" data-tab="profile">
+        <div class="nav-item" data-tab="profile">
             <div class="nav-icon">👤</div>
             <div class="nav-label">Профиль</div>
         </div>

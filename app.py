@@ -750,7 +750,18 @@ def api_shop_my_orders():
                     'status': r.status or 'new',
                     'created_at': (r.created_at or datetime.now(timezone.utc)).isoformat()
                 })
-            return jsonify({'orders': out})
+            # ETag/304 для экономии трафика
+            etag = _etag_for_payload({'orders': out})
+            inm = request.headers.get('If-None-Match')
+            if inm and inm == etag:
+                resp = app.response_class(status=304)
+                resp.headers['ETag'] = etag
+                resp.headers['Cache-Control'] = 'private, max-age=60'
+                return resp
+            resp = jsonify({'orders': out, 'updated_at': datetime.now(timezone.utc).isoformat(), 'version': etag})
+            resp.headers['ETag'] = etag
+            resp.headers['Cache-Control'] = 'private, max-age=60'
+            return resp
         finally:
             db.close()
     except Exception as e:
@@ -1397,6 +1408,33 @@ def get_rosters_sheet():
         raise ValueError("SHEET_ID не установлен в переменных окружения")
     doc = _get_doc(sheet_id)
     return doc.worksheet("СОСТАВЫ")
+
+# Запись счёта матча в лист "РАСПИСАНИЕ ИГР" в колонки B (home) и D (away)
+def mirror_match_score_to_schedule(home: str, away: str, score_home: int|None, score_away: int|None) -> bool:
+    try:
+        if score_home is None or score_away is None:
+            return False
+        ws = get_schedule_sheet()
+        _metrics_inc('sheet_reads', 1)
+        rows = ws.get_all_values() or []
+        # Ищем первую строку с совпадением home в A и away в E (как в билдере расписания)
+        target_row_idx = None
+        for i, r in enumerate(rows, start=1):
+            a = (r[0] if len(r) > 0 else '').strip()
+            e = (r[4] if len(r) > 4 else '').strip()
+            if a == home and e == away:
+                target_row_idx = i
+                break
+        if target_row_idx is None:
+            return False
+        rng = f"B{target_row_idx}:D{target_row_idx}"
+        ws.update(rng, [[str(score_home), '', str(score_away)]])
+        _metrics_inc('sheet_writes', 1)
+        return True
+    except Exception as e:
+        _metrics_note_rate_limit(e)
+        app.logger.warning(f"Mirror match score to schedule failed: {e}")
+        return False
 
 def get_user_achievements_row(user_id):
     """Читает или инициализирует строку достижений пользователя."""
@@ -5073,6 +5111,13 @@ def api_match_settle():
                 changed += 1
             if changed:
                 db.commit()
+            # После фиксации ставок попробуем записать счёт в Google Sheets (best-effort)
+            try:
+                ms = db.query(MatchScore).filter(MatchScore.home==home, MatchScore.away==away).first()
+                if ms and (ms.score_home is not None) and (ms.score_away is not None):
+                    mirror_match_score_to_schedule(home, away, int(ms.score_home), int(ms.score_away))
+            except Exception:
+                pass
             return jsonify({'status':'ok', 'changed': changed, 'won': won_cnt, 'lost': lost_cnt})
         finally:
             db.close()
