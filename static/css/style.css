@@ -42,18 +42,19 @@ body {
     position: fixed;
     left: 50%;
     transform: translateX(-50%);
-    bottom: 14px;
-    width: min(300px, calc(100% - 24px)); /* чуть больше отступы слева/справа */
+    bottom: 0;
+    width: min(600px, calc(100% - 24px));
     background: rgba(10, 18, 40, 0.92);
     backdrop-filter: blur(12px);
-    border-radius: 16px;
-    padding: 8px 8px;
+    border-radius: 16px 16px 0 0;
+    padding: 10px 10px calc(10px + env(safe-area-inset-bottom, 0px));
     display: flex;
     justify-content: space-between;
     z-index: 1000;
-    box-shadow: 0 12px 28px rgba(0,0,0,0.40);
+    box-shadow: 0 -8px 22px rgba(0,0,0,0.35);
     border: 1px solid rgba(255,255,255,0.06);
-    overflow: hidden; /* панель встроена внутрь, не выезжает за пределы приложения */
+    border-bottom: none;
+    overflow: hidden;
 }
 
 .nav-item {
@@ -79,7 +80,7 @@ body {
 /* Панель переключения лиги: встроена внутрь нижнего меню и раздвигает контент слева */
 .nav-league-panel {
     position: absolute;
-    left: 8px; /* внутри паддинга меню */
+    left: 8px;
     top: 8px;
     bottom: 8px;
     height: auto;
@@ -95,12 +96,7 @@ body {
     padding: 0;
     transition: var(--transition);
 }
-.nav.nav--show-league .nav-league-panel {
-    width: 40px; /* раскрываем только на ширину иконки */
-    padding: 8px 6px;
-}
-.nav.nav--show-league .nav-league-btn { gap: 0; }
-.nav.nav--show-league { padding-left: 64px; } /* 8px (паддинг) + 40px (панель) + ~16px зазор */
+/* режим показа альтернативной лиги через полку-оверлей — панель оставляем скрытой */
 .nav-league-btn {
     display: flex;
     align-items: center;
@@ -124,6 +120,26 @@ body {
 .nav-icon { font-size: 16px; line-height: 1; margin-bottom: 0; }
 .nav-label { display: none; }
 .nav-item .nav-badge { position: absolute; top: -2px; right: 2px; background: #ef4444; color: #fff; border-radius: 999px; padding: 1px 5px; font-size: 10px; font-weight: 800; line-height: 1; border: 1px solid rgba(255,255,255,0.6); box-shadow: 0 0 0 1px rgba(0,0,0,0.4); }
+
+/* Полка выбора лиг (красивое открытие) */
+#league-overlay { left: 50% !important; transform: translateX(-50%) !important; width: min(600px, calc(100% - 24px)) !important; }
+.league-shelf {
+    background: rgba(10,18,40,0.96);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-bottom: none;
+    border-radius: 14px 14px 0 0;
+    padding: 10px;
+    box-shadow: 0 -10px 30px rgba(0,0,0,0.45);
+    transform: translateY(100%);
+    transition: transform .28s ease-out, opacity .28s ease-out;
+    opacity: 0.98;
+}
+.league-shelf.show { transform: translateY(0); }
+.league-shelf .league-options { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
+.league-shelf .league-tile { display: flex; gap: 8px; align-items: center; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 8px; cursor: pointer; transition: transform .15s ease; }
+.league-shelf .league-tile:hover { transform: translateY(-1px); }
+.league-shelf .league-icon { font-size: 18px; }
+.league-shelf .league-name { font-weight: 800; }
 
 /* --- МОдалка --- */
 .modal { position: fixed; inset: 0; z-index: 1200; display: none; }
