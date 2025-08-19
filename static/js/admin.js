@@ -79,7 +79,46 @@
         let created = o.created_at || '';
         try { created = new Date(created).toLocaleDateString('ru-RU'); } catch(_) {}
         const userLabel = o.username ? ('@' + o.username) : (o.user_id ? ('ID ' + o.user_id) : '—');
-        tr.innerHTML = `<td>${idx+1}</td><td>${userLabel}</td><td>${o.items_preview||''}</td><td>${o.items_qty||0}</td><td>${(o.total||0).toLocaleString()}</td><td>${created}</td><td>${o.status||''}</td>`;
+        const tdIdx = document.createElement('td'); tdIdx.textContent = String(idx+1);
+        const tdUser = document.createElement('td'); tdUser.textContent = userLabel;
+        const tdItems = document.createElement('td'); tdItems.textContent = o.items_preview || '';
+        const tdQty = document.createElement('td'); tdQty.textContent = String(o.items_qty || 0);
+        const tdSum = document.createElement('td'); tdSum.textContent = (o.total||0).toLocaleString();
+        const tdCreated = document.createElement('td'); tdCreated.textContent = created;
+        const tdStatus = document.createElement('td');
+        const sel = document.createElement('select');
+        const variants = [
+          { v:'new', l:'новый' },
+          { v:'accepted', l:'принят' },
+          { v:'done', l:'завершен' },
+          { v:'cancelled', l:'отменен' }
+        ];
+        variants.forEach(({v,l}) => { const opt=document.createElement('option'); opt.value=v; opt.textContent=l; sel.appendChild(opt); });
+        sel.value = (o.status||'new');
+        sel.addEventListener('change', async () => {
+          try {
+            sel.disabled = true;
+            const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || '')); fd.append('status', sel.value);
+            const rr = await fetch(`/api/admin/orders/${o.id}/status`, { method: 'POST', body: fd });
+            if (!rr.ok) throw new Error('status');
+          } catch(_) { /* revert on error */ sel.value = o.status||'new'; }
+          finally { sel.disabled = false; }
+        });
+        tdStatus.appendChild(sel);
+        const tdDel = document.createElement('td');
+        const btnDel = document.createElement('button'); btnDel.className='details-btn'; btnDel.textContent='✖';
+        btnDel.addEventListener('click', async () => {
+          try {
+            if (!confirm('Удалить заказ?')) return;
+            btnDel.disabled = true;
+            const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
+            const rr = await fetch(`/api/admin/orders/${o.id}/delete`, { method: 'POST', body: fd });
+            if (!rr.ok) throw new Error('delete');
+            tr.remove();
+          } catch(_) { btnDel.disabled = false; }
+        });
+        tdDel.appendChild(btnDel);
+        tr.append(tdIdx, tdUser, tdItems, tdQty, tdSum, tdCreated, tdStatus, tdDel);
         tbody.appendChild(tr);
       });
       if (updated && data.updated_at) { try { updated.textContent = `Обновлено: ${new Date(data.updated_at).toLocaleString()}`; } catch(_) {} }

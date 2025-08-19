@@ -869,8 +869,38 @@ def api_shop_checkout():
         if total <= 0:
             return jsonify({'error': 'Нулевая сумма заказа'}), 400
 
+        # Идемпотентность: если за последние 2 минуты уже есть заказ с теми же позициями и суммой — вернём его
+        # Сигнатура по товарам: code:qty, отсортировано
+        try:
+            sig_current = '|'.join(sorted([f"{it['code']}:{int(it['qty'])}" for it in norm_items]))
+        except Exception:
+            sig_current = ''
+
         db: Session = get_db()
         try:
+            # Проверим последние заказы пользователя (до 5 шт) за 2 минуты
+            try:
+                recent = db.query(ShopOrder).filter(ShopOrder.user_id==user_id).order_by(ShopOrder.created_at.desc()).limit(5).all()
+                from datetime import timedelta
+                for r in recent:
+                    try:
+                        if r.created_at and (datetime.now(timezone.utc) - r.created_at) > timedelta(minutes=2):
+                            continue
+                    except Exception:
+                        pass
+                    if int(r.total or 0) != int(total):
+                        continue
+                    # Соберём сигнатуру заказанных позиций
+                    its = db.query(ShopOrderItem).filter(ShopOrderItem.order_id==r.id).all()
+                    sig = '|'.join(sorted([f"{it.product_code}:{int(it.qty or 0)}" for it in its]))
+                    if sig and sig == sig_current:
+                        # Заказ совпадает — считаем повторной отправкой, возвращаем существующий
+                        u = db.get(User, user_id)
+                        bal = int(u.credits or 0) if u else 0
+                        return jsonify({'order_id': int(r.id), 'total': int(r.total or 0), 'balance': bal, 'duplicate': True})
+            except Exception as _e:
+                app.logger.warning(f"Idempotency check failed: {_e}")
+
             u = db.get(User, user_id)
             if not u:
                 return jsonify({'error': 'Пользователь не найден'}), 404
@@ -927,6 +957,74 @@ def api_shop_checkout():
     except Exception as e:
         app.logger.error(f"Shop checkout error: {e}")
         return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
+
+@app.route('/api/admin/orders/<int:order_id>/status', methods=['POST'])
+def api_admin_order_set_status(order_id: int):
+    """Админ: смена статуса заказа. Поля: initData, status in ['new','accepted','done','cancelled'].
+    При переводе в 'cancelled' делаем возврат кредитов, если ранее не был отменен.
+    """
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Unauthorized'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+        st = (request.form.get('status') or '').strip().lower()
+        if st not in ('new','accepted','done','cancelled'):
+            return jsonify({'error': 'bad status'}), 400
+        if SessionLocal is None:
+            return jsonify({'error': 'DB unavailable'}), 500
+        db: Session = get_db()
+        try:
+            row = db.get(ShopOrder, order_id)
+            if not row:
+                return jsonify({'error': 'not found'}), 404
+            # Если отмена — вернуть кредиты пользователю (однократно)
+            if st == 'cancelled' and (row.status or 'new') != 'cancelled':
+                u = db.get(User, int(row.user_id))
+                if u:
+                    u.credits = int(u.credits or 0) + int(row.total or 0)
+                    u.updated_at = datetime.now(timezone.utc)
+            row.status = st
+            row.updated_at = datetime.now(timezone.utc)
+            db.commit()
+            return jsonify({'status': 'ok'})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"Admin order status error: {e}")
+        return jsonify({'error': 'internal'}), 500
+
+@app.route('/api/admin/orders/<int:order_id>/delete', methods=['POST'])
+def api_admin_order_delete(order_id: int):
+    """Админ: удалить заказ целиком вместе с позициями. Поля: initData."""
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Unauthorized'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+        if SessionLocal is None:
+            return jsonify({'error': 'DB unavailable'}), 500
+        db: Session = get_db()
+        try:
+            row = db.get(ShopOrder, order_id)
+            if not row:
+                return jsonify({'error': 'not found'}), 404
+            # Удаляем позиции, затем заказ
+            db.query(ShopOrderItem).filter(ShopOrderItem.order_id==order_id).delete()
+            db.delete(row)
+            db.commit()
+            return jsonify({'status': 'ok'})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"Admin order delete error: {e}")
+        return jsonify({'error': 'internal'}), 500
 
 @app.route('/api/shop/my-orders', methods=['POST'])
 def api_shop_my_orders():

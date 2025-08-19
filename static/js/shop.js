@@ -97,7 +97,9 @@
         const sum = Number(o.total||0);
         let created = o.created_at || '';
         try { created = new Date(created).toLocaleDateString('ru-RU'); } catch(_) {}
-        tr.innerHTML = `<td>${i+1}</td><td>${sum.toLocaleString()}</td><td>${created}</td><td>${o.status||''}</td>`;
+  const stMap = { new: 'новый', accepted: 'принят', done: 'завершен', cancelled: 'отменен' };
+  const st = stMap[(o.status||'').toLowerCase()] || (o.status||'');
+  tr.innerHTML = `<td>${i+1}</td><td>${sum.toLocaleString()}</td><td>${created}</td><td>${st}</td>`;
         tbody.appendChild(tr);
       });
       table.append(thead, tbody); host.appendChild(table);
