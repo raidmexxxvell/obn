@@ -3971,10 +3971,9 @@ def api_vote_match():
                 MatchVote.home==home, MatchVote.away==away, MatchVote.date_key==date_key, MatchVote.user_id==uid
             ).first()
             if existing:
-                existing.choice = choice
-                existing.created_at = datetime.now(timezone.utc)
-            else:
-                db.add(MatchVote(home=home, away=away, date_key=date_key, user_id=uid, choice=choice))
+                # Запрещаем менять голос: просто сообщаем, что уже голосовал
+                return jsonify({'status': 'exists', 'choice': existing.choice}), 200
+            db.add(MatchVote(home=home, away=away, date_key=date_key, user_id=uid, choice=choice))
             db.commit()
             return jsonify({'status': 'ok'})
         finally:
@@ -3994,9 +3993,21 @@ def api_vote_match_aggregates():
         date_key = (request.args.get('date') or '').strip()[:10]
         if not home or not away or not date_key:
             return jsonify({'error': 'Не указан матч'}), 400
+        # Опционально узнаем мой голос
+        my_choice = None
+        parsed = None
+        try:
+            init_data = request.args.get('initData', '')
+            if init_data:
+                parsed = parse_and_verify_telegram_init_data(init_data)
+        except Exception:
+            parsed = None
         if SessionLocal is None:
-            # Без БД отдадим пустые нули
-            return jsonify({'home':0,'draw':0,'away':0})
+            # Без БД отдадим нули и без персонализации
+            resp = {'home':0,'draw':0,'away':0}
+            if parsed and parsed.get('user'):
+                resp['my_choice'] = None
+            return jsonify(resp)
         db = get_db()
         try:
             rows = db.query(MatchVote.choice, func.count(MatchVote.id)).filter(
@@ -4006,6 +4017,19 @@ def api_vote_match_aggregates():
             for c, cnt in rows:
                 k = str(c).lower()
                 if k in agg: agg[k] = int(cnt)
+            # Мой голос, если запрос аутентифицирован initData
+            try:
+                if parsed and parsed.get('user'):
+                    uid = int(parsed['user'].get('id'))
+                    mine = db.query(MatchVote).filter(
+                        MatchVote.home==home, MatchVote.away==away, MatchVote.date_key==date_key, MatchVote.user_id==uid
+                    ).first()
+                    if mine:
+                        my_choice = str(mine.choice)
+            except Exception:
+                pass
+            if my_choice is not None:
+                agg['my_choice'] = my_choice
             return jsonify(agg)
         finally:
             db.close()

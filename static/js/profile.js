@@ -1860,22 +1860,30 @@ document.addEventListener('DOMContentLoaded', () => {
                         const sum = Math.max(1, h+d+a);
                         const ph = Math.round(h*100/sum), pd = Math.round(d*100/sum), pa = Math.round(a*100/sum);
                         segH.style.width = ph+'%'; segD.style.width = pd+'%'; segA.style.width = pa+'%';
+                        try {
+                            const my = (agg && agg.my_choice) ? String(agg.my_choice).toLowerCase() : null;
+                            if (my) { voteBtns.querySelectorAll('button').forEach(b=>b.disabled=true); }
+                        } catch(_) {}
                     };
                     try {
                         const params = new URLSearchParams({ home: m.home||'', away: m.away||'', date: (m.date||'').slice(0,10) });
+                        params.append('initData', (window.Telegram?.WebApp?.initData || ''));
                         fetch(`/api/vote/match-aggregates?${params.toString()}`).then(r=>r.json()).then(updateAgg).catch(()=>{});
                     } catch(_) {}
 
                     // Кнопки голосования
-                    const voteBtns = document.createElement('div'); voteBtns.className = 'vote-btns';
-                    const mkBtn = (code, text) => { const b = document.createElement('button'); b.className = 'details-btn'; b.textContent = text; b.addEventListener('click', async ()=>{
+            const voteBtns = document.createElement('div'); voteBtns.className = 'vote-btns';
+            const mkBtn = (code, text) => { const b = document.createElement('button'); b.className = 'details-btn'; b.textContent = text; b.addEventListener('click', async ()=>{
                         try {
                             const tg = window.Telegram?.WebApp || null; const fd = new FormData();
                             fd.append('initData', tg?.initData || ''); fd.append('home', m.home||''); fd.append('away', m.away||''); fd.append('date', (m.date||'').slice(0,10)); fd.append('choice', code);
-                            const r = await fetch('/api/vote/match', { method:'POST', body: fd }); const d = await r.json().catch(()=>({})); if (!r.ok) { throw new Error(d?.error||'Ошибка'); }
-                            // перезагрузим агрегаты
-                            const params = new URLSearchParams({ home: m.home||'', away: m.away||'', date: (m.date||'').slice(0,10) });
-                            const agg = await fetch(`/api/vote/match-aggregates?${params.toString()}`).then(x=>x.json()).catch(()=>null);
+                const r = await fetch('/api/vote/match', { method:'POST', body: fd }); const d = await r.json().catch(()=>({})); if (!r.ok) { throw new Error(d?.error||'Ошибка'); }
+                // блокируем дальнейшие голоса
+                voteBtns.querySelectorAll('button').forEach(x=>x.disabled=true);
+                // перезагрузим агрегаты с initData, чтобы отобразился my_choice
+                const params = new URLSearchParams({ home: m.home||'', away: m.away||'', date: (m.date||'').slice(0,10) });
+                params.append('initData', tg?.initData || '');
+                const agg = await fetch(`/api/vote/match-aggregates?${params.toString()}`).then(x=>x.json()).catch(()=>null);
                             if (agg) updateAgg(agg);
                         } catch(err) { try { window.Telegram?.WebApp?.showAlert?.('Не удалось сохранить голос'); } catch(_) {} }
                     }); return b; };
