@@ -3065,13 +3065,20 @@ def api_leader_prizes():
     resp.headers['ETag'] = etag
     resp.headers['Cache-Control'] = 'public, max-age=3600, stale-while-revalidate=600'
     return resp
+_BOT_TOKEN_WARNED = False
 def parse_and_verify_telegram_init_data(init_data: str, max_age_seconds: int = 24*60*60):
     """Парсит и проверяет initData из Telegram WebApp.
     Возвращает dict с полями 'user', 'auth_date', 'raw' при успехе, иначе None.
     """
     bot_token = os.environ.get('BOT_TOKEN')
     if not bot_token:
-        raise ValueError("BOT_TOKEN не установлен в переменных окружения")
+        # В dev окружении можем работать без Telegram — возвращаем None вместо исключения
+        global _BOT_TOKEN_WARNED
+        if not _BOT_TOKEN_WARNED:
+            try: app.logger.warning('BOT_TOKEN не установлен — initData будет игнорироваться')
+            except Exception: pass
+            _BOT_TOKEN_WARNED = True
+        return None
 
     if not init_data:
         return None
