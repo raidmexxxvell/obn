@@ -772,10 +772,10 @@ def _shop_catalog() -> dict:
         except Exception:
             return default
     return {
-        'boots': { 'name': 'Бутсы', 'price': p('SHOP_PRICE_BOOTS', 20000) },
-        'ball': { 'name': 'Мяч', 'price': p('SHOP_PRICE_BALL', 8000) },
-        'tshirt': { 'name': 'Футболка', 'price': p('SHOP_PRICE_TSHIRT', 5000) },
-        'cap': { 'name': 'Кепка', 'price': p('SHOP_PRICE_CAP', 3000) },
+        'boots': { 'name': 'Бутсы', 'price': p('SHOP_PRICE_BOOTS', 500) },
+        'ball': { 'name': 'Мяч', 'price': p('SHOP_PRICE_BALL', 500) },
+        'tshirt': { 'name': 'Футболка', 'price': p('SHOP_PRICE_TSHIRT', 500) },
+        'cap': { 'name': 'Кепка', 'price': p('SHOP_PRICE_CAP', 500) },
     }
 
 def _normalize_order_items(raw_items) -> list[dict]:

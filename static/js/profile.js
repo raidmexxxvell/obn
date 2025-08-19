@@ -980,7 +980,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const b = document.createElement('button');
                 b.className = 'details-btn';
                 b.textContent = text;
-        b.addEventListener('click', async () => {
+        b.addEventListener('click', async (e) => {
+                    try { e.stopPropagation(); } catch(_) {}
                     try {
                         const fd = new FormData();
             fd.append('initData', window.Telegram?.WebApp?.initData || '');
@@ -1008,39 +1009,30 @@ document.addEventListener('DOMContentLoaded', () => {
             const mkKey = (obj) => { try { const h=(obj?.home||'').toLowerCase().trim(); const a=(obj?.away||'').toLowerCase().trim(); const raw=obj?.date?String(obj.date):(obj?.datetime?String(obj.datetime):''); const d=raw?raw.slice(0,10):''; return `${h}__${a}__${d}`; } catch(_) { return `${(obj?.home||'').toLowerCase()}__${(obj?.away||'').toLowerCase()}__`; } };
             const tourMatches = new Set(); try { const tours=toursCache?.data?.tours || toursCache?.tours || []; tours.forEach(t => (t.matches||[]).forEach(x => tourMatches.add(mkKey(x)))); } catch(_) {}
             if (tourMatches.has(mkKey(m))) { card.appendChild(wrap); }
-            // Если матч идёт прямо сейчас — клика по карточке открывает детали матча
-            try {
-                const now = new Date();
-                let isLive = false;
-                if (m.datetime) {
-                    const dt = new Date(m.datetime); const dtEnd = new Date(dt.getTime() + 2*60*60*1000);
-                    isLive = now >= dt && now < dtEnd;
-                } else if (m.date && m.time) {
-                    const dt = new Date(m.date + 'T' + (m.time?.length===5? m.time+':00': m.time||''));
-                    const dtEnd = new Date(dt.getTime() + 2*60*60*1000);
-                    isLive = now >= dt && now < dtEnd;
-                }
-                if (isLive) {
-                    card.style.cursor = 'pointer';
-                    card.addEventListener('click', () => {
-                        const params = new URLSearchParams({ home: m.home || '', away: m.away || '' });
-                        const cacheKey = `md:${(m.home||'').toLowerCase()}::${(m.away||'').toLowerCase()}`;
-                        const cached = (() => { try { return JSON.parse(localStorage.getItem(cacheKey) || 'null'); } catch(_) { return null; } })();
-                        const fetchWithETag = (etag) => fetch(`/api/match-details?${params.toString()}`, { headers: etag ? { 'If-None-Match': etag } : {} })
-                          .then(async r => { if (r.status === 304 && cached) return cached; const data = await r.json(); const version = data.version || r.headers.get('ETag') || null; const toStore = { data, version, ts: Date.now() }; try { localStorage.setItem(cacheKey, JSON.stringify(toStore)); } catch(_) {} return toStore; });
-                        const go = (store) => { try { window.openMatchScreen?.({ home: m.home, away: m.away, date: m.date, time: m.time }, store?.data || store); } catch(_) {} };
-                        const FRESH_TTL = 10 * 60 * 1000;
-                        if (cached && (Date.now() - (cached.ts||0) < FRESH_TTL)) { go(cached); }
-                        else if (cached && cached.version) { fetchWithETag(cached.version).then(go).catch(() => { go(cached); }); }
-                        else if (cached) { go(cached); }
-                        else { fetchWithETag(null).then(go).catch(()=>{}); }
-                    });
-                }
-            } catch(_) {}
+                        // Клика по карточке всегда открывает детали матча
+                        try {
+                                card.style.cursor = 'pointer';
+                                card.addEventListener('click', (e) => {
+                                        // Не реагируем на клики по кнопкам внутри карточки
+                                        try { if (e?.target?.closest('button')) return; } catch(_) {}
+                                        const params = new URLSearchParams({ home: m.home || '', away: m.away || '' });
+                                        const cacheKey = `md:${(m.home||'').toLowerCase()}::${(m.away||'').toLowerCase()}`;
+                                        const cached = (() => { try { return JSON.parse(localStorage.getItem(cacheKey) || 'null'); } catch(_) { return null; } })();
+                                        const fetchWithETag = (etag) => fetch(`/api/match-details?${params.toString()}`, { headers: etag ? { 'If-None-Match': etag } : {} })
+                                            .then(async r => { if (r.status === 304 && cached) return cached; const data = await r.json(); const version = data.version || r.headers.get('ETag') || null; const toStore = { data, version, ts: Date.now() }; try { localStorage.setItem(cacheKey, JSON.stringify(toStore)); } catch(_) {} return toStore; });
+                                        const go = (store) => { try { window.openMatchScreen?.({ home: m.home, away: m.away, date: m.date, time: m.time }, store?.data || store); } catch(_) {} };
+                                        const FRESH_TTL = 10 * 60 * 1000;
+                                        if (cached && (Date.now() - (cached.ts||0) < FRESH_TTL)) { go(cached); }
+                                        else if (cached && cached.version) { fetchWithETag(cached.version).then(go).catch(() => { go(cached); }); }
+                                        else if (cached) { go(cached); }
+                                        else { fetchWithETag(null).then(go).catch(()=>{}); }
+                                });
+                        } catch(_) {}
             // кнопка перехода в Прогнозы
             const footer = document.createElement('div'); footer.className='match-footer';
             const goPred = document.createElement('button'); goPred.className='details-btn'; goPred.textContent='Сделать прогноз';
-            goPred.addEventListener('click', ()=>{
+            goPred.addEventListener('click', (e)=>{
+                try { e.stopPropagation(); } catch(_) {}
                 try { document.querySelector('.nav-item[data-tab="predictions"]').click(); } catch(_) {}
             });
             footer.appendChild(goPred); card.appendChild(footer);
