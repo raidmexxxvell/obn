@@ -2021,6 +2021,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     // Очистка плеера при каждом открытии экрана (ленивая вставка при показе)
     streamPane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
+        // Всегда показываем вкладку «Трансляция» для всех пользователей
+        try {
+            const existed = subtabs?.querySelector('[data-mdtab="stream"]');
+            if (!existed) {
+                const tab = document.createElement('div'); tab.className='subtab-item'; tab.setAttribute('data-mdtab','stream'); tab.textContent='Трансляция';
+                subtabs.appendChild(tab);
+            }
+        } catch(_) {}
         // Спроси сервер, можно ли показывать вкладку (подтверждено + за N минут до матча)
         try {
             const dateStr = (match?.datetime || match?.date || '').toString().slice(0,10);
@@ -2055,7 +2063,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         const ratio = document.createElement('div'); ratio.className = 'stream-aspect';
                         let src = '';
                         if (info.vkVideoId) {
-                            src = `https://vk.com/video_ext.php?oid=${encodeURIComponent(info.vkVideoId.split('_')[0])}&id=${encodeURIComponent(info.vkVideoId.split('_')[1])}&hd=2&autoplay=${info.autoplay?1:0}`;
+                            // Строим всегда vk.com/video_ext.php из пары oid_id
+                            const [oid, vid] = String(info.vkVideoId).split('_');
+                            src = `https://vk.com/video_ext.php?oid=${encodeURIComponent(oid||'')}&id=${encodeURIComponent(vid||'')}&hd=2&autoplay=${info.autoplay?1:0}`;
                         } else if (info.vkPostUrl) {
                             src = info.vkPostUrl;
                         }
@@ -2081,15 +2091,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (ans?.available) {
                         // кэшируем, чтобы сохранялось до конца матча
                         writeCached(ans);
-                        if (!existing) {
-                            const tab = document.createElement('div'); tab.className='subtab-item'; tab.setAttribute('data-mdtab','stream'); tab.textContent='Трансляция';
-                            subtabs.appendChild(tab);
-                        }
+                        // вкладка уже существует всегда
                         streamPane.__streamInfo = ans;
                         // Если вкладка уже активна — построим сразу
                         const isActive = subtabs?.querySelector('[data-mdtab="stream"]')?.classList.contains('active');
                         if (isActive && !streamPane.__inited) {
-                            buildStream(ans);
+                            // Небольшая задержка для корректной инициализации макета перед вставкой iframe
+                            setTimeout(() => buildStream(ans), 50);
                         }
                         // больше не проверяем
                         if (streamPane.__streamTimer) { clearTimeout(streamPane.__streamTimer); streamPane.__streamTimer = null; }
@@ -2098,14 +2106,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         const cached = readCached();
                         const now = Date.now();
                         if (cached && cached.ans && isFinite(endMs) && now < endMs) {
-                            if (!existing) {
-                                const tab = document.createElement('div'); tab.className='subtab-item'; tab.setAttribute('data-mdtab','stream'); tab.textContent='Трансляция';
-                                subtabs.appendChild(tab);
-                            }
+                            // вкладка уже существует всегда
                             streamPane.__streamInfo = cached.ans;
                             const isActive2 = subtabs?.querySelector('[data-mdtab="stream"]')?.classList.contains('active');
                             if (isActive2 && !streamPane.__inited) {
-                                buildStream(cached.ans);
+                                setTimeout(() => buildStream(cached.ans), 50);
                             }
                             // прекращаем дальнейшие проверки
                             if (streamPane.__streamTimer) { clearTimeout(streamPane.__streamTimer); streamPane.__streamTimer = null; }
@@ -2121,7 +2126,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 streamPane.__streamTimer = setTimeout(doCheck, delay);
                             }
                         }
-                        if (existing) { existing.remove(); }
+                        // вкладку не скрываем, показываем скелет
                     }
                 }).catch(()=>{});
             };
@@ -2527,9 +2532,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             const dateStr = (match?.datetime || match?.date || '').toString().slice(0,10);
                             const key = `stream:${(match.home||'').toLowerCase().trim()}__${(match.away||'').toLowerCase().trim()}__${dateStr}`;
                             localStorage.removeItem(key);
-                            // Уберём вкладку «Трансляция», если она есть
-                            const existing = mdPane.querySelector('.modal-subtabs [data-mdtab="stream"]');
-                            if (existing) existing.remove();
+                            // Вкладку не убираем, просто сбрасываем содержимое
                             if (streamPane) { streamPane.style.display = 'none'; streamPane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция недоступна</div></div>'; }
                         } catch(_) {}
                         await fullRefresh();

@@ -147,7 +147,7 @@
     if (!list || !msg || !winInput || !refreshBtn) return;
     list.innerHTML = '';
     try {
-  const winMin = Math.max(60, Math.min(240, Number(winInput.value)||60));
+  const winMin = Math.max(60, Math.min(480, Number(winInput.value)||360));
   const params = new URLSearchParams({ window_min: String(winMin), include_started_min: '30' });
   const r = await fetch(`/api/streams/upcoming?${params}`);
   const data = await r.json();

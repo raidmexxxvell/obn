@@ -46,10 +46,15 @@ if 'COMPRESS_DISABLE' not in os.environ:
         except Exception:
             pass
 
-# Долгий кэш для статики (/static/*)
+# Долгий кэш для статики (/static/*) и базовые security-заголовки
 @app.after_request
 def _add_static_cache_headers(resp):
     try:
+        # Security headers (безопасные значения по умолчанию)
+        resp.headers.setdefault('X-Content-Type-Options', 'nosniff')
+        resp.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
+        resp.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+
         p = request.path or ''
         if p.startswith('/static/'):
             # годовой кэш + immutable; версии файлов должны меняться при изменениях
@@ -108,6 +113,76 @@ MATCH_DETAILS_TTL = 30  # сек
 
 # Ranks cache for odds models (avoid frequent Sheets reads)
 RANKS_CACHE = {'data': None, 'ts': 0}
+
+# Lightweight in-memory rate limiter (per-identity per-scope)
+RATE_BUCKETS = {}
+RATE_LOCK = threading.Lock()
+
+def _rl_identity_from_request(allow_pseudo: bool = False) -> str:
+    """Best-effort identity for rate limiting: Telegram user_id if present, else pseudo or IP+UA hash."""
+    try:
+        # Try Telegram initData from form/args
+        init_data = request.form.get('initData', '') if request.method == 'POST' else request.args.get('initData', '')
+        uid = None
+        if init_data:
+            try:
+                p = parse_and_verify_telegram_init_data(init_data)
+                if p and p.get('user'):
+                    uid = int(p['user'].get('id'))
+            except Exception:
+                uid = None
+        if uid is not None:
+            return f"uid:{uid}"
+        if allow_pseudo:
+            try:
+                pid = _pseudo_user_id()
+                return f"pid:{pid}"
+            except Exception:
+                pass
+        # Fallback to IP+UA hash
+        ip = request.headers.get('X-Forwarded-For') or request.remote_addr or ''
+        ua = request.headers.get('User-Agent') or ''
+        raw = f"{ip}|{ua}"
+        h = hashlib.sha256(raw.encode('utf-8')).hexdigest()[:16]
+        return f"ipua:{h}"
+    except Exception:
+        return "anon:0"
+
+def _rate_limit(scope: str, limit: int, window_sec: int, identity: str | None = None, allow_pseudo: bool = False):
+    """Returns a Flask response (429) if limited, else None. Sliding window in-memory.
+    scope: logical bucket name (e.g., 'betting_place').
+    limit/window_sec: max events per window per identity.
+    identity: optional explicit identity; if None, derive from request.
+    allow_pseudo: when True, identity fallback can use pseudo user id.
+    """
+    try:
+        now = time.time()
+        ident = identity or _rl_identity_from_request(allow_pseudo=allow_pseudo)
+        key = f"{scope}:{ident}"
+        with RATE_LOCK:
+            arr = RATE_BUCKETS.get(key)
+            if arr is None:
+                arr = []
+                RATE_BUCKETS[key] = arr
+            # prune old
+            threshold = now - window_sec
+            i = 0
+            for i in range(len(arr)):
+                if arr[i] >= threshold:
+                    break
+            if i > 0:
+                del arr[:i]
+            if len(arr) >= limit:
+                retry_after = int(max(1, window_sec - (now - arr[0]))) if arr else window_sec
+                resp = jsonify({'error': 'Too Many Requests', 'retry_after': retry_after})
+                resp.status_code = 429
+                resp.headers['Retry-After'] = str(retry_after)
+                return resp
+            arr.append(now)
+    except Exception:
+        # On limiter failure, do not block request
+        return None
+    return None
 RANKS_TTL = 600  # 10 минут
 
 # Версия статики для cache-busting на клиентах (мобилки с жёстким кэшем)
@@ -387,6 +462,10 @@ def api_betting_place():
     - penalty/redcard: selection in ['yes','no']
     Поля: initData, tour, home, away, market, selection, stake, [line]
     """
+    # Rate limit: максимум 5 ставок за 60 секунд на пользователя
+    limited = _rate_limit('betting_place', limit=5, window_sec=60, allow_pseudo=False)
+    if limited is not None:
+        return limited
     parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
     if not parsed or not parsed.get('user'):
         return jsonify({'error': 'Недействительные данные'}), 401
@@ -981,29 +1060,38 @@ def api_admin_order_set_status(order_id: int):
             row = db.get(ShopOrder, order_id)
             if not row:
                 return jsonify({'error': 'not found'}), 404
+            prev = (row.status or 'new').lower()
             # Если уже отменён — дальнейшие изменения запрещены (идемпотентно пропускаем одинаковый статус)
-            if (row.status or 'new') == 'cancelled' and st != 'cancelled':
+            if prev == 'cancelled' and st != 'cancelled':
                 return jsonify({'error': 'locked'}), 409
             # Если отмена — вернуть кредиты пользователю (однократно)
-            if st == 'cancelled' and (row.status or 'new') != 'cancelled':
+            if st == 'cancelled' and prev != 'cancelled':
                 u = db.get(User, int(row.user_id))
                 if u:
                     u.credits = int(u.credits or 0) + int(row.total or 0)
                     u.updated_at = datetime.now(timezone.utc)
-            row.status = st
-            row.updated_at = datetime.now(timezone.utc)
+                    # Зеркалим пользователя в Sheets best-effort
+                    try:
+                        mirror_user_to_sheets(u)
+                    except Exception as _e:
+                        app.logger.warning(f"Mirror after refund failed: {_e}")
+            if prev != st:
+                row.status = st
+                row.updated_at = datetime.now(timezone.utc)
             db.commit()
             # Уведомление пользователю о смене статуса (best-effort)
             try:
                 bot_token = os.environ.get('BOT_TOKEN', '')
                 if bot_token:
-                    # Сообщение по-русски
                     st_map = { 'new': 'новый', 'accepted': 'принят', 'done': 'завершен', 'cancelled': 'отменен' }
                     txt = f"Ваш заказ №{order_id}: статус — {st_map.get(st, st)}."
-                    if st == 'cancelled':
-                        # Узнаем текущий баланс
-                        u2 = db.get(User, int(row.user_id)) if 'db' in locals() else None
-                        bal = int(u2.credits or 0) if u2 else 0
+                    if st == 'cancelled' and prev != 'cancelled':
+                        bal = 0
+                        try:
+                            u2 = db.get(User, int(row.user_id))
+                            bal = int(u2.credits or 0)
+                        except Exception:
+                            pass
                         txt = f"Ваш заказ №{order_id} отменен. Кредиты возвращены (+{int(row.total or 0)}). Баланс: {bal}."
                     import requests
                     requests.post(
@@ -1012,7 +1100,7 @@ def api_admin_order_set_status(order_id: int):
                     )
             except Exception as _e:
                 app.logger.warning(f"Notify user order status failed: {_e}")
-            return jsonify({'status': 'ok'})
+            return jsonify({'status': 'ok', 'status_prev': prev, 'status_new': st})
         finally:
             db.close()
     except Exception as e:
@@ -1196,64 +1284,7 @@ def api_admin_order_details(order_id: int):
         app.logger.error(f"Admin order details error: {e}")
         return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
 
-@app.route('/api/admin/orders/<int:order_id>/status', methods=['POST'])
-def api_admin_order_update_status(order_id: int):
-    """Админ: изменить статус заказа. Поля: initData, status(new|paid|cancelled).
-    При обновлении отправляет уведомление пользователю в Telegram (если настроен BOT_TOKEN).
-    """
-    try:
-        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
-        if not parsed or not parsed.get('user'):
-            return jsonify({'error': 'Unauthorized'}), 401
-        user_id = str(parsed['user'].get('id'))
-        admin_id = os.environ.get('ADMIN_USER_ID', '')
-        if not admin_id or user_id != admin_id:
-            return jsonify({'error': 'forbidden'}), 403
-        new_status = (request.form.get('status') or '').strip().lower()
-        if new_status not in ('new', 'paid', 'cancelled'):
-            return jsonify({'error': 'Некорректный статус'}), 400
-        if SessionLocal is None:
-            return jsonify({'error': 'БД недоступна'}), 500
-        db: Session = get_db()
-        try:
-            order = db.get(ShopOrder, int(order_id))
-            if not order:
-                return jsonify({'error': 'Заказ не найден'}), 404
-            prev = (order.status or 'new').lower()
-            # Возврат кредитов только при переходе в cancelled впервые
-            if new_status == 'cancelled' and prev != 'cancelled':
-                u = db.get(User, int(order.user_id))
-                if u:
-                    u.credits = int(u.credits or 0) + int(order.total or 0)
-                    u.updated_at = datetime.now(timezone.utc)
-                    try:
-                        mirror_user_to_sheets(u)
-                    except Exception as e:
-                        app.logger.warning(f"Mirror after refund failed: {e}")
-            if prev != new_status:
-                order.status = new_status
-                order.updated_at = datetime.now(timezone.utc)
-            db.commit()
-            # Отправим уведомление пользователю (не блокируем ответ)
-            try:
-                bot_token = os.environ.get('BOT_TOKEN', '')
-                if bot_token:
-                    text = f"Статус вашего заказа №{order.id} обновлён: {new_status.upper()}"
-                    if new_status == 'cancelled' and prev != 'cancelled':
-                        text += f"\nКредиты возвращены: {int(order.total or 0)}"
-                    import requests
-                    requests.post(
-                        f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                        json={"chat_id": int(order.user_id), "text": text}, timeout=5
-                    )
-            except Exception as e:
-                app.logger.warning(f"User notify failed: {e}")
-            return jsonify({'status': 'ok', 'id': int(order.id), 'user_id': int(order.user_id), 'total': int(order.total or 0), 'status_new': new_status, 'status_prev': prev })
-        finally:
-            db.close()
-    except Exception as e:
-        app.logger.error(f"Admin order update status error: {e}")
-        return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
+# (Удалено дублирующееся определение маршрута /api/admin/orders/<id>/status)
 
 def ensure_weekly_baselines(db: Session, period_start: datetime):
     """Создаёт снимок credits для всех пользователей в начале недели (если ещё не создан).
@@ -4468,6 +4499,10 @@ def api_vote_match():
     Поля: initData, home, away, date (YYYY-MM-DD), choice in ['home','draw','away']
     """
     try:
+        # Rate limit: 10 голосов за 60 секунд на идентичность (учёт псевдо-ID если разрешено)
+        limited = _rate_limit('vote_match', limit=10, window_sec=60, allow_pseudo=True)
+        if limited is not None:
+            return limited
         parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
         uid = None
         if parsed and parsed.get('user'):
@@ -5670,11 +5705,11 @@ def api_streams_upcoming():
     """
     try:
         try:
-            window_min = int(request.args.get('window_min') or '60')
+            window_min = int(request.args.get('window_min') or '360')
         except Exception:
-            window_min = 60
-        # Минимум 60 минут, чтобы матч гарантированно появился заранее
-        window_min = max(60, min(240, window_min))
+            window_min = 360
+        # Минимум 60 минут, максимум 480 (8 часов)
+        window_min = max(60, min(480, window_min))
         try:
             include_started_min = int(request.args.get('include_started_min') or '30')
         except Exception:
@@ -5767,26 +5802,40 @@ def api_streams_set():
         # Разобрать vk_raw в vkVideoId или vkPostUrl
         vk_id = ''
         vk_url = ''
-        s = vk_raw
+        s = (vk_raw or '').strip()
         try:
-            if 'video_ext.php' in s:
-                u = urlparse(s)
-                q = parse_qs(u.query)
-                oid = (q.get('oid', [None])[0])
-                vid = (q.get('id', [None])[0])
-                if oid and vid:
-                    vk_id = f"{oid}_{vid}"
-            elif '/video' in s:
-                path = urlparse(s).path or ''
-                m = _re.search(r"/video(-?\d+_\d+)", path)
+            # Если админ вставил целиком <iframe ...>, извлечём src
+            if '<iframe' in s.lower():
+                m = _re.search(r"src\s*=\s*['\"]([^'\"]+)['\"]", s, _re.IGNORECASE)
                 if m:
-                    vk_id = m.group(1)
+                    s = m.group(1).strip()
+            # Если где-то в строке встречаются oid и id (даже без корректного URL)
+            m2_oid = _re.search(r"(?:[?&#]|\b)oid=([-\d]+)\b", s)
+            m2_id = _re.search(r"(?:[?&#]|\b)id=(\d+)\b", s)
+            if m2_oid and m2_id:
+                vk_id = f"{m2_oid.group(1)}_{m2_id.group(1)}"
             else:
-                # Похоже на обычную ссылку
-                vk_url = s
+                # Пробуем как URL (vk.com или vkvideo.ru неважно)
+                u = urlparse(s)
+                if 'video_ext.php' in (u.path or ''):
+                    q = parse_qs(u.query)
+                    oid = (q.get('oid', [None])[0])
+                    vid = (q.get('id', [None])[0])
+                    if oid and vid:
+                        vk_id = f"{oid}_{vid}"
+                elif '/video' in (u.path or ''):
+                    m = _re.search(r"/video(-?\d+_\d+)", u.path or '')
+                    if m:
+                        vk_id = m.group(1)
+            # Если так и не получили vk_id, но похоже на ссылку — сохраним как постовую URL
+            if not vk_id:
+                # Принимаем только валидные http(s) ссылки, иначе игнор
+                if s.startswith('http://') or s.startswith('https://'):
+                    vk_url = s
         except Exception:
-            # Если не смогли распарсить — считаем это обычной ссылкой
-            vk_url = s
+            # Если не смогли распарсить — сохраним как есть, но только если это URL
+            if s.startswith('http://') or s.startswith('https://'):
+                vk_url = s
         if not vk_id and not vk_url:
             return jsonify({'error': 'vk ссылка пуста'}), 400
         if vk_id and not _re.match(r'^-?\d+_\d+$', vk_id):
@@ -6042,6 +6091,10 @@ def api_match_comments_list():
 def api_match_comments_add():
     """Добавляет комментарий (rate limit: 1 комментарий в 5 минут на пользователя/матч/дату)."""
     try:
+        # Global anti-spam limiter: не чаще 3 комментариев за 60 секунд на пользователя
+        limited = _rate_limit('comments_add', limit=3, window_sec=60, allow_pseudo=False)
+        if limited is not None:
+            return limited
         parsed = parse_and_verify_telegram_init_data(request.form.get('initData',''))
         if not parsed or not parsed.get('user'):
             return jsonify({'error': 'Недействительные данные'}), 401
