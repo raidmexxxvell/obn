@@ -872,6 +872,7 @@ body.theme-blb .share-btn {
 .vote-strip .seg-a { background: linear-gradient(90deg, #f59e0b, #ef4444); left: auto; }
 .vote-legend { display: grid; grid-template-columns: repeat(3, 1fr); font-size: 12px; color: var(--gray); text-align: center; }
 .vote-inline-btns, .vote-btns { display:flex; justify-content:center; gap: 12px; padding-top: 6px; }
+.vote-confirm { text-align: center; }
 
 @keyframes voteShimmer {
     0% { background-position: 0% 0; }
@@ -971,7 +972,7 @@ body.theme-blb .share-btn {
 /* Match stats */
 .stats-grid { display: flex; flex-direction: column; gap: 10px; }
 .metric { display: flex; flex-direction: column; gap: 6px; }
-.metric-title { font-size: 12px; opacity: .9; font-weight: 700; }
+.metric-title { font-size: 12px; opacity: .9; font-weight: 700; text-align: center; }
 .stat-row { display: grid; grid-template-columns: 36px 1fr 36px; align-items: center; gap: 8px; }
 .stat-left, .stat-right { text-align: center; font-weight: 700; }
 .stat-bar { position: relative; height: 12px; border-radius: 8px; overflow: hidden; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08); }

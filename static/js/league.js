@@ -6,6 +6,25 @@
   const raf = (cb) => (window.requestAnimationFrame || window.setTimeout)(cb, 0);
   const rIC = window.requestIdleCallback || function (cb) { return setTimeout(() => cb({ timeRemaining: () => 0 }), 0); };
 
+  // Локальный маппер цветов команд (используем глобальный, если есть)
+  const getTeamColor = window.getTeamColor || function(name){
+    try {
+      const norm = (name||'').toString().trim().toLowerCase().replace(/ё/g,'е').replace(/[^a-z0-9а-я]+/gi,'');
+      const map = {
+        'полет': '#fdfdfc',
+        'дождь': '#292929',
+        'киборги': '#f4f3fb',
+        'фкобнинск': '#eb0000',
+        'ювелиры': '#333333',
+        'звезда': '#a01818',
+        'фкsetka4real': '#000000',
+        'серпантин': '#141098',
+        'креатив': '#98108c',
+      };
+      return map[norm] || '#3b82f6';
+    } catch(_) { return '#3b82f6'; }
+  };
+
   function batchAppend(parent, nodes, batchSize = 20) {
     let i = 0;
     function step() {
@@ -180,6 +199,12 @@
           const segH = document.createElement('div'); segH.className = 'seg seg-h';
           const segD = document.createElement('div'); segD.className = 'seg seg-d';
           const segA = document.createElement('div'); segA.className = 'seg seg-a';
+          // Цвета сегментов голосования: П1/П2 — цвета команд, X — приятный серый
+          try {
+            segH.style.backgroundColor = getTeamColor(m.home || '');
+            segA.style.backgroundColor = getTeamColor(m.away || '');
+            segD.style.backgroundColor = '#8e8e93';
+          } catch(_) {}
           bar.append(segH, segD, segA);
           const legend = document.createElement('div'); legend.className = 'vote-legend'; legend.innerHTML = '<span>П1</span><span>X</span><span>П2</span>';
       const btns = document.createElement('div'); btns.className = 'vote-inline-btns';
@@ -242,8 +267,11 @@
         const adminId = document.body.getAttribute('data-admin');
         const currentId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id ? String(window.Telegram.WebApp.initDataUnsafe.user.id) : '';
         if (adminId && currentId && adminId === currentId) {
-          const star = document.createElement('button');
-          star.className = 'details-btn'; star.textContent = '⭐ На главную'; star.style.marginRight='8px';
+        const star = document.createElement('button');
+        star.className = 'details-btn'; star.style.marginRight='8px';
+        const featureKey = `feature:${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}`;
+        const isFeatured = (()=>{ try { const s = localStorage.getItem('feature:current'); if (!s) return false; const j=JSON.parse(s); return j && j.home===m.home && j.away===m.away; } catch(_) { return false; } })();
+        star.textContent = isFeatured ? 'Закреплено' : '⭐ На главную';
           star.addEventListener('click', async () => {
             try {
               star.disabled = true; const orig = star.textContent; star.textContent = '...';
@@ -251,7 +279,8 @@
               fd.append('home', m.home || ''); fd.append('away', m.away || '');
               if (m.date) fd.append('date', String(m.date).slice(0,10)); if (m.datetime) fd.append('datetime', String(m.datetime));
               const r = await fetch('/api/feature-match/set', { method: 'POST', body: fd }); const j = await r.json().catch(()=>({}));
-              if (!r.ok) throw new Error(j?.error || 'Ошибка'); star.textContent = 'Назначено';
+          if (!r.ok) throw new Error(j?.error || 'Ошибка'); star.textContent = 'Закреплено';
+          try { localStorage.setItem('feature:current', JSON.stringify({ home: m.home||'', away: m.away||'', ts: Date.now() })); } catch(_) {}
               try { window.renderTopMatchOfWeek?.(); } catch(_) {}
               try { document.dispatchEvent(new CustomEvent('feature-match:set', { detail: { match: m } })); } catch(_) {}
             } catch(_) { try { window.Telegram?.WebApp?.showAlert?.('Не удалось назначить матч недели'); } catch(_) {} }

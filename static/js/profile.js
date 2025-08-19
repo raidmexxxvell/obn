@@ -146,6 +146,32 @@ document.addEventListener('DOMContentLoaded', () => {
         favoriteTeamSelect.addEventListener('change', (e) => { const v = e.target.value || ''; saveFavoriteTeam(v); });
     }
 
+    // Цвета команд: нормализуем имя и подставляем цвет
+    function getTeamColor(name) {
+        try {
+            const norm = (name || '')
+                .toString()
+                .trim()
+                .toLowerCase()
+                .replace(/ё/g, 'е')
+                .replace(/[^a-z0-9а-я]+/gi, '');
+            const map = {
+                'полет': '#fdfdfc',
+                'дождь': '#292929',
+                'киборги': '#f4f3fb',
+                'фкобнинск': '#eb0000',
+                'ювелиры': '#333333',
+                'звезда': '#a01818',
+                'фкsetka4real': '#000000',
+                'серпантин': '#141098',
+                'креатив': '#98108c',
+            };
+            return map[norm] || '#3b82f6';
+        } catch(_) { return '#3b82f6'; }
+    }
+    // Экспортируем глобально, чтобы могли использовать другие модули
+    try { window.getTeamColor = getTeamColor; } catch(_) {}
+
     function initApp() {
         // если tg есть, но в нём нет user — сообщаем об ошибке
         if (tg && !tg.initDataUnsafe?.user) {
@@ -862,7 +888,7 @@ document.addEventListener('DOMContentLoaded', () => {
             dlist.forEach((d,i) => d.classList.toggle('active', i===index));
         };
         let timer = null;
-        const arm = () => { if (slides.length <= 1) return; if (timer) clearInterval(timer); timer = setInterval(() => { index = (index + 1) % slides.length; apply(); }, 3000); };
+    const arm = () => { if (slides.length <= 1) return; if (timer) clearInterval(timer); timer = setInterval(() => { index = (index + 1) % slides.length; apply(); }, 5000); };
         arm();
         // Свайп-поддержка
         let startX = 0; let scx = 0; let dragging = false;
@@ -994,6 +1020,12 @@ document.addEventListener('DOMContentLoaded', () => {
             btns.append(mkBtn('home','За П1'), mkBtn('draw','За X'), mkBtn('away','За П2'));
             legend.innerHTML = '<span>П1</span><span>X</span><span>П2</span>';
             wrap.append(title, bar, legend, btns, confirm);
+            // Покрасим полосы под цвета команд + серый для ничьей
+            try {
+                segH.style.backgroundColor = getTeamColor(m.home || '');
+                segA.style.backgroundColor = getTeamColor(m.away || '');
+                segD.style.backgroundColor = '#8e8e93';
+            } catch(_) {}
             // Показываем блок только если матч в ставочных турах
             const toursCache = (() => { try { return JSON.parse(localStorage.getItem('betting:tours') || 'null'); } catch(_) { return null; } })();
             const mkKey = (obj) => { try { const h=(obj?.home||'').toLowerCase().trim(); const a=(obj?.away||'').toLowerCase().trim(); const raw=obj?.date?String(obj.date):(obj?.datetime?String(obj.datetime):''); const d=raw?raw.slice(0,10):''; return `${h}__${a}__${d}`; } catch(_) { return `${(obj?.home||'').toLowerCase()}__${(obj?.away||'').toLowerCase()}__`; } };
@@ -1012,12 +1044,14 @@ document.addEventListener('DOMContentLoaded', () => {
                                         if (navUfo) navUfo.classList.add('active');
                                         const elHome = document.getElementById('tab-home');
                                         const elUfo = document.getElementById('tab-ufo');
+                                        const elUfoContent = document.getElementById('ufo-content');
                                         const elPreds = document.getElementById('tab-predictions');
                                         const elLead = document.getElementById('tab-leaderboard');
                                         const elShop = document.getElementById('tab-shop');
                                         const elAdmin = document.getElementById('tab-admin');
                                         [elHome, elUfo, elPreds, elLead, elShop, elAdmin].forEach(el => { if (el) el.style.display = 'none'; });
                                         if (elUfo) elUfo.style.display = '';
+                                        if (elUfoContent) elUfoContent.style.display = '';
                                     } catch(_) {}
                                         const params = new URLSearchParams({ home: m.home || '', away: m.away || '' });
                                         const cacheKey = `md:${(m.home||'').toLowerCase()}::${(m.away||'').toLowerCase()}`;
@@ -1878,6 +1912,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const schedulePane = document.getElementById('ufo-schedule');
         const mdPane = document.getElementById('ufo-match-details');
         if (!schedulePane || !mdPane) return;
+    // Очистим возможные дубликаты админских контролов
+    try { mdPane.querySelectorAll('.admin-score-ctrls').forEach(n => n.remove()); } catch(_) {}
     // показать экран деталей
     schedulePane.style.display = 'none';
     mdPane.style.display = '';
@@ -2270,7 +2306,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             const isAdmin = !!(adminId && currentId && String(adminId) === currentId);
                             if (isAdmin) {
                                 const center = score.parentElement || dt.parentElement;
-                                if (!center.querySelector('.admin-score-ctrls')) {
+                                if (!mdPane.querySelector('.admin-score-ctrls')) {
                                     const mkBtn = (txt) => { const b = document.createElement('button'); b.className = 'details-btn'; b.textContent = txt; b.style.padding = '2px 8px'; b.style.minWidth = 'unset'; return b; };
                                     const row = document.createElement('div');
                                     row.className = 'admin-score-ctrls';
@@ -2285,7 +2321,8 @@ document.addEventListener('DOMContentLoaded', () => {
                                     const aMinus = mkBtn('−'); const aPlus = mkBtn('+');
                                     left.append(hMinus, hPlus); right.append(aMinus, aPlus);
                                     try { if (dt && dt.parentElement === center) center.insertBefore(row, dt); else center.appendChild(row); } catch(_) {}
-                                    row.append(left, score, right);
+                                    const spacer = document.createElement('div'); spacer.style.width='8px';
+                                    row.append(left, spacer, right);
                                     const tg = window.Telegram?.WebApp || null;
                                     const parseScore = () => {
                                         try { const t = score.textContent||''; const m = t.match(/(\d+)\s*:\s*(\d+)/); if (m) return [parseInt(m[1],10)||0, parseInt(m[2],10)||0]; } catch(_) {}
@@ -2580,7 +2617,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 { key: 'reds', label: 'Удаления' },
             ];
             const wrap = document.createElement('div'); wrap.className = 'stats-grid';
-            const theme = (getActiveLeague() === 'BLB') ? { a:'#e91e63', b:'#ffffff22' } : { a:'#ff3366', b:'#ffffff22' };
             const bar = (l, r) => {
                 const total = (Number(l)||0) + (Number(r)||0);
                 const lp = total>0 ? Math.round((l/total)*100) : 50;
@@ -2588,8 +2624,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 const row = document.createElement('div'); row.className = 'stat-row';
                 const left = document.createElement('div'); left.className='stat-left'; left.textContent = String(l||0);
                 const mid = document.createElement('div'); mid.className='stat-bar';
-                const leftFill = document.createElement('div'); leftFill.className='stat-fill-left'; leftFill.style.width = lp+'%'; leftFill.style.background = theme.b;
-                const rightFill = document.createElement('div'); rightFill.className='stat-fill-right'; rightFill.style.width = rp+'%'; rightFill.style.background = theme.a;
+                const leftFill = document.createElement('div'); leftFill.className='stat-fill-left'; leftFill.style.width = lp+'%';
+                const rightFill = document.createElement('div'); rightFill.className='stat-fill-right'; rightFill.style.width = rp+'%';
+                // Цвета заливок — цвета команд
+                try {
+                    leftFill.style.backgroundColor = getTeamColor(m.home || '');
+                    rightFill.style.backgroundColor = getTeamColor(m.away || '');
+                } catch(_) {}
                 mid.append(leftFill, rightFill);
                 const right = document.createElement('div'); right.className='stat-right'; right.textContent = String(r||0);
                 row.append(left, mid, right);
@@ -2600,7 +2641,35 @@ document.addEventListener('DOMContentLoaded', () => {
                 const rowWrap = document.createElement('div'); rowWrap.className='metric';
                 const title = document.createElement('div'); title.className='metric-title'; title.textContent = mt.label;
                 const vals = d && Array.isArray(d[mt.key]) ? d[mt.key] : [0,0];
-                rowWrap.append(title, bar(vals[0], vals[1]));
+                const row = bar(vals[0], vals[1]);
+                // Админ +/- рядом с цифрами
+                try {
+                    const adminId = document.body.getAttribute('data-admin');
+                    const currentId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id ? String(window.Telegram.WebApp.initDataUnsafe.user.id) : '';
+                    const isAdmin = !!(adminId && currentId && String(adminId) === currentId);
+                    if (isAdmin) {
+                        const mk = (txt) => { const b=document.createElement('button'); b.className='details-btn'; b.textContent=txt; b.style.padding='0 6px'; b.style.minWidth='unset'; return b; };
+                        const lh = mk('−'); const lplus = mk('+'); const rh = mk('−'); const rplus = mk('+');
+                        const leftBox = document.createElement('div'); leftBox.style.display='flex'; leftBox.style.gap='4px'; leftBox.style.alignItems='center';
+                        const rightBox = document.createElement('div'); rightBox.style.display='flex'; rightBox.style.gap='4px'; rightBox.style.alignItems='center';
+                        const leftVal = row.querySelector('.stat-left'); const rightVal = row.querySelector('.stat-right');
+                        const fieldMap = { shots_total:'shots_total', shots_on:'shots_on', corners:'corners', yellows:'yellows', reds:'reds' };
+                        const base = fieldMap[mt.key];
+                        const post = (lhv, rhv) => {
+                            const tg = window.Telegram?.WebApp || null;
+                            const fd = new FormData(); fd.append('initData', tg?.initData || ''); fd.append('home', m.home||''); fd.append('away', m.away||'');
+                            fd.append(base+'_home', String(lhv)); fd.append(base+'_away', String(rhv));
+                            fetch('/api/match/stats/set', { method: 'POST', body: fd }).catch(()=>{});
+                        };
+                        lh.addEventListener('click', () => { const l= Math.max(0, (parseInt(leftVal.textContent,10)||0)-1); const r=(parseInt(rightVal.textContent,10)||0); leftVal.textContent=String(l); post(l,r); renderMatchStats(host,m); });
+                        lplus.addEventListener('click', () => { const l=(parseInt(leftVal.textContent,10)||0)+1; const r=(parseInt(rightVal.textContent,10)||0); leftVal.textContent=String(l); post(l,r); renderMatchStats(host,m); });
+                        rh.addEventListener('click', () => { const r= Math.max(0, (parseInt(rightVal.textContent,10)||0)-1); const l=(parseInt(leftVal.textContent,10)||0); rightVal.textContent=String(r); post(l,r); renderMatchStats(host,m); });
+                        rplus.addEventListener('click', () => { const r=(parseInt(rightVal.textContent,10)||0)+1; const l=(parseInt(leftVal.textContent,10)||0); rightVal.textContent=String(r); post(l,r); renderMatchStats(host,m); });
+                        leftBox.append(lh, lplus); rightBox.append(rh, rplus);
+                        row.insertBefore(leftBox, row.firstChild); row.appendChild(rightBox);
+                    }
+                } catch(_) {}
+                rowWrap.append(title, row);
                 wrap.appendChild(rowWrap);
             });
             host.innerHTML = ''; host.appendChild(wrap);
