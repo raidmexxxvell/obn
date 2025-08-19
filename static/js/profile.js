@@ -1912,6 +1912,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const schedulePane = document.getElementById('ufo-schedule');
         const mdPane = document.getElementById('ufo-match-details');
         if (!schedulePane || !mdPane) return;
+    // Скрыть все основные панели лиги, чтобы не было «Таблица/Статистика» сверху
+    try {
+        const tablePane = document.getElementById('ufo-table');
+        const statsPaneLeague = document.getElementById('ufo-stats');
+        const resultsPane = document.getElementById('ufo-results');
+        [tablePane, statsPaneLeague, schedulePane, resultsPane].forEach(p => { if (p) p.style.display = 'none'; });
+    } catch(_) {}
     // Очистим возможные дубликаты админских контролов
     try { mdPane.querySelectorAll('.admin-score-ctrls').forEach(n => n.remove()); } catch(_) {}
     // показать экран деталей
@@ -2622,7 +2629,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 const lp = total>0 ? Math.round((l/total)*100) : 50;
                 const rp = 100 - lp;
                 const row = document.createElement('div'); row.className = 'stat-row';
-                const left = document.createElement('div'); left.className='stat-left'; left.textContent = String(l||0);
+                const leftSide = document.createElement('div'); leftSide.className='stat-side stat-left';
+                const leftVal = document.createElement('div'); leftVal.className='stat-val'; leftVal.textContent = String(l||0);
+                leftSide.appendChild(leftVal);
                 const mid = document.createElement('div'); mid.className='stat-bar';
                 const leftFill = document.createElement('div'); leftFill.className='stat-fill-left'; leftFill.style.width = lp+'%';
                 const rightFill = document.createElement('div'); rightFill.className='stat-fill-right'; rightFill.style.width = rp+'%';
@@ -2632,8 +2641,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     rightFill.style.backgroundColor = getTeamColor(m.away || '');
                 } catch(_) {}
                 mid.append(leftFill, rightFill);
-                const right = document.createElement('div'); right.className='stat-right'; right.textContent = String(r||0);
-                row.append(left, mid, right);
+                const rightSide = document.createElement('div'); rightSide.className='stat-side stat-right';
+                const rightVal = document.createElement('div'); rightVal.className='stat-val'; rightVal.textContent = String(r||0);
+                rightSide.appendChild(rightVal);
+                row.append(leftSide, mid, rightSide);
                 return row;
             };
             wrap.innerHTML = '';
@@ -2642,17 +2653,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 const title = document.createElement('div'); title.className='metric-title'; title.textContent = mt.label;
                 const vals = d && Array.isArray(d[mt.key]) ? d[mt.key] : [0,0];
                 const row = bar(vals[0], vals[1]);
-                // Админ +/- рядом с цифрами
+        // Админ +/- рядом с цифрами (внутри крайних колонок)
                 try {
                     const adminId = document.body.getAttribute('data-admin');
                     const currentId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id ? String(window.Telegram.WebApp.initDataUnsafe.user.id) : '';
                     const isAdmin = !!(adminId && currentId && String(adminId) === currentId);
                     if (isAdmin) {
-                        const mk = (txt) => { const b=document.createElement('button'); b.className='details-btn'; b.textContent=txt; b.style.padding='0 6px'; b.style.minWidth='unset'; return b; };
-                        const lh = mk('−'); const lplus = mk('+'); const rh = mk('−'); const rplus = mk('+');
-                        const leftBox = document.createElement('div'); leftBox.style.display='flex'; leftBox.style.gap='4px'; leftBox.style.alignItems='center';
-                        const rightBox = document.createElement('div'); rightBox.style.display='flex'; rightBox.style.gap='4px'; rightBox.style.alignItems='center';
-                        const leftVal = row.querySelector('.stat-left'); const rightVal = row.querySelector('.stat-right');
+            const mk = (txt) => { const b=document.createElement('button'); b.className='details-btn'; b.textContent=txt; b.style.padding='0 6px'; b.style.minWidth='unset'; return b; };
+            const lh = mk('−'); const lplus = mk('+'); const rh = mk('−'); const rplus = mk('+');
+            const leftBox = document.createElement('div'); leftBox.className = 'admin-inc';
+            const rightBox = document.createElement('div'); rightBox.className = 'admin-inc';
+            const leftVal = row.querySelector('.stat-left .stat-val') || row.querySelector('.stat-val');
+            const rightVal = row.querySelector('.stat-right .stat-val') || row.querySelectorAll('.stat-val')[1];
                         const fieldMap = { shots_total:'shots_total', shots_on:'shots_on', corners:'corners', yellows:'yellows', reds:'reds' };
                         const base = fieldMap[mt.key];
                         const post = (lhv, rhv) => {
@@ -2665,8 +2677,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         lplus.addEventListener('click', () => { const l=(parseInt(leftVal.textContent,10)||0)+1; const r=(parseInt(rightVal.textContent,10)||0); leftVal.textContent=String(l); post(l,r); renderMatchStats(host,m); });
                         rh.addEventListener('click', () => { const r= Math.max(0, (parseInt(rightVal.textContent,10)||0)-1); const l=(parseInt(leftVal.textContent,10)||0); rightVal.textContent=String(r); post(l,r); renderMatchStats(host,m); });
                         rplus.addEventListener('click', () => { const r=(parseInt(rightVal.textContent,10)||0)+1; const l=(parseInt(leftVal.textContent,10)||0); rightVal.textContent=String(r); post(l,r); renderMatchStats(host,m); });
-                        leftBox.append(lh, lplus); rightBox.append(rh, rplus);
-                        row.insertBefore(leftBox, row.firstChild); row.appendChild(rightBox);
+            leftBox.append(lh, lplus); rightBox.append(rh, rplus);
+            // Вставляем кнопки в крайние боксы
+            const leftSide = row.querySelector('.stat-left');
+            const rightSide = row.querySelector('.stat-right');
+            if (leftSide) leftSide.insertBefore(leftBox, leftSide.firstChild);
+            if (rightSide) rightSide.appendChild(rightBox);
                     }
                 } catch(_) {}
                 rowWrap.append(title, row);

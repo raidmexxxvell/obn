@@ -213,6 +213,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         try { agree = window.confirm(ask); } catch(_) { agree = false; }
                         if (agree) {
                             try {
+                                // Сохраним новую версию заранее, чтобы после перезагрузки не спрашивать снова
+                                try { localStorage.setItem(VER_KEY, String(ver)); } catch (_) {}
                                 const base = window.location.href.split('#')[0];
                                 const sep = base.includes('?') ? '&' : '?';
                                 window.location.replace(base + sep + 'v=' + ver + '&t=' + Date.now());

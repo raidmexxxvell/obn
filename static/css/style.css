@@ -973,11 +973,14 @@ body.theme-blb .share-btn {
 .stats-grid { display: flex; flex-direction: column; gap: 10px; }
 .metric { display: flex; flex-direction: column; gap: 6px; }
 .metric-title { font-size: 12px; opacity: .9; font-weight: 700; text-align: center; }
-.stat-row { display: grid; grid-template-columns: 36px 1fr 36px; align-items: center; gap: 8px; }
-.stat-left, .stat-right { text-align: center; font-weight: 700; }
+/* Новая раскладка: цифры и +/- по краям, полоса строго по центру */
+.stat-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; }
+.stat-side { display: flex; align-items: center; gap: 6px; justify-content: center; }
+.stat-side .stat-val { min-width: 18px; text-align: center; font-weight: 700; }
+.stat-side .admin-inc { display:flex; gap:4px; }
 .stat-bar { position: relative; height: 12px; border-radius: 8px; overflow: hidden; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08); }
-.stat-fill-left { position: absolute; left: 0; top: 0; bottom: 0; background: #ffffff22; }
-.stat-fill-right { position: absolute; right: 0; top: 0; bottom: 0; background: #ff3366; }
+.stat-fill-left { position: absolute; left: 0; top: 0; bottom: 0; }
+.stat-fill-right { position: absolute; right: 0; top: 0; bottom: 0; }
 
 /* Магазин */
 .store-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 12px 10px 20px; }
