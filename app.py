@@ -1479,6 +1479,10 @@ def _compute_match_odds(home: str, away: str, date_key: str|None = None) -> dict
         vote_infl_max = float(os.environ.get('BET_VOTE_INFLUENCE_MAX', '0.06'))
     except Exception:
         vote_infl_max = 0.06
+    try:
+        fav_pull = float(os.environ.get('BET_FAV_PULL', '0.50'))  # 0..1 — доля подтяжки к таргету (0=нет, 1=жестко)
+    except Exception:
+        fav_pull = 0.50
 
     lam, mu = _estimate_goal_rates(home, away)
     probs, _mat = _dc_outcome_probs(lam, mu, rho=rho, max_goals=max_goals)
@@ -1527,7 +1531,7 @@ def _compute_match_odds(home: str, away: str, date_key: str|None = None) -> dict
     except Exception:
         pass
 
-    # Подтяжка к целевому кэфу фаворита (например, 1.40)
+    # Мягкая подтяжка к целевому кэфу фаворита (например, 1.40), но оставляем "плавающим"
     overround = 1.0 + BET_MARGIN
     try:
         arr = [pH,pD,pA]
@@ -1535,13 +1539,15 @@ def _compute_match_odds(home: str, away: str, date_key: str|None = None) -> dict
         pmax = arr[fav_idx]
         cur_odds = 1.0 / max(1e-9, pmax*overround)
         target = max(1.10, fav_target_odds)
-        if cur_odds > target:
+        if cur_odds > target and fav_pull > 0:
             need_p = min(0.92, max(0.05, 1.0/(target*overround)))
-            need_p = max(pmax, need_p)
+            # Сместим pmax лишь частично в сторону need_p
+            p_new = pmax + fav_pull * (need_p - pmax)
+            p_new = min(0.98, max(pmax, p_new))
             others_sum = (pH+pD+pA) - pmax
-            if others_sum > 1e-9 and need_p < 0.98:
-                scale = (1.0 - need_p)/others_sum
-                pH, pD, pA = [ (need_p if i==fav_idx else max(0.01, v*scale)) for i,v in enumerate([pH,pD,pA]) ]
+            if others_sum > 1e-9 and p_new < 0.98:
+                scale = (1.0 - p_new)/others_sum
+                pH, pD, pA = [ (p_new if i==fav_idx else max(0.01, v*scale)) for i,v in enumerate([pH,pD,pA]) ]
     except Exception:
         pass
     def to_odds(p):

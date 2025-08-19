@@ -1070,7 +1070,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const L = (name) => { const t = document.createElement('div'); t.className = 'team'; const i = document.createElement('img'); i.className='logo'; loadTeamLogo(i, name||''); const n = document.createElement('div'); n.className='team-name'; n.textContent = name||''; t.append(i, n); return t; };
             center.append(L(m.home), (()=>{const s=document.createElement('div'); s.className='score'; s.textContent='VS'; return s;})(), L(m.away));
             card.appendChild(center);
-            // Горизонтальная полоса голосования «П1 • X • П2»
+            // Горизонтальная полоса голосования «П1 • X • П2» (показываем только если на матч есть ставки)
             const wrap = document.createElement('div'); wrap.className = 'vote-inline';
             const title = document.createElement('div'); title.className = 'vote-title'; title.textContent = 'Голосование';
             const bar = document.createElement('div'); bar.className = 'vote-strip';
@@ -1080,13 +1080,34 @@ document.addEventListener('DOMContentLoaded', () => {
             bar.append(segH, segD, segA);
             const legend = document.createElement('div'); legend.className = 'vote-legend';
             const btns = document.createElement('div'); btns.className = 'vote-inline-btns';
-            const mkBtn = (code, text) => { const b=document.createElement('button'); b.className='details-btn'; b.textContent=text; b.addEventListener('click', async ()=>{
-                try { const fd = new FormData(); fd.append('initData', window.Telegram?.WebApp?.initData||''); fd.append('home', m.home||''); fd.append('away', m.away||''); fd.append('date', (m.date||'').slice(0,10)); fd.append('choice', code); const r = await fetch('/api/vote/match',{method:'POST', body: fd}); if (!r.ok) throw 0; await loadAgg(); } catch(_){}
-            }); return b; };
+            const mkBtn = (code, text) => {
+                const b = document.createElement('button');
+                b.className = 'details-btn';
+                b.textContent = text;
+                b.addEventListener('click', async () => {
+                    try {
+                        const fd = new FormData();
+                        fd.append('initData', window.Telegram?.WebApp?.initData || '');
+                        fd.append('home', m.home || '');
+                        fd.append('away', m.away || '');
+                        fd.append('date', (m.date || '').slice(0, 10));
+                        fd.append('choice', code);
+                        const r = await fetch('/api/vote/match', { method: 'POST', body: fd });
+                        if (!r.ok) throw 0;
+                        btns.querySelectorAll('button').forEach(x => x.disabled = true);
+                        await loadAgg(true);
+                    } catch (_) {}
+                });
+                return b;
+            };
             btns.append(mkBtn('home','За П1'), mkBtn('draw','За X'), mkBtn('away','За П2'));
             legend.innerHTML = '<span>П1</span><span>X</span><span>П2</span>';
             wrap.append(title, bar, legend, btns);
-            card.appendChild(wrap);
+            // Показываем блок только если матч в ставочных турах
+            const toursCache = (() => { try { return JSON.parse(localStorage.getItem('betting:tours') || 'null'); } catch(_) { return null; } })();
+            const mkKey = (obj) => { try { const h=(obj?.home||'').toLowerCase().trim(); const a=(obj?.away||'').toLowerCase().trim(); const raw=obj?.date?String(obj.date):(obj?.datetime?String(obj.datetime):''); const d=raw?raw.slice(0,10):''; return `${h}__${a}__${d}`; } catch(_) { return `${(obj?.home||'').toLowerCase()}__${(obj?.away||'').toLowerCase()}__`; } };
+            const tourMatches = new Set(); try { const tours=toursCache?.data?.tours || toursCache?.tours || []; tours.forEach(t => (t.matches||[]).forEach(x => tourMatches.add(mkKey(x)))); } catch(_) {}
+            if (tourMatches.has(mkKey(m))) { card.appendChild(wrap); }
             // кнопка перехода в Прогнозы
             const footer = document.createElement('div'); footer.className='match-footer';
             const goPred = document.createElement('button'); goPred.className='details-btn'; goPred.textContent='Сделать прогноз';
@@ -1096,17 +1117,19 @@ document.addEventListener('DOMContentLoaded', () => {
             footer.appendChild(goPred); card.appendChild(footer);
             host.appendChild(card);
 
-            async function loadAgg(){
+        async function loadAgg(withInit){
                 try {
-                    const params = new URLSearchParams({ home: m.home||'', away: m.away||'', date: (m.date||'').slice(0,10) });
+            const params = new URLSearchParams({ home: m.home||'', away: m.away||'', date: (m.date||'').slice(0,10) });
+            if (withInit) params.append('initData', (window.Telegram?.WebApp?.initData || ''));
                     const agg = await fetch(`/api/vote/match-aggregates?${params.toString()}`).then(r=>r.json());
                     const h = Number(agg?.home||0), d = Number(agg?.draw||0), a = Number(agg?.away||0);
                     const sum = Math.max(1, h+d+a);
                     const ph = Math.round(h*100/sum), pd = Math.round(d*100/sum), pa = Math.round(a*100/sum);
                     segH.style.width = ph+'%'; segD.style.width = pd+'%'; segA.style.width = pa+'%';
+            if (agg && agg.my_choice) { btns.querySelectorAll('button').forEach(x=>x.disabled=true); }
                 } catch(_){ segH.style.width='33%'; segD.style.width='34%'; segA.style.width='33%'; }
             }
-            loadAgg();
+        loadAgg(true);
         } catch(_) {}
     }
 
@@ -1843,17 +1866,34 @@ document.addEventListener('DOMContentLoaded', () => {
                     center.append(home, score, away);
                     card.appendChild(center);
 
-                    // Голосование: одна общая полоса
-                    const voteWrap = document.createElement('div'); voteWrap.className = 'vote-inline';
-                    const voteTitle = document.createElement('div'); voteTitle.className = 'vote-title'; voteTitle.textContent = 'Голосование';
-                    const strip = document.createElement('div'); strip.className = 'vote-strip';
-                    const segH = document.createElement('div'); segH.className = 'seg seg-h';
-                    const segD = document.createElement('div'); segD.className = 'seg seg-d';
-                    const segA = document.createElement('div'); segA.className = 'seg seg-a';
-                    strip.append(segH, segD, segA);
-                    const legend = document.createElement('div'); legend.className = 'vote-legend'; legend.innerHTML = '<span>П1</span><span>X</span><span>П2</span>';
-                    voteWrap.append(voteTitle, strip, legend);
-                    card.appendChild(voteWrap);
+                    // Голосование: показываем только если на этот матч есть ставки
+                    const mkKey = (obj) => {
+                        try {
+                            const h = (obj?.home || '').toLowerCase().trim();
+                            const a = (obj?.away || '').toLowerCase().trim();
+                            const raw = obj?.date ? String(obj.date) : (obj?.datetime ? String(obj.datetime) : '');
+                            const d = raw ? raw.slice(0, 10) : '';
+                            return `${h}__${a}__${d}`;
+                        } catch(_) { return `${(obj?.home||'').toLowerCase()}__${(obj?.away||'').toLowerCase()}__`; }
+                    };
+                    const toursCache = (() => { try { return JSON.parse(localStorage.getItem('betting:tours') || 'null'); } catch(_) { return null; } })();
+                    const tourMatches = new Set();
+                    try { const tours = toursCache?.data?.tours || toursCache?.tours || []; tours.forEach(t => (t.matches||[]).forEach(x => tourMatches.add(mkKey(x)))); } catch(_) {}
+                    const thisKey = mkKey(m);
+                    const hasBetting = tourMatches.has(thisKey);
+                    if (hasBetting) {
+                        const voteWrap = document.createElement('div'); voteWrap.className = 'vote-inline';
+                        const voteTitle = document.createElement('div'); voteTitle.className = 'vote-title'; voteTitle.textContent = 'Голосование';
+                        const strip = document.createElement('div'); strip.className = 'vote-strip';
+                        const segH = document.createElement('div'); segH.className = 'seg seg-h';
+                        const segD = document.createElement('div'); segD.className = 'seg seg-d';
+                        const segA = document.createElement('div'); segA.className = 'seg seg-a';
+                        strip.append(segH, segD, segA);
+                        const legend = document.createElement('div'); legend.className = 'vote-legend'; legend.innerHTML = '<span>П1</span><span>X</span><span>П2</span>';
+                        voteWrap.append(voteTitle, strip, legend);
+                        card.appendChild(voteWrap);
+                        // функции updateAgg и загрузки перенесены ниже (используют segH/segD/segA)
+                    }
 
                     const updateAgg = (agg) => {
                         const h = Number(agg?.home||0), d = Number(agg?.draw||0), a = Number(agg?.away||0);
@@ -1866,9 +1906,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         } catch(_) {}
                     };
                     try {
-                        const params = new URLSearchParams({ home: m.home||'', away: m.away||'', date: (m.date||'').slice(0,10) });
-                        params.append('initData', (window.Telegram?.WebApp?.initData || ''));
-                        fetch(`/api/vote/match-aggregates?${params.toString()}`).then(r=>r.json()).then(updateAgg).catch(()=>{});
+                        if (hasBetting) {
+                            const params = new URLSearchParams({ home: m.home||'', away: m.away||'', date: (m.date||'').slice(0,10) });
+                            params.append('initData', (window.Telegram?.WebApp?.initData || ''));
+                            fetch(`/api/vote/match-aggregates?${params.toString()}`).then(r=>r.json()).then(updateAgg).catch(()=>{});
+                        }
                     } catch(_) {}
 
                     // Кнопки голосования
@@ -1887,8 +1929,13 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (agg) updateAgg(agg);
                         } catch(err) { try { window.Telegram?.WebApp?.showAlert?.('Не удалось сохранить голос'); } catch(_) {} }
                     }); return b; };
-                    voteBtns.append(mkBtn('home','За П1'), mkBtn('draw','За X'), mkBtn('away','За П2'));
-                    card.appendChild(voteBtns);
+                    if (hasBetting) {
+                        voteBtns.style.display = 'flex';
+                        voteBtns.style.justifyContent = 'center';
+                        voteBtns.style.gap = '10px';
+                        voteBtns.append(mkBtn('home','За П1'), mkBtn('draw','За X'), mkBtn('away','За П2'));
+                        card.appendChild(voteBtns);
+                    }
 
                     const footer = document.createElement('div');
                     footer.className = 'match-footer';
@@ -1933,25 +1980,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const btn = document.createElement('button');
                     btn.className = 'details-btn';
                     btn.setAttribute('data-throttle', '800');
-                    const toursCache = (() => { try { return JSON.parse(localStorage.getItem('betting:tours') || 'null'); } catch(_) { return null; } })();
-                    // Ключ матча: home__away__YYYY-MM-DD (чтобы отличать одноимённые пары в разных турах)
-                    const mkKey = (obj) => {
-                        try {
-                            const h = (obj?.home || '').toLowerCase().trim();
-                            const a = (obj?.away || '').toLowerCase().trim();
-                            const raw = obj?.date ? String(obj.date) : (obj?.datetime ? String(obj.datetime) : '');
-                            const d = raw ? raw.slice(0, 10) : '';
-                            return `${h}__${a}__${d}`;
-                        } catch(_) { return `${(obj?.home||'').toLowerCase()}__${(obj?.away||'').toLowerCase()}__`; }
-                    };
-                    const tourMatches = new Set();
-                    try {
-                        const tours = toursCache?.data?.tours || toursCache?.tours || [];
-                        tours.forEach(t => (t.matches||[]).forEach(x => {
-                            tourMatches.add(mkKey(x));
-                        }));
-                    } catch(_) {}
-                    const thisKey = mkKey(m);
+                    // toursCache, mkKey, tourMatches, thisKey уже объявлены выше — используем их
                     const matchHasPrediction = tourMatches.has(thisKey);
                     if (matchHasPrediction) {
                         btn.textContent = 'Сделать прогноз';

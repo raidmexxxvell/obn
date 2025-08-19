@@ -37,10 +37,10 @@ body {
 .container { max-width: 600px; margin: 0 auto; padding: 0 12px; } /* внутренние отступы переносим в контейнер */
 .nav {
     position: fixed;
-    left: 0;
-    right: 0;
+    left: 50%;
+    transform: translateX(-50%);
     bottom: 0;
-    width: 100vw;
+    width: min(600px, 100vw);
     background: rgba(10, 18, 40, 0.92);
     backdrop-filter: blur(12px);
     border-radius: 0; /* без закруглений */
@@ -855,7 +855,7 @@ body.theme-blb .share-btn {
 .vote-strip .seg-d { background: linear-gradient(90deg, rgba(255,255,255,0.7), rgba(255,255,255,0.5)); left: auto; }
 .vote-strip .seg-a { background: linear-gradient(90deg, #f59e0b, #ef4444); left: auto; }
 .vote-legend { display: grid; grid-template-columns: repeat(3, 1fr); font-size: 12px; color: var(--gray); }
-.vote-inline-btns { display:flex; justify-content:center; gap: 8px; }
+.vote-inline-btns, .vote-btns { display:flex; justify-content:center; gap: 12px; padding-top: 6px; }
 
 @keyframes voteShimmer {
     0% { background-position: 0% 0; }
