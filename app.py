@@ -361,6 +361,21 @@ def _match_date_key(m: dict) -> str:
         pass
     return ''
 
+def _pseudo_user_id() -> int:
+    """Формирует стабильный псевдо-идентификатор пользователя по IP+User-Agent,
+    чтобы позволить голосование вне Telegram при включённом ALLOW_VOTE_WITHOUT_TELEGRAM=1.
+    Не используется, если есть валидный Telegram initData.
+    """
+    try:
+        ip = request.headers.get('X-Forwarded-For') or request.remote_addr or ''
+        ua = request.headers.get('User-Agent') or ''
+        raw = f"{ip}|{ua}"
+        h = hashlib.sha256(raw.encode('utf-8')).hexdigest()[:12]
+        return int(h, 16)
+    except Exception:
+        # Небольшой фиксированный ID как fallback
+        return 0
+
 
 @app.route('/api/betting/place', methods=['POST'])
 def api_betting_place():
@@ -3945,9 +3960,18 @@ def api_schedule():
                         resp.headers['ETag'] = _etag
                         resp.headers['Cache-Control'] = 'public, max-age=900, stale-while-revalidate=600'
                         return resp
-                    # Вычислим «матч недели» по разнице сил и ближайшей дате
+                    # «Матч недели» берём из ближайшего тура ставок (если есть снапшот betting-tours)
                     try:
-                        best = _pick_match_of_week(payload.get('tours') or [])
+                        if SessionLocal is not None:
+                            db = get_db()
+                            try:
+                                bt = _snapshot_get(db, 'betting-tours')
+                                tours_src = (bt or {}).get('payload', {}).get('tours') or payload.get('tours') or []
+                            finally:
+                                db.close()
+                        else:
+                            tours_src = payload.get('tours') or []
+                        best = _pick_match_of_week(tours_src)
                         if best:
                             payload = dict(payload)
                             payload['match_of_week'] = best
@@ -3962,7 +3986,16 @@ def api_schedule():
         # Bootstrap
         payload = _build_schedule_payload_from_sheet()
         try:
-            best = _pick_match_of_week(payload.get('tours') or [])
+            # На bootstrap тоже попробуем опираться на туры ставок при наличии
+            tours_src = payload.get('tours') or []
+            if SessionLocal is not None:
+                db = get_db()
+                try:
+                    bt = _snapshot_get(db, 'betting-tours')
+                    tours_src = (bt or {}).get('payload', {}).get('tours') or tours_src
+                finally:
+                    db.close()
+            best = _pick_match_of_week(tours_src)
             if best:
                 payload = dict(payload)
                 payload['match_of_week'] = best
@@ -3991,9 +4024,15 @@ def api_vote_match():
     """
     try:
         parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
-        if not parsed or not parsed.get('user'):
-            return jsonify({'error': 'Недействительные данные'}), 401
-        uid = int(parsed['user'].get('id'))
+        uid = None
+        if parsed and parsed.get('user'):
+            uid = int(parsed['user'].get('id'))
+        else:
+            # Разрешим голосование без Telegram, если включено явно
+            if os.environ.get('ALLOW_VOTE_WITHOUT_TELEGRAM', '0') in ('1','true','True'):
+                uid = _pseudo_user_id()
+            else:
+                return jsonify({'error': 'Недействительные данные'}), 401
         home = (request.form.get('home') or '').strip()
         away = (request.form.get('away') or '').strip()
         date_key = (request.form.get('date') or '').strip()[:10]
@@ -4041,6 +4080,7 @@ def api_vote_match_aggregates():
         # Опционально узнаем мой голос
         my_choice = None
         parsed = None
+        # Разбираем Telegram initData (опционально)
         try:
             init_data = request.args.get('initData', '')
             if init_data:
@@ -4062,10 +4102,14 @@ def api_vote_match_aggregates():
             for c, cnt in rows:
                 k = str(c).lower()
                 if k in agg: agg[k] = int(cnt)
-            # Мой голос, если запрос аутентифицирован initData
+            # Мой голос: если есть initData или разрешён псевдо-ID
             try:
+                uid = None
                 if parsed and parsed.get('user'):
                     uid = int(parsed['user'].get('id'))
+                elif os.environ.get('ALLOW_VOTE_WITHOUT_TELEGRAM', '0') in ('1','true','True'):
+                    uid = _pseudo_user_id()
+                if uid is not None:
                     mine = db.query(MatchVote).filter(
                         MatchVote.home==home, MatchVote.away==away, MatchVote.date_key==date_key, MatchVote.user_id==uid
                     ).first()
