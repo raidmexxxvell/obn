@@ -37,6 +37,58 @@
     step();
   }
 
+  // Кэш и дозатор запросов для агрегатов голосования (TTL 2 минуты, максимум 2 параллельно)
+  const VoteAgg = (() => {
+    const TTL = 120000; // 2 мин
+    const MAX_CONCURRENCY = 2;
+    const GAP_MS = 180; // пауза между запросами
+    let running = 0;
+    const q = [];
+    const dedup = new Map(); // key -> Promise
+
+    const keyFrom = (home, away, dateStr) => {
+      try {
+        const d = String(dateStr || '').slice(0, 10);
+        const h = (home || '').toLowerCase().trim();
+        const a = (away || '').toLowerCase().trim();
+        return `${h}__${a}__${d}`;
+      } catch(_) { return `${home||''}__${away||''}__${String(dateStr||'').slice(0,10)}`; }
+    };
+    const readCache = (key) => {
+      try {
+        const j = JSON.parse(localStorage.getItem('voteAgg:' + key) || 'null');
+        if (j && Number.isFinite(j.ts) && (Date.now() - j.ts < TTL)) return j;
+      } catch(_) {}
+      return null;
+    };
+    const writeCache = (key, data) => {
+      try { localStorage.setItem('voteAgg:' + key, JSON.stringify({ ...data, ts: Date.now() })); } catch(_) {}
+    };
+    const pump = () => {
+      if (running >= MAX_CONCURRENCY) return;
+      const job = q.shift();
+      if (!job) return;
+      running++;
+      const url = `/api/vote/match-aggregates?home=${encodeURIComponent(job.h)}&away=${encodeURIComponent(job.a)}&date=${encodeURIComponent(job.d)}`;
+      fetch(url, { cache: 'no-store' })
+        .then(r => r.json())
+        .then(data => { writeCache(job.key, data || {}); job.res(data || {}); })
+        .catch(() => job.res(null))
+        .finally(() => { running--; setTimeout(pump, GAP_MS); });
+    };
+    const fetchAgg = (home, away, dateStr) => {
+      const key = keyFrom(home, away, dateStr);
+      const cached = readCache(key);
+      if (cached) return Promise.resolve(cached);
+      if (dedup.has(key)) return dedup.get(key);
+      const p = new Promise(res => { q.push({ key, h: home || '', a: away || '', d: String(dateStr||'').slice(0,10), res }); pump(); });
+      dedup.set(key, p);
+      p.finally(() => dedup.delete(key));
+      return p;
+    };
+    return { fetchAgg, readCache, keyFrom };
+  })();
+
   function setUpdatedLabelSafely(labelEl, newIso) {
     try {
       const prevIso = labelEl.getAttribute('data-updated-iso');
@@ -199,17 +251,17 @@
           const segH = document.createElement('div'); segH.className = 'seg seg-h';
           const segD = document.createElement('div'); segD.className = 'seg seg-d';
           const segA = document.createElement('div'); segA.className = 'seg seg-a';
-          // Цвета сегментов голосования: П1/П2 — цвета команд, X — приятный серый
+          // Цвета сегментов голосования: П1/П2 — цвета команд, X — серый; ставим через background, чтобы перекрыть градиенты CSS
           try {
-            segH.style.backgroundColor = getTeamColor(m.home || '');
-            segA.style.backgroundColor = getTeamColor(m.away || '');
-            segD.style.backgroundColor = '#8e8e93';
+            segH.style.background = getTeamColor(m.home || '');
+            segA.style.background = getTeamColor(m.away || '');
+            segD.style.background = '#8e8e93';
           } catch(_) {}
           bar.append(segH, segD, segA);
           const legend = document.createElement('div'); legend.className = 'vote-legend'; legend.innerHTML = '<span>П1</span><span>X</span><span>П2</span>';
       const btns = document.createElement('div'); btns.className = 'vote-inline-btns';
       const confirm = document.createElement('div'); confirm.className = 'vote-confirm'; confirm.style.fontSize='12px'; confirm.style.color='var(--success)';
-      const voteKey = (() => { try { const raw=m.date?String(m.date):(m.datetime?String(m.datetime):''); const d=raw?raw.slice(0,10):''; return `${(m.home||'').toLowerCase().trim()}__${(m.away||'').toLowerCase().trim()}__${d}`; } catch(_) { return `${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}__`; } })();
+      const voteKey = VoteAgg.keyFrom(m.home||'', m.away||'', m.date || m.datetime);
           const mkBtn = (code, text) => {
             const b = document.createElement('button'); b.className = 'details-btn'; b.textContent = text;
             b.addEventListener('click', async () => {
@@ -228,7 +280,8 @@
         try { localStorage.setItem('voted:'+voteKey, '1'); } catch(_) {}
         // Сразу скрываем кнопки
         btns.style.display = 'none';
-                await loadAgg(true);
+                // Мягко обновим агрегаты через очередь, чтобы полоска обновилась
+                setTimeout(() => { VoteAgg.fetchAgg(m.home||'', m.away||'', m.date || m.datetime).then(applyAgg); }, 250);
               } catch (_) {}
             });
             return b;
@@ -236,28 +289,29 @@
           btns.append(mkBtn('home','За П1'), mkBtn('draw','За X'), mkBtn('away','За П2'));
       wrap.append(title, bar, legend, btns, confirm);
           card.appendChild(wrap);
-
-          async function loadAgg(withInit){
+          const applyAgg = (agg) => {
             try {
-              const dkey = (m.date ? String(m.date) : (m.datetime ? String(m.datetime) : '')).slice(0,10);
-              const params = new URLSearchParams({ home: m.home||'', away: m.away||'', date: dkey });
-              if (withInit) params.append('initData', (window.Telegram?.WebApp?.initData || ''));
-              const agg = await fetch(`/api/vote/match-aggregates?${params.toString()}`).then(r=>r.json());
               const h = Number(agg?.home||0), d = Number(agg?.draw||0), a = Number(agg?.away||0);
               const sum = Math.max(1, h+d+a);
-              const ph = Math.round(h*100/sum), pd = Math.round(d*100/sum), pa = Math.round(a*100/sum);
-              segH.style.width = ph+'%'; segD.style.width = pd+'%'; segA.style.width = pa+'%';
-              if (agg && agg.my_choice) {
-                btns.querySelectorAll('button').forEach(x=>x.disabled=true);
-                btns.style.display = 'none';
-                confirm.textContent = 'Ваш голос учтён';
-                try { localStorage.setItem('voted:'+voteKey, '1'); } catch(_) {}
-              }
-            } catch(_){ segH.style.width='33%'; segD.style.width='34%'; segA.style.width='33%'; }
-          }
+              segH.style.width = Math.round(h*100/sum)+'%';
+              segD.style.width = Math.round(d*100/sum)+'%';
+              segA.style.width = Math.round(a*100/sum)+'%';
+            } catch(_) { segH.style.width='33%'; segD.style.width='34%'; segA.style.width='33%'; }
+          };
           // Если локально зафиксировано, спрячем кнопки сразу
           try { if (localStorage.getItem('voted:'+voteKey) === '1') { btns.style.display='none'; confirm.textContent='Ваш голос учтён'; } } catch(_) {}
-          loadAgg(true);
+          // Ленивая загрузка агрегатов: берём из кэша или ждём вход в вьюпорт
+          const cached = VoteAgg.readCache(voteKey);
+          if (cached) applyAgg(cached);
+          const doFetch = () => VoteAgg.fetchAgg(m.home||'', m.away||'', m.date || m.datetime).then(applyAgg);
+          if ('IntersectionObserver' in window) {
+            const io = new IntersectionObserver((ents) => {
+              ents.forEach(e => { if (e.isIntersecting) { doFetch(); io.unobserve(card); } });
+            }, { root: null, rootMargin: '200px', threshold: 0.01 });
+            io.observe(card);
+          } else {
+            doFetch();
+          }
         }
       } catch(_) {}
 

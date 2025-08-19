@@ -1020,11 +1020,11 @@ document.addEventListener('DOMContentLoaded', () => {
             btns.append(mkBtn('home','За П1'), mkBtn('draw','За X'), mkBtn('away','За П2'));
             legend.innerHTML = '<span>П1</span><span>X</span><span>П2</span>';
             wrap.append(title, bar, legend, btns, confirm);
-            // Покрасим полосы под цвета команд + серый для ничьей
+            // Покрасим полосы под цвета команд + серый для ничьей (через background, чтобы перекрыть CSS-градиенты)
             try {
-                segH.style.backgroundColor = getTeamColor(m.home || '');
-                segA.style.backgroundColor = getTeamColor(m.away || '');
-                segD.style.backgroundColor = '#8e8e93';
+                segH.style.background = getTeamColor(m.home || '');
+                segA.style.background = getTeamColor(m.away || '');
+                segD.style.background = '#8e8e93';
             } catch(_) {}
             // Показываем блок только если матч в ставочных турах
             const toursCache = (() => { try { return JSON.parse(localStorage.getItem('betting:tours') || 'null'); } catch(_) { return null; } })();

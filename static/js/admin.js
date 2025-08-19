@@ -72,10 +72,14 @@
     const updated = document.getElementById('admin-orders-updated');
     if (!table) return; const tbody = table.querySelector('tbody'); tbody.innerHTML = '';
     try {
-      const r = await fetch('/api/admin/orders'); const data = await r.json();
+      const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
+      const r = await fetch('/api/admin/orders', { method: 'POST', body: fd }); const data = await r.json();
       (data.orders||[]).forEach((o, idx) => {
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${idx+1}</td><td>${o.user_name||'—'}</td><td>${(o.items||[]).map(x=>x.name).join(', ')}</td><td>${o.total_qty||0}</td><td>${(o.total||0).toLocaleString()}</td><td>${o.created_at||''}</td><td>${o.status||''}</td>`;
+        let created = o.created_at || '';
+        try { created = new Date(created).toLocaleDateString('ru-RU'); } catch(_) {}
+        const userLabel = o.username ? ('@' + o.username) : (o.user_id ? ('ID ' + o.user_id) : '—');
+        tr.innerHTML = `<td>${idx+1}</td><td>${userLabel}</td><td>${o.items_preview||''}</td><td>${o.items_qty||0}</td><td>${(o.total||0).toLocaleString()}</td><td>${created}</td><td>${o.status||''}</td>`;
         tbody.appendChild(tr);
       });
       if (updated && data.updated_at) { try { updated.textContent = `Обновлено: ${new Date(data.updated_at).toLocaleString()}`; } catch(_) {} }

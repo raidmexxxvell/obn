@@ -18,6 +18,16 @@
   function writeCart(items) { try { localStorage.setItem('shop:cart', JSON.stringify(items)); } catch(_) {} try { updateCartBadge(); } catch(_) {} }
   function addToCart(item) { const items = readCart(); const idx = items.findIndex(x => x.id === item.id); if (idx>=0) items[idx].qty=(items[idx].qty||1)+1; else items.push({ id:item.id, name:item.name, price:Number(item.price)||0, qty:1 }); writeCart(items); renderCart(); }
   function removeFromCart(id) { const items = readCart().filter(x => x.id !== id); writeCart(items); renderCart(); }
+  function setQty(id, qty) {
+    const q = Math.max(1, Math.min(99, Number(qty)||1));
+    const items = readCart(); const it = items.find(x=>x.id===id); if (!it) return;
+    it.qty = q; writeCart(items); renderCart();
+  }
+  function incQty(id, delta) {
+    const items = readCart(); const it = items.find(x=>x.id===id); if (!it) return;
+    const q = Math.max(1, Math.min(99, Number(it.qty||1) + (delta||1)));
+    it.qty = q; writeCart(items); renderCart();
+  }
   function renderCart() {
     const host = document.querySelector('#shop-pane-cart'); if (!host) return;
     const items = readCart(); host.innerHTML = '';
@@ -26,11 +36,25 @@
     let total = 0;
     items.forEach(it => {
       total += (Number(it.price)||0) * (Number(it.qty)||1);
-      const row = document.createElement('div'); row.className = 'cart-row';
-      const name = document.createElement('div'); name.className='cart-name'; name.textContent = `${it.name} × ${it.qty}`;
-      const price = document.createElement('div'); price.className='cart-price'; price.textContent = ((Number(it.price)||0) * (Number(it.qty)||1)).toLocaleString();
+      const row = document.createElement('div'); row.className = 'cart-line';
+      const left = document.createElement('div'); left.className = 'cart-left';
+      const right = document.createElement('div'); right.className = 'cart-right';
+
+      const name = document.createElement('span'); name.textContent = it.name;
+      const qty = document.createElement('div'); qty.className = 'qty-control';
+      const minus = document.createElement('button'); minus.type='button'; minus.className = 'qty-btn'; minus.textContent = '−'; minus.addEventListener('click', ()=> incQty(it.id, -1));
+      const input = document.createElement('input'); input.type='number'; input.min='1'; input.max='99'; input.value = String(it.qty||1); input.className='qty-input';
+      input.addEventListener('change', ()=> setQty(it.id, input.value));
+      input.addEventListener('input', ()=> { const v = input.value.replace(/\D/g,''); input.value = v.slice(0,2); });
+      const plus = document.createElement('button'); plus.type='button'; plus.className = 'qty-btn'; plus.textContent = '+'; plus.addEventListener('click', ()=> incQty(it.id, 1));
+      qty.append(minus, input, plus);
+      left.append(name, qty);
+
+      const price = document.createElement('span'); price.textContent = ((Number(it.price)||0) * (Number(it.qty)||1)).toLocaleString();
       const del = document.createElement('button'); del.className='details-btn'; del.textContent='Убрать'; del.addEventListener('click', ()=> removeFromCart(it.id));
-      row.append(name, price, del); list.appendChild(row);
+      right.append(price, del);
+
+      row.append(left, right); list.appendChild(row);
     });
     const controls = document.createElement('div'); controls.className='cart-controls';
     const totalEl = document.createElement('div'); totalEl.className='cart-total'; totalEl.textContent = 'Итого: ' + total.toLocaleString() + ' кредитов';
@@ -52,7 +76,7 @@
     try {
       const tg = window.Telegram?.WebApp || null; const items = readCart(); if (!items.length) return;
       const fd = new FormData(); fd.append('initData', tg?.initData || ''); fd.append('items', JSON.stringify(items));
-      const r = await fetch('/api/shop/order', { method: 'POST', body: fd }); const d = await r.json().catch(()=>({}));
+      const r = await fetch('/api/shop/checkout', { method: 'POST', body: fd }); const d = await r.json().catch(()=>({}));
       if (!r.ok) throw new Error(d?.error||'Ошибка заказа');
       writeCart([]); renderCart(); try { window.Telegram?.WebApp?.showAlert?.('Заказ оформлен'); } catch(_) {}
       try { renderMyOrders(); } catch(_) {}
@@ -66,14 +90,14 @@
       host.innerHTML=''; const list = data?.orders || [];
       if (!list.length) { host.innerHTML = '<div style="padding:12px; color: var(--gray);">Заказов нет.</div>'; return; }
       const table = document.createElement('table'); table.className='league-table';
-      const thead = document.createElement('thead'); thead.innerHTML = '<tr><th>№</th><th>Товары</th><th>Шт</th><th>Сумма</th><th>Создан</th><th>Статус</th></tr>';
+      const thead = document.createElement('thead'); thead.innerHTML = '<tr><th>№</th><th>Сумма</th><th>Создан</th><th>Статус</th></tr>';
       const tbody = document.createElement('tbody');
       list.forEach((o, i) => {
         const tr = document.createElement('tr');
         const sum = Number(o.total||0);
-        const qty = Number(o.total_qty||0);
-        const items = (o.items||[]).map(x=>x.name).join(', ');
-        tr.innerHTML = `<td>${i+1}</td><td>${items}</td><td>${qty}</td><td>${sum.toLocaleString()}</td><td>${o.created_at||''}</td><td>${o.status||''}</td>`;
+        let created = o.created_at || '';
+        try { created = new Date(created).toLocaleDateString('ru-RU'); } catch(_) {}
+        tr.innerHTML = `<td>${i+1}</td><td>${sum.toLocaleString()}</td><td>${created}</td><td>${o.status||''}</td>`;
         tbody.appendChild(tr);
       });
       table.append(thead, tbody); host.appendChild(table);
@@ -96,5 +120,5 @@
     });
     initShop(); updateCartBadge();
   }
-  window.Shop = { initShopUI, updateCartBadge, readCart, writeCart, addToCart, removeFromCart, renderCart, initShop, placeOrder, renderMyOrders };
+  window.Shop = { initShopUI, updateCartBadge, readCart, writeCart, addToCart, removeFromCart, setQty, incQty, renderCart, initShop, placeOrder, renderMyOrders };
 })();

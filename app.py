@@ -4354,6 +4354,83 @@ def api_vote_match_aggregates():
         app.logger.error(f"vote agg error: {e}")
         return jsonify({'error': 'Не удалось получить голоса'}), 500
 
+@app.route('/api/vote/aggregates/batch', methods=['POST'])
+def api_vote_aggregates_batch():
+    """Батч-эндпоинт: на вход JSON { matches: [{home, away, date}], initData?: string }
+    Возвращает { items: { key -> {home,draw,away, my_choice?} } }, где key = lower(home)+'__'+lower(away)+'__'+YYYY-MM-DD.
+    """
+    try:
+        payload = request.get_json(silent=True) or {}
+        matches = payload.get('matches') or []
+        init_data = payload.get('initData') or ''
+        # Разберём initData (опционально)
+        parsed = None
+        try:
+            if init_data:
+                parsed = parse_and_verify_telegram_init_data(init_data)
+        except Exception:
+            parsed = None
+        my_uid = None
+        if parsed and parsed.get('user'):
+            try: my_uid = int(parsed['user'].get('id'))
+            except Exception: my_uid = None
+        elif os.environ.get('ALLOW_VOTE_WITHOUT_TELEGRAM', '0') in ('1','true','True'):
+            my_uid = _pseudo_user_id()
+
+        def norm(s: str) -> str:
+            try:
+                return ''.join(ch for ch in (s or '').strip().lower().replace('ё','е') if ch.isalnum())
+            except Exception:
+                return ''
+
+        def key_of(home: str, away: str, date_key: str) -> str:
+            return f"{norm(home)}__{norm(away)}__{(date_key or '')[:10]}"
+
+        # Подготовим набор уникальных ключей
+        req = []
+        seen = set()
+        for m in matches:
+            h = (m.get('home') or '').strip()
+            a = (m.get('away') or '').strip()
+            d = (m.get('date') or m.get('datetime') or '').strip()[:10]
+            if not h or not a or not d:
+                continue
+            k = key_of(h, a, d)
+            if k in seen:
+                continue
+            seen.add(k)
+            req.append((k, h, a, d))
+
+        items = {}
+        if not req or SessionLocal is None:
+            return jsonify({ 'items': items })
+
+        db = get_db()
+        try:
+            # По каждому запросу выполним агрегат и (опц.) мой голос
+            for k, h, a, d in req:
+                rows = db.query(MatchVote.choice, func.count(MatchVote.id)).filter(
+                    MatchVote.home==h, MatchVote.away==a, MatchVote.date_key==d
+                ).group_by(MatchVote.choice).all()
+                agg = {'home':0,'draw':0,'away':0}
+                for c, cnt in rows:
+                    kk = str(c).lower()
+                    if kk in agg: agg[kk] = int(cnt)
+                # мой голос
+                if my_uid is not None:
+                    mine = db.query(MatchVote).filter(
+                        MatchVote.home==h, MatchVote.away==a, MatchVote.date_key==d, MatchVote.user_id==my_uid
+                    ).first()
+                    if mine:
+                        agg['my_choice'] = str(mine.choice)
+                items[k] = agg
+            return jsonify({ 'items': items })
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"vote batch error: {e}")
+        return jsonify({'error': 'Не удалось получить агрегаты'}), 500
+
 def _load_all_tours_from_sheet():
     """Читает лист расписания и возвращает список всех туров с матчами.
     Формат тура: { tour:int, title:str, start_at:iso, matches:[{home,away,date,time,datetime,score_home,score_away}] }
