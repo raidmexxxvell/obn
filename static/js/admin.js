@@ -152,6 +152,16 @@
   const r = await fetch(`/api/streams/upcoming?${params}`);
   const data = await r.json();
       list.innerHTML = '';
+      // Получим уже сохранённые подтверждения, чтобы предзаполнить поля
+      let saved = {};
+      try {
+        const rr = await fetch('/api/streams/list');
+        const dd = await rr.json();
+        (dd.items||[]).forEach(it => {
+          const key = `${(it.home||'').toLowerCase()}__${(it.away||'').toLowerCase()}__${(it.date||'')}`;
+          saved[key] = { vkVideoId: it.vkVideoId||'', vkPostUrl: it.vkPostUrl||'' };
+        });
+      } catch(_) {}
       (data.matches||[]).forEach(m => {
         const card = document.createElement('div'); card.className='store-item';
         const name = document.createElement('div'); name.className='store-name'; name.textContent = `${m.home||''} — ${m.away||''}`;
@@ -159,6 +169,16 @@
         const input = document.createElement('input'); input.type='text'; input.placeholder = 'Ссылка VK Live';
         const btn = document.createElement('button'); btn.className='details-btn confirm'; btn.textContent='Подтвердить';
         const hint = document.createElement('div'); hint.className = 'save-hint';
+        // Предзаполним, если уже была сохранённая ссылка
+        try {
+          const dateKey = (m.datetime||m.date||'').slice(0,10);
+          const key = `${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}__${dateKey}`;
+          const prev = saved[key];
+          if (prev) {
+            const val = prev.vkVideoId ? `https://vk.com/video${prev.vkVideoId}` : (prev.vkPostUrl||'');
+            if (val) { input.value = val; hint.textContent = 'Ранее сохранено'; hint.classList.remove('error'); hint.classList.add('success'); }
+          }
+        } catch(_) {}
         btn.addEventListener('click', async () => {
           try {
             const val = (input.value || '').trim();
@@ -167,16 +187,34 @@
               hint.classList.remove('success'); hint.classList.add('error');
               return;
             }
+            // Если уже было сохранено и значение меняется — спросим подтверждение
+            try {
+              const dateKey = (m.datetime||m.date||'').slice(0,10);
+              const key = `${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}__${dateKey}`;
+              const prev = saved[key];
+              const prevHuman = prev ? (prev.vkVideoId ? `https://vk.com/video${prev.vkVideoId}` : (prev.vkPostUrl||'')) : '';
+              if (prevHuman && prevHuman !== val) {
+                const ok = confirm('Ссылка уже сохранена. Перезаписать?');
+                if (!ok) return;
+              }
+            } catch(_) {}
             btn.disabled = true; const o = btn.textContent; btn.textContent = '...';
             const fd = new FormData();
             fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
             fd.append('home', m.home || ''); fd.append('away', m.away || '');
             fd.append('datetime', m.datetime || ''); fd.append('vk', val);
             const rr = await fetch('/api/streams/set', { method:'POST', body: fd });
-            if (!rr.ok) { throw new Error('save'); }
+            const resp = await rr.json().catch(()=>({}));
+            if (!rr.ok) { throw new Error(resp?.error || 'save'); }
             btn.textContent = 'Сохранено';
-            hint.textContent = 'Ссылка успешно сохранена';
+            hint.textContent = resp?.message || 'Ссылка успешно сохранена';
             hint.classList.remove('error'); hint.classList.add('success');
+            // Обновим локальный saved
+            try {
+              const dateKey = (m.datetime||m.date||'').slice(0,10);
+              const key = `${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}__${dateKey}`;
+              saved[key] = { vkVideoId: resp?.vkVideoId || '', vkPostUrl: resp?.vkPostUrl || '' };
+            } catch(_) {}
           } catch(_) { btn.disabled=false; btn.textContent='Подтвердить'; }
         });
         const row = document.createElement('div'); row.className='stream-row'; row.append(input, btn);

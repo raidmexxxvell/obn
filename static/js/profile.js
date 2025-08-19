@@ -2024,7 +2024,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Спроси сервер, можно ли показывать вкладку (подтверждено + за N минут до матча)
         try {
             const dateStr = (match?.datetime || match?.date || '').toString().slice(0,10);
-            const url = `/api/streams/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}&date=${encodeURIComponent(dateStr)}&window=10`;
+            const url = `/api/streams/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}&date=${encodeURIComponent(dateStr)}&window=60`;
             const cacheKey = (() => {
                 try { const h=(match.home||'').toLowerCase().trim(); const a=(match.away||'').toLowerCase().trim(); const d=dateStr; return `stream:${h}__${a}__${d}`; } catch(_) { return `stream:`; }
             })();

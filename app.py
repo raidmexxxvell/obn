@@ -5659,15 +5659,38 @@ def api_streams_set():
         try:
             row = db.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None)).first()
             now_ts = datetime.now(timezone.utc)
+            prev_id = None
+            prev_url = None
             if not row:
                 row = MatchStream(home=home, away=away, date=(date_str or None))
                 db.add(row)
+            else:
+                try:
+                    prev_id = row.vk_video_id or None
+                    prev_url = row.vk_post_url or None
+                except Exception:
+                    prev_id = None; prev_url = None
             row.vk_video_id = vk_id or None
             row.vk_post_url = vk_url or None
             row.confirmed_at = now_ts
             row.updated_at = now_ts
             db.commit()
-            return jsonify({'status': 'ok'})
+            # Логирование факта сохранения для аудита
+            try:
+                app.logger.info(f"streams/set by admin {user_id}: {home} vs {away} ({date_str or '-'}) -> vkVideoId={row.vk_video_id or ''} vkPostUrl={row.vk_post_url or ''} (prev: id={prev_id or ''} url={prev_url or ''})")
+            except Exception:
+                pass
+            msg = 'Ссылка принята и сохранена'
+            return jsonify({
+                'status': 'ok',
+                'message': msg,
+                'home': home,
+                'away': away,
+                'date': date_str,
+                'vkVideoId': row.vk_video_id or '',
+                'vkPostUrl': row.vk_post_url or '',
+                'prev': { 'vkVideoId': prev_id or '', 'vkPostUrl': prev_url or '' }
+            })
         finally:
             db.close()
     except Exception as e:
