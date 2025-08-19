@@ -968,6 +968,16 @@ body.theme-blb .share-btn {
 .toast { background: rgba(0,0,0,0.85); color: #fff; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 10px 14px; min-width: 240px; max-width: 90vw; box-shadow: 0 8px 24px rgba(0,0,0,0.3); animation: toastIn 200ms ease-out; }
 @keyframes toastIn { from { opacity: 0; transform: translateX(-50%) translateY(-10px);} to { opacity: 1; transform: translateX(-50%) translateY(0);} }
 
+/* Match stats */
+.stats-grid { display: flex; flex-direction: column; gap: 10px; }
+.metric { display: flex; flex-direction: column; gap: 6px; }
+.metric-title { font-size: 12px; opacity: .9; font-weight: 700; }
+.stat-row { display: grid; grid-template-columns: 36px 1fr 36px; align-items: center; gap: 8px; }
+.stat-left, .stat-right { text-align: center; font-weight: 700; }
+.stat-bar { position: relative; height: 12px; border-radius: 8px; overflow: hidden; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08); }
+.stat-fill-left { position: absolute; left: 0; top: 0; bottom: 0; background: #ffffff22; }
+.stat-fill-right { position: absolute; right: 0; top: 0; bottom: 0; background: #ff3366; }
+
 /* Магазин */
 .store-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 12px 10px 20px; }
 .store-item { background: var(--card-bg); border: 1px solid rgba(255,255,255,0.10); border-radius: 12px; padding: 10px; text-align: center; }

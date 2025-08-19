@@ -644,6 +644,27 @@ class MatchPlayerEvent(Base):
     note = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
+# Итоговая статистика матча (основные метрики)
+class MatchStats(Base):
+    __tablename__ = 'match_stats'
+    __table_args__ = (
+        Index('idx_mstats_home_away', 'home', 'away', unique=True),
+    )
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    home = Column(Text, nullable=False)
+    away = Column(Text, nullable=False)
+    shots_total_home = Column(Integer, nullable=True)
+    shots_total_away = Column(Integer, nullable=True)
+    shots_on_home = Column(Integer, nullable=True)
+    shots_on_away = Column(Integer, nullable=True)
+    corners_home = Column(Integer, nullable=True)
+    corners_away = Column(Integer, nullable=True)
+    yellows_home = Column(Integer, nullable=True)
+    yellows_away = Column(Integer, nullable=True)
+    reds_home = Column(Integer, nullable=True)
+    reds_away = Column(Integer, nullable=True)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
 class MatchFlags(Base):
     __tablename__ = 'match_flags'
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -6086,6 +6107,96 @@ def api_match_settle():
     except Exception as e:
         app.logger.error(f"Ошибка match/settle: {e}")
         return jsonify({'error': 'Не удалось выполнить расчёт матча'}), 500
+
+# ----------- MATCH STATS API -----------
+@app.route('/api/match/stats/get', methods=['GET'])
+def api_match_stats_get():
+    try:
+        home = (request.args.get('home') or '').strip()
+        away = (request.args.get('away') or '').strip()
+        if not home or not away:
+            return jsonify({'error': 'home/away обязательны'}), 400
+        if SessionLocal is None:
+            return jsonify({'error': 'БД недоступна'}), 500
+        db: Session = get_db()
+        try:
+            row = db.query(MatchStats).filter(MatchStats.home==home, MatchStats.away==away).first()
+            # fallback: если нет записи, сконструируем карточки из событий
+            payload = {}
+            if row:
+                payload = {
+                    'shots_total': [row.shots_total_home, row.shots_total_away],
+                    'shots_on': [row.shots_on_home, row.shots_on_away],
+                    'corners': [row.corners_home, row.corners_away],
+                    'yellows': [row.yells_home if hasattr(row,'yells_home') else row.yellows_home, row.yellows_away],
+                    'reds': [row.reds_home, row.reds_away],
+                    'updated_at': (row.updated_at.isoformat() if row.updated_at else None)
+                }
+            else:
+                # derive from player events for cards only
+                ev = db.query(MatchPlayerEvent).filter(MatchPlayerEvent.home==home, MatchPlayerEvent.away==away).all()
+                yh = len([e for e in ev if e.team=='home' and e.type=='yellow'])
+                ya = len([e for e in ev if e.team=='away' and e.type=='yellow'])
+                rh = len([e for e in ev if e.team=='home' and e.type=='red'])
+                ra = len([e for e in ev if e.team=='away' and e.type=='red'])
+                payload = { 'yellows': [yh, ya], 'reds': [rh, ra], 'updated_at': None }
+            return jsonify(payload)
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"Ошибка match/stats/get: {e}")
+        return jsonify({'error': 'Не удалось получить статистику'}), 500
+
+@app.route('/api/match/stats/set', methods=['POST'])
+def api_match_stats_set():
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+        home = (request.form.get('home') or '').strip()
+        away = (request.form.get('away') or '').strip()
+        if not home or not away:
+            return jsonify({'error': 'home/away обязательны'}), 400
+        vals = {}
+        def as_int(v):
+            try:
+                return int(v)
+            except Exception:
+                return None
+        map_fields = {
+            'shots_total_home': 'shots_total_home','shots_total_away': 'shots_total_away',
+            'shots_on_home': 'shots_on_home','shots_on_away': 'shots_on_away',
+            'corners_home': 'corners_home','corners_away': 'corners_away',
+            'yellows_home': 'yellows_home','yellows_away': 'yellows_away',
+            'reds_home': 'reds_home','reds_away': 'reds_away',
+        }
+        for k in map_fields.keys():
+            if k in request.form:
+                vals[k] = as_int(request.form.get(k))
+        if not vals:
+            return jsonify({'error': 'Нет полей для обновления'}), 400
+        if SessionLocal is None:
+            return jsonify({'error': 'БД недоступна'}), 500
+        db: Session = get_db()
+        try:
+            row = db.query(MatchStats).filter(MatchStats.home==home, MatchStats.away==away).first()
+            if not row:
+                row = MatchStats(home=home, away=away)
+                db.add(row)
+            for k,v in vals.items():
+                setattr(row, k, v)
+            row.updated_at = datetime.now(timezone.utc)
+            db.commit()
+            return jsonify({'status':'ok'})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"Ошибка match/stats/set: {e}")
+        return jsonify({'error': 'Не удалось сохранить статистику'}), 500
 
 if __name__ == '__main__':
     # Стартуем фоновой синхронизатор при локальном запуске

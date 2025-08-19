@@ -2051,6 +2051,20 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch(_) {}
 
     // События будут отображаться внутри вкладок составов
+        // Вкладка «Статистика»
+        let statsPane = document.getElementById('md-pane-stats');
+        if (!statsPane) {
+            statsPane = document.createElement('div');
+            statsPane.id = 'md-pane-stats';
+            statsPane.className = 'md-pane';
+            statsPane.style.display = 'none';
+            mdPane.querySelector('.modal-body')?.appendChild(statsPane);
+        }
+        // Добавим пункт в подменю, если его нет
+        if (!subtabs.querySelector('[data-mdtab="stats"]')) {
+            const st = document.createElement('div'); st.className = 'subtab-item'; st.setAttribute('data-mdtab','stats'); st.textContent = 'Статистика';
+            subtabs.appendChild(st);
+        }
 
         // по умолчанию активируем «Команда 1»
         mdPane.querySelector('.modal-subtabs .subtab-item[data-mdtab="home"]').classList.add('active');
@@ -2058,6 +2072,7 @@ document.addEventListener('DOMContentLoaded', () => {
         awayPane.style.display = 'none';
     specialsPane.style.display = 'none';
     streamPane.style.display = 'none';
+    statsPane.style.display = 'none';
     if (typeof eventsPane !== 'undefined') eventsPane.style.display = 'none';
 
         // заполнение составов — табличный вид с событиями
@@ -2309,15 +2324,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach((x)=>x.classList.remove('active'));
                 btn.classList.add('active');
                 const key = btn.getAttribute('data-mdtab');
-    if (key === 'home') { homePane.style.display = ''; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; streamPane.style.display = 'none'; }
-    else if (key === 'away') { homePane.style.display = 'none'; awayPane.style.display = ''; specialsPane.style.display = 'none'; streamPane.style.display = 'none'; }
+    if (key === 'home') { homePane.style.display = ''; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; streamPane.style.display = 'none'; statsPane.style.display = 'none'; }
+    else if (key === 'away') { homePane.style.display = 'none'; awayPane.style.display = ''; specialsPane.style.display = 'none'; streamPane.style.display = 'none'; statsPane.style.display = 'none'; }
                 else if (key === 'specials') {
                     homePane.style.display = 'none'; awayPane.style.display = 'none'; specialsPane.style.display = '';
                     // отрисуем спецпанель внутри specialsPane
                     renderSpecialsPane(specialsPane, match);
-                    streamPane.style.display = 'none';
+                    streamPane.style.display = 'none'; statsPane.style.display = 'none';
                 } else if (key === 'stream') {
-                    homePane.style.display = 'none'; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; streamPane.style.display = '';
+                    homePane.style.display = 'none'; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; streamPane.style.display = ''; statsPane.style.display = 'none';
                     // Лениво вставляем VK iframe только при первом показе
                     if (!streamPane.__inited) {
                         try {
@@ -2354,6 +2369,9 @@ document.addEventListener('DOMContentLoaded', () => {
                             try { streamPane.__startCommentsPoll(); } catch(_) {}
                         }
                     }
+                } else if (key === 'stats') {
+                    homePane.style.display = 'none'; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; streamPane.style.display = 'none'; statsPane.style.display = '';
+                    renderMatchStats(statsPane, match);
                     }
             };
         });
@@ -2548,6 +2566,46 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     try { window.openMatchScreen = openMatchScreen; } catch(_) {}
+
+    // Отрисовка статистики матча (одна строка на метрику)
+    function renderMatchStats(host, m) {
+        host.innerHTML = '<div class="stats-wrap">Загрузка…</div>';
+        const url = `/api/match/stats/get?home=${encodeURIComponent(m.home||'')}&away=${encodeURIComponent(m.away||'')}`;
+        fetch(url).then(r=>r.json()).then(d => {
+            const metrics = [
+                { key: 'shots_total', label: 'Всего ударов' },
+                { key: 'shots_on', label: 'Удары в створ' },
+                { key: 'corners', label: 'Угловые' },
+                { key: 'yellows', label: 'Жёлтые карточки' },
+                { key: 'reds', label: 'Удаления' },
+            ];
+            const wrap = document.createElement('div'); wrap.className = 'stats-grid';
+            const theme = (getActiveLeague() === 'BLB') ? { a:'#e91e63', b:'#ffffff22' } : { a:'#ff3366', b:'#ffffff22' };
+            const bar = (l, r) => {
+                const total = (Number(l)||0) + (Number(r)||0);
+                const lp = total>0 ? Math.round((l/total)*100) : 50;
+                const rp = 100 - lp;
+                const row = document.createElement('div'); row.className = 'stat-row';
+                const left = document.createElement('div'); left.className='stat-left'; left.textContent = String(l||0);
+                const mid = document.createElement('div'); mid.className='stat-bar';
+                const leftFill = document.createElement('div'); leftFill.className='stat-fill-left'; leftFill.style.width = lp+'%'; leftFill.style.background = theme.b;
+                const rightFill = document.createElement('div'); rightFill.className='stat-fill-right'; rightFill.style.width = rp+'%'; rightFill.style.background = theme.a;
+                mid.append(leftFill, rightFill);
+                const right = document.createElement('div'); right.className='stat-right'; right.textContent = String(r||0);
+                row.append(left, mid, right);
+                return row;
+            };
+            wrap.innerHTML = '';
+            metrics.forEach(mt => {
+                const rowWrap = document.createElement('div'); rowWrap.className='metric';
+                const title = document.createElement('div'); title.className='metric-title'; title.textContent = mt.label;
+                const vals = d && Array.isArray(d[mt.key]) ? d[mt.key] : [0,0];
+                rowWrap.append(title, bar(vals[0], vals[1]));
+                wrap.appendChild(rowWrap);
+            });
+            host.innerHTML = ''; host.appendChild(wrap);
+        }).catch(()=>{ host.innerHTML = '<div class="stats-wrap">Нет данных</div>'; });
+    }
 
     // Рендер спецсобытий (внутри деталей матча)
     function renderSpecialsPane(host, m) {
@@ -2961,6 +3019,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // ---------- LIVE notifications ----------
     const LiveWatcher = (() => {
         let lastLiveKeys = new Set();
+        let initialized = false; // чтобы не уведомлять о матчах, уже идущих при первом заходе
         const getKey = (m) => `${m.home||''}__${m.away||''}__${m.datetime||m.date||''}`;
         const getPair = (m) => `${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}`;
         const isLive = (m) => {
@@ -2992,12 +3051,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 return (window.__LIVE_STATUS && window.__LIVE_STATUS.pairs) ? window.__LIVE_STATUS.pairs : new Set();
             }
         };
-        const showToast = (text) => {
+        const showToast = (text, onClick) => {
             let cont = document.querySelector('.toast-container');
             if (!cont) { cont = document.createElement('div'); cont.className = 'toast-container'; document.body.appendChild(cont); }
             const el = document.createElement('div'); el.className = 'toast'; el.textContent = text;
+            el.style.cursor = onClick ? 'pointer' : '';
+            if (onClick) el.addEventListener('click', () => { try { onClick(); } catch(_) {} try { el.remove(); } catch(_) {} });
             cont.appendChild(el);
-            setTimeout(()=>{ el.remove(); if (cont.childElementCount===0) cont.remove(); }, 3500);
+            setTimeout(()=>{ try { el.remove(); if (cont.childElementCount===0) cont.remove(); } catch(_) {} }, 5000);
         };
         const scan = async () => {
             // берём из кэша /api/schedule
@@ -3006,12 +3067,44 @@ document.addEventListener('DOMContentLoaded', () => {
                 const tours = cached?.data?.tours || [];
                 const currentLive = new Set();
                 const pairFlags = await fetchLiveFlags();
+                const nowStarted = [];
                 tours.forEach(t => (t.matches||[]).forEach(m => {
-                    if (isLive(m) || pairFlags.has(getPair(m))) currentLive.add(getKey(m));
+                    const live = isLive(m) || pairFlags.has(getPair(m));
+                    const key = getKey(m);
+                    if (live) currentLive.add(key);
+                    // Новый старт во время открытого приложения
+                    if (live && !lastLiveKeys.has(key) && initialized) {
+                        nowStarted.push(m);
+                    }
                 }));
-                // уведомляем о новых LIVE матчах
-                currentLive.forEach(k => { if (!lastLiveKeys.has(k)) showToast('Матч начался!'); });
+                // уведомления только для матчей, стартовавших после инициализации
+                nowStarted.forEach(m => {
+                    const title = `${m.home || 'Команда 1'} — ${m.away || 'Команда 2'}: матч начался`;
+                    const onClick = () => {
+                        // Открыть детали матча
+                        const params = new URLSearchParams({ home: m.home||'', away: m.away||'' });
+                        const cacheKey = `md:${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}`;
+                        try {
+                            const storeRaw = localStorage.getItem(cacheKey);
+                            const store = storeRaw ? JSON.parse(storeRaw) : null;
+                            const go = (st) => { try { window.openMatchScreen?.({ home: m.home, away: m.away, date: m.date, time: m.time }, st?.data || st); } catch(_) {} };
+                            if (store?.etag) {
+                                fetch(`/api/match-details?${params.toString()}`, { headers: { 'If-None-Match': store.etag } })
+                                  .then(r => r.status===304? store : r.json().then(d=>({ etag: r.headers.get('ETag'), data: d })))
+                                  .then(st => go(st))
+                                  .catch(()=> go(null));
+                            } else {
+                                fetch(`/api/match-details?${params.toString()}`)
+                                  .then(r => r.json().then(d=>({ etag: r.headers.get('ETag'), data: d })))
+                                  .then(st => { try { localStorage.setItem(cacheKey, JSON.stringify(st)); } catch(_) {} go(st); })
+                                  .catch(()=> go(null));
+                            }
+                        } catch(_) {}
+                    };
+                    showToast(title, onClick);
+                });
                 lastLiveKeys = currentLive;
+                if (!initialized) initialized = true;
             } catch(_) {}
         };
     setInterval(scan, 30000); // каждые 30 секунд мягкий опрос клиентского кэша
@@ -3024,7 +3117,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     btn.textContent = 'Тест уведомления LIVE';
                     btn.className = 'details-btn';
                     btn.style.position = 'fixed'; btn.style.bottom = '90px'; btn.style.right = '12px'; btn.style.zIndex = '9999';
-                    btn.addEventListener('click', () => showToast('Матч начался!'));
+                    btn.addEventListener('click', () => showToast('Демо уведомление: Команда 1 — Команда 2', null));
                     document.body.appendChild(btn);
                 }
             } catch(_) {}
