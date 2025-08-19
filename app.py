@@ -109,6 +109,9 @@ MATCH_DETAILS_TTL = 30  # сек
 RANKS_CACHE = {'data': None, 'ts': 0}
 RANKS_TTL = 600  # 10 минут
 
+# Версия статики для cache-busting на клиентах (мобилки с жёстким кэшем)
+STATIC_VERSION = os.environ.get('STATIC_VERSION') or str(int(time.time()))
+
 # Командные силы (1..10) для усложнения коэффициентов. Можно переопределить через BET_TEAM_STRENGTHS_JSON.
 # Ключи должны быть нормализованы: нижний регистр, без пробелов и знаков, 'ё' -> 'е'.
 TEAM_STRENGTHS_BASE = {
@@ -155,6 +158,45 @@ def _load_team_strengths() -> dict[str, float]:
         except Exception as e:
             app.logger.warning(f"BET_TEAM_STRENGTHS_JSON parse failed: {e}")
     return strengths
+
+def _pick_match_of_week(tours: list[dict]) -> dict|None:
+    """Выбирает ближайший по времени матч с максимальной суммарной силой команд.
+    Возвращает {home, away, date, datetime} или None.
+    """
+    try:
+        strengths = _load_team_strengths()
+        def s(name: str) -> float:
+            return float(strengths.get(_norm_team_key(name or ''), 0))
+        # Соберём все матчи с датой в будущем
+        now = datetime.now()
+        candidates = []
+        for t in tours or []:
+            for m in t.get('matches', []) or []:
+                try:
+                    dt = None
+                    if m.get('datetime'):
+                        dt = datetime.fromisoformat(str(m['datetime']))
+                    elif m.get('date'):
+                        dt = datetime.fromisoformat(str(m['date']))
+                    if not dt or dt < now:
+                        continue
+                    score = s(m.get('home','')) + s(m.get('away',''))
+                    candidates.append((dt, score, m))
+                except Exception:
+                    continue
+        if not candidates:
+            return None
+        # Сначала ближайшие по дате, затем по убыванию силы
+        candidates.sort(key=lambda x: (x[0], -x[1]))
+        dt, _score, m = candidates[0]
+        return {
+            'home': m.get('home',''),
+            'away': m.get('away',''),
+            'date': m.get('date') or None,
+            'datetime': m.get('datetime') or None,
+        }
+    except Exception:
+        return None
 
 # ---------------------- METRICS ----------------------
 METRICS_LOCK = threading.Lock()
@@ -293,6 +335,30 @@ class StatsTableRow(Base):
     c6 = Column(String(255), default='')
     c7 = Column(String(255), default='')
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+class MatchVote(Base):
+    __tablename__ = 'match_votes'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    home = Column(String(255), nullable=False)
+    away = Column(String(255), nullable=False)
+    date_key = Column(String(32), nullable=False)  # YYYY-MM-DD
+    user_id = Column(Integer, nullable=False)
+    choice = Column(String(8), nullable=False)  # 'home'|'draw'|'away'
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    __table_args__ = (
+        Index('ux_vote_match_user', 'home', 'away', 'date_key', 'user_id', unique=True),
+        Index('ix_vote_match', 'home', 'away', 'date_key'),
+    )
+
+def _match_date_key(m: dict) -> str:
+    try:
+        if m.get('date'):
+            return str(m['date'])[:10]
+        if m.get('datetime'):
+            return str(m['datetime'])[:10]
+    except Exception:
+        pass
+    return ''
 
 
 @app.route('/api/betting/place', methods=['POST'])
@@ -1279,9 +1345,10 @@ def _estimate_goal_rates(home: str, away: str) -> tuple[float, float]:
     except Exception:
         base_total = 4.2
     try:
-        home_adv = float(os.environ.get('BET_HOME_ADV', '0.10'))
+        # Нейтральное поле: дом. преимущество выключено
+        home_adv = float(os.environ.get('BET_HOME_ADV', '0.00'))
     except Exception:
-        home_adv = 0.10
+        home_adv = 0.00
     try:
         share_scale = float(os.environ.get('BET_RANK_SHARE_SCALE', '0.03'))
     except Exception:
@@ -1291,13 +1358,14 @@ def _estimate_goal_rates(home: str, away: str) -> tuple[float, float]:
     except Exception:
         total_scale = 0.015
     try:
-        str_share_scale = float(os.environ.get('BET_STR_SHARE_SCALE', '0.02'))
+        # Усилим вклад сил, чтобы явный фаворит имел заметно меньший кф
+        str_share_scale = float(os.environ.get('BET_STR_SHARE_SCALE', '0.05'))
     except Exception:
-        str_share_scale = 0.02
+        str_share_scale = 0.05
     try:
-        str_total_scale = float(os.environ.get('BET_STR_TOTAL_SCALE', '0.010'))
+        str_total_scale = float(os.environ.get('BET_STR_TOTAL_SCALE', '0.015'))
     except Exception:
-        str_total_scale = 0.010
+        str_total_scale = 0.015
     try:
         min_rate = float(os.environ.get('BET_MIN_RATE', '0.15'))
         max_rate = float(os.environ.get('BET_MAX_RATE', '5.0'))
@@ -1354,7 +1422,8 @@ def _estimate_goal_rates(home: str, away: str) -> tuple[float, float]:
     share_home = 0.5 + home_adv
     share_home += diff_rank * share_scale
     share_home += diff_str * str_share_scale
-    share_home = clamp(share_home, 0.15, 0.85)
+    # Без перекосов до нелепости, но шире коридор
+    share_home = clamp(share_home, 0.10, 0.90)
     lam = clamp(mu_total * share_home, min_rate, max_rate)
     mu = clamp(mu_total * (1.0 - share_home), min_rate, max_rate)
     return lam, mu
@@ -1393,6 +1462,13 @@ def _compute_match_odds(home: str, away: str) -> dict:
 
     lam, mu = _estimate_goal_rates(home, away)
     probs, _mat = _dc_outcome_probs(lam, mu, rho=rho, max_goals=max_goals)
+    # Нормализуем вероятности и ограничим минимум/максимум для реалистичности на нейтральном поле
+    pH = min(0.92, max(0.05, probs['H']))
+    pD = min(0.60, max(0.05, probs['D']))
+    pA = min(0.92, max(0.05, probs['A']))
+    s = pH + pD + pA
+    if s > 0:
+        pH, pD, pA = pH/s, pD/s, pA/s
     overround = 1.0 + BET_MARGIN
     def to_odds(p):
         try:
@@ -1400,9 +1476,9 @@ def _compute_match_odds(home: str, away: str) -> dict:
         except Exception:
             return 1.10
     return {
-        'home': to_odds(probs['H']),
-        'draw': to_odds(probs['D']),
-        'away': to_odds(probs['A'])
+        'home': to_odds(pH),
+        'draw': to_odds(pD),
+        'away': to_odds(pA)
     }
 
 def _compute_totals_odds(home: str, away: str, line: float) -> dict:
@@ -2904,7 +2980,7 @@ def parse_and_verify_telegram_init_data(init_data: str, max_age_seconds: int = 2
 @app.route('/')
 def index():
     """Главная страница приложения"""
-    return render_template('index.html', admin_user_id=os.environ.get('ADMIN_USER_ID', ''))
+    return render_template('index.html', admin_user_id=os.environ.get('ADMIN_USER_ID', ''), static_version=STATIC_VERSION)
 
 @app.route('/api/user', methods=['POST'])
 def get_user():
@@ -3746,6 +3822,14 @@ def api_schedule():
                         resp.headers['ETag'] = _etag
                         resp.headers['Cache-Control'] = 'public, max-age=900, stale-while-revalidate=600'
                         return resp
+                    # Вычислим «матч недели» по разнице сил и ближайшей дате
+                    try:
+                        best = _pick_match_of_week(payload.get('tours') or [])
+                        if best:
+                            payload = dict(payload)
+                            payload['match_of_week'] = best
+                    except Exception:
+                        pass
                     resp = jsonify({**payload, 'version': _etag})
                     resp.headers['ETag'] = _etag
                     resp.headers['Cache-Control'] = 'public, max-age=900, stale-while-revalidate=600'
@@ -3754,6 +3838,13 @@ def api_schedule():
                 db.close()
         # Bootstrap
         payload = _build_schedule_payload_from_sheet()
+        try:
+            best = _pick_match_of_week(payload.get('tours') or [])
+            if best:
+                payload = dict(payload)
+                payload['match_of_week'] = best
+        except Exception:
+            pass
         _core = {'tours': payload.get('tours')}
         _etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
         if SessionLocal is not None:
@@ -3769,6 +3860,75 @@ def api_schedule():
     except Exception as e:
         app.logger.error(f"Ошибка загрузки расписания: {str(e)}")
         return jsonify({'error': 'Не удалось загрузить расписание'}), 500
+
+@app.route('/api/vote/match', methods=['POST'])
+def api_vote_match():
+    """Сохранить голос пользователя за исход матча (home/draw/away). Требует initData Telegram.
+    Поля: initData, home, away, date (YYYY-MM-DD), choice in ['home','draw','away']
+    """
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        uid = int(parsed['user'].get('id'))
+        home = (request.form.get('home') or '').strip()
+        away = (request.form.get('away') or '').strip()
+        date_key = (request.form.get('date') or '').strip()[:10]
+        choice = (request.form.get('choice') or '').strip().lower()
+        if choice not in ('home','draw','away'):
+            return jsonify({'error': 'Неверный выбор'}), 400
+        if not home or not away or not date_key:
+            return jsonify({'error': 'Не указан матч'}), 400
+        if SessionLocal is None:
+            return jsonify({'error': 'БД недоступна'}), 500
+        db = get_db()
+        try:
+            # upsert по уникальному индексу
+            existing = db.query(MatchVote).filter(
+                MatchVote.home==home, MatchVote.away==away, MatchVote.date_key==date_key, MatchVote.user_id==uid
+            ).first()
+            if existing:
+                existing.choice = choice
+                existing.created_at = datetime.now(timezone.utc)
+            else:
+                db.add(MatchVote(home=home, away=away, date_key=date_key, user_id=uid, choice=choice))
+            db.commit()
+            return jsonify({'status': 'ok'})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"vote save error: {e}")
+        return jsonify({'error': 'Не удалось сохранить голос'}), 500
+
+@app.route('/api/vote/match-aggregates', methods=['GET'])
+def api_vote_match_aggregates():
+    """Вернёт агрегаты голосов по матчу: counts {home,draw,away}.
+    Параметры: home, away, date (YYYY-MM-DD)
+    """
+    try:
+        home = (request.args.get('home') or '').strip()
+        away = (request.args.get('away') or '').strip()
+        date_key = (request.args.get('date') or '').strip()[:10]
+        if not home or not away or not date_key:
+            return jsonify({'error': 'Не указан матч'}), 400
+        if SessionLocal is None:
+            # Без БД отдадим пустые нули
+            return jsonify({'home':0,'draw':0,'away':0})
+        db = get_db()
+        try:
+            rows = db.query(MatchVote.choice, func.count(MatchVote.id)).filter(
+                MatchVote.home==home, MatchVote.away==away, MatchVote.date_key==date_key
+            ).group_by(MatchVote.choice).all()
+            agg = {'home':0,'draw':0,'away':0}
+            for c, cnt in rows:
+                k = str(c).lower()
+                if k in agg: agg[k] = int(cnt)
+            return jsonify(agg)
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"vote agg error: {e}")
+        return jsonify({'error': 'Не удалось получить голоса'}), 500
 
 def _load_all_tours_from_sheet():
     """Читает лист расписания и возвращает список всех туров с матчами.

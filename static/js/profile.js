@@ -638,7 +638,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (tab === 'ufo') {
                 item.addEventListener('dblclick', (e) => {
                     e.preventDefault(); e.stopPropagation();
-                    try { toggleLeagueShelf(); } catch(_) {}
+                    try { openLeagueDrawer(); } catch(_) {}
                 });
                 // Явная обработка touchend для надёжного двойного тапа
                 let _ufoLastTouch = 0;
@@ -646,7 +646,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const now = Date.now();
                     if (now - _ufoLastTouch < 350) {
                         e.preventDefault(); e.stopPropagation();
-                        try { toggleLeagueShelf(); } catch(_) {}
+                        try { openLeagueDrawer(); } catch(_) {}
                         _ufoLastTouch = 0;
                     } else {
                         _ufoLastTouch = now;
@@ -993,41 +993,26 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (s.href) { window.open(s.href, '_blank'); return; }
                     const act = (s.action || '').toUpperCase();
                     if (act === 'BLB') {
-                        // слушаем окончание анимации и только после этого показываем подсказку
-                        let hinted = false;
-                        const onEnd = () => { if (hinted) return; hinted = true; try { showLeagueHint(); } catch(_) {} };
-                        window.addEventListener('league:transition-end', onEnd, { once: true });
-                        setTimeout(onEnd, 3300); // фолбэк
                         selectBLBLeague(true);
-                        // перейти на вкладку НЛО
-                        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-                        const navUfo = document.querySelector('.nav-item[data-tab="ufo"]');
-                        if (navUfo) navUfo.classList.add('active');
-                        const home = document.getElementById('tab-home');
-                        const ufo = document.getElementById('tab-ufo');
-                        const preds = document.getElementById('tab-predictions');
-                        const lead = document.getElementById('tab-leaderboard');
-                        const shop = document.getElementById('tab-shop');
-                        const admin = document.getElementById('tab-admin');
-                        [home, ufo, preds, lead, shop, admin].forEach(el => { if (el) el.style.display = 'none'; });
-                        if (ufo) ufo.style.display = '';
                     } else if (act === 'UFO') {
+                        // Плавный переход и подсказка после завершения
                         let hinted = false;
                         const onEnd = () => { if (hinted) return; hinted = true; try { showLeagueHint(); } catch(_) {} };
                         window.addEventListener('league:transition-end', onEnd, { once: true });
                         setTimeout(onEnd, 3300);
                         selectUFOLeague(false, true);
+                        // Переключим вкладку на НЛО
                         document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
                         const navUfo = document.querySelector('.nav-item[data-tab="ufo"]');
                         if (navUfo) navUfo.classList.add('active');
-                        const home = document.getElementById('tab-home');
-                        const ufo = document.getElementById('tab-ufo');
-                        const preds = document.getElementById('tab-predictions');
-                        const lead = document.getElementById('tab-leaderboard');
-                        const shop = document.getElementById('tab-shop');
-                        const admin = document.getElementById('tab-admin');
-                        [home, ufo, preds, lead, shop, admin].forEach(el => { if (el) el.style.display = 'none'; });
-                        if (ufo) ufo.style.display = '';
+                        const elHome = document.getElementById('tab-home');
+                        const elUfo = document.getElementById('tab-ufo');
+                        const elPreds = document.getElementById('tab-predictions');
+                        const elLead = document.getElementById('tab-leaderboard');
+                        const elShop = document.getElementById('tab-shop');
+                        const elAdmin = document.getElementById('tab-admin');
+                        [elHome, elUfo, elPreds, elLead, elShop, elAdmin].forEach(el => { if (el) el.style.display = 'none'; });
+                        if (elUfo) elUfo.style.display = '';
                     }
                 } catch(_) {}
             });
@@ -1797,6 +1782,52 @@ document.addEventListener('DOMContentLoaded', () => {
                     center.append(home, score, away);
                     card.appendChild(center);
 
+                    // Блок голосования под логотипами
+                    const voteWrap = document.createElement('div');
+                    voteWrap.className = 'match-vote';
+                    const mkBar = (label) => {
+                        const row = document.createElement('div'); row.className = 'vote-row';
+                        const lbl = document.createElement('span'); lbl.className = 'vote-label'; lbl.textContent = label;
+                        const bar = document.createElement('div'); bar.className = 'vote-bar';
+                        const fill = document.createElement('div'); fill.className = 'vote-fill'; bar.appendChild(fill);
+                        const pct = document.createElement('span'); pct.className = 'vote-pct'; pct.textContent = '—%';
+                        row.append(lbl, bar, pct); return { row, fill, pct };
+                    };
+                    const homeBar = mkBar('П1');
+                    const drawBar = mkBar('X');
+                    const awayBar = mkBar('П2');
+                    voteWrap.append(homeBar.row, drawBar.row, awayBar.row);
+                    card.appendChild(voteWrap);
+
+                    const updateAgg = (agg) => {
+                        const h = Number(agg?.home||0), d = Number(agg?.draw||0), a = Number(agg?.away||0);
+                        const sum = Math.max(1, h+d+a);
+                        const ph = Math.round(h*100/sum), pd = Math.round(d*100/sum), pa = Math.round(a*100/sum);
+                        homeBar.fill.style.width = ph+'%'; homeBar.pct.textContent = ph+'%';
+                        drawBar.fill.style.width = pd+'%'; drawBar.pct.textContent = pd+'%';
+                        awayBar.fill.style.width = pa+'%'; awayBar.pct.textContent = pa+'%';
+                    };
+                    try {
+                        const params = new URLSearchParams({ home: m.home||'', away: m.away||'', date: (m.date||'').slice(0,10) });
+                        fetch(`/api/vote/match-aggregates?${params.toString()}`).then(r=>r.json()).then(updateAgg).catch(()=>{});
+                    } catch(_) {}
+
+                    // Кнопки голосования
+                    const voteBtns = document.createElement('div'); voteBtns.className = 'vote-btns';
+                    const mkBtn = (code, text) => { const b = document.createElement('button'); b.className = 'details-btn'; b.textContent = text; b.addEventListener('click', async ()=>{
+                        try {
+                            const tg = window.Telegram?.WebApp || null; const fd = new FormData();
+                            fd.append('initData', tg?.initData || ''); fd.append('home', m.home||''); fd.append('away', m.away||''); fd.append('date', (m.date||'').slice(0,10)); fd.append('choice', code);
+                            const r = await fetch('/api/vote/match', { method:'POST', body: fd }); const d = await r.json().catch(()=>({})); if (!r.ok) { throw new Error(d?.error||'Ошибка'); }
+                            // перезагрузим агрегаты
+                            const params = new URLSearchParams({ home: m.home||'', away: m.away||'', date: (m.date||'').slice(0,10) });
+                            const agg = await fetch(`/api/vote/match-aggregates?${params.toString()}`).then(x=>x.json()).catch(()=>null);
+                            if (agg) updateAgg(agg);
+                        } catch(err) { try { window.Telegram?.WebApp?.showAlert?.('Не удалось сохранить голос'); } catch(_) {} }
+                    }); return b; };
+                    voteBtns.append(mkBtn('home','За П1'), mkBtn('draw','За X'), mkBtn('away','За П2'));
+                    card.appendChild(voteBtns);
+
                     const footer = document.createElement('div');
                     footer.className = 'match-footer';
                     // Кнопка «Детали» (как было)
@@ -2352,24 +2383,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 0);
         return shelf;
     }
-    function openLeagueShelf() {
-        const shelf = ensureLeagueShelf();
-        requestAnimationFrame(() => { shelf.classList.add('show'); });
-    }
-    function closeLeagueShelf() {
-        const shelf = document.getElementById('league-shelf');
-        if (!shelf) return;
-        shelf.classList.remove('show');
-        // Удаляем через анимацию
-        setTimeout(() => {
-            try { if (shelf.__onDoc) document.removeEventListener('click', shelf.__onDoc, { capture: true }); } catch(_) {}
-            try { shelf.remove(); } catch(_) {}
-        }, 320);
-    }
-    function toggleLeagueShelf() {
-        const shelf = document.getElementById('league-shelf');
-        if (shelf) closeLeagueShelf(); else openLeagueShelf();
-    }
+    // Старое всплывающее меню лиг больше не используется
 
     // Боковой drawer лиг
     function openLeagueDrawer() {
@@ -2386,8 +2400,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const key = btn.getAttribute('data-league');
             // анимация перехода
             if (key === 'UFO') selectUFOLeague(false, true); else if (key === 'BLB') selectBLBLeague(true);
-            // закрываем drawer на 2-й секунде плавно и возвращаем меню
-            setTimeout(() => { closeLeagueDrawer(); }, 2000);
+            // сразу закрываем drawer, чтобы не мешал анимации перехода
+            closeLeagueDrawer();
         };
         drawer.addEventListener('click', onClick, { once: true });
         // клик вне — закрытие
