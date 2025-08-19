@@ -98,11 +98,12 @@
     const base = '/static/img/team-logos/';
     const name = (teamName || '').trim();
     const candidates = [];
+    try { imgEl.loading = 'lazy'; imgEl.decoding = 'async'; } catch(_) {}
     if (name) {
       const norm = name.toLowerCase().replace(/\s+/g, '').replace(/ё/g, 'е');
-      candidates.push(base + encodeURIComponent(norm + '.png') + `?v=${Date.now()}`);
+      candidates.push(base + encodeURIComponent(norm + '.png'));
     }
-    candidates.push(base + 'default.png' + `?v=${Date.now()}`);
+    candidates.push(base + 'default.png');
     let idx = 0;
     const tryNext = () => { if (idx >= candidates.length) return; imgEl.onerror = () => { idx++; tryNext(); }; imgEl.src = candidates[idx]; };
     tryNext();
@@ -140,12 +141,12 @@
 
       const center = document.createElement('div'); center.className='match-center';
       const home = document.createElement('div'); home.className='team home';
-      const hImg = document.createElement('img'); hImg.className='logo'; hImg.alt = m.home || ''; loadTeamLogo(hImg, m.home || '');
+  const hImg = document.createElement('img'); hImg.className='logo'; hImg.alt = m.home || ''; try { hImg.loading='lazy'; hImg.decoding='async'; } catch(_) {} loadTeamLogo(hImg, m.home || '');
       const hName = document.createElement('div'); hName.className='team-name'; hName.setAttribute('data-team-name', m.home || ''); hName.textContent = withTeamCount(m.home || '');
       home.append(hImg, hName);
       const score = document.createElement('div'); score.className = 'score'; score.textContent = 'VS';
       const away = document.createElement('div'); away.className='team away';
-      const aImg = document.createElement('img'); aImg.className='logo'; aImg.alt = m.away || ''; loadTeamLogo(aImg, m.away || '');
+  const aImg = document.createElement('img'); aImg.className='logo'; aImg.alt = m.away || ''; try { aImg.loading='lazy'; aImg.decoding='async'; } catch(_) {} loadTeamLogo(aImg, m.away || '');
       const aName = document.createElement('div'); aName.className='team-name'; aName.setAttribute('data-team-name', m.away || ''); aName.textContent = withTeamCount(m.away || '');
       away.append(aImg, aName);
       center.append(home, score, away);
@@ -159,14 +160,16 @@
         try { const tours=toursCache?.data?.tours || toursCache?.tours || []; tours.forEach(t => (t.matches||[]).forEach(x => tourMatches.add(mkKey(x)))); } catch(_) {}
         if (tourMatches.has(mkKey(m))) {
           const wrap = document.createElement('div'); wrap.className = 'vote-inline';
-          const title = document.createElement('div'); title.className = 'vote-title'; title.textContent = 'Голосование';
+      const title = document.createElement('div'); title.className = 'vote-title'; title.textContent = 'Голосование';
           const bar = document.createElement('div'); bar.className = 'vote-strip';
           const segH = document.createElement('div'); segH.className = 'seg seg-h';
           const segD = document.createElement('div'); segD.className = 'seg seg-d';
           const segA = document.createElement('div'); segA.className = 'seg seg-a';
           bar.append(segH, segD, segA);
           const legend = document.createElement('div'); legend.className = 'vote-legend'; legend.innerHTML = '<span>П1</span><span>X</span><span>П2</span>';
-          const btns = document.createElement('div'); btns.className = 'vote-inline-btns';
+      const btns = document.createElement('div'); btns.className = 'vote-inline-btns';
+      const confirm = document.createElement('div'); confirm.className = 'vote-confirm'; confirm.style.fontSize='12px'; confirm.style.color='var(--success)';
+      const voteKey = (() => { try { const raw=m.date?String(m.date):(m.datetime?String(m.datetime):''); const d=raw?raw.slice(0,10):''; return `${(m.home||'').toLowerCase().trim()}__${(m.away||'').toLowerCase().trim()}__${d}`; } catch(_) { return `${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}__`; } })();
           const mkBtn = (code, text) => {
             const b = document.createElement('button'); b.className = 'details-btn'; b.textContent = text;
             b.addEventListener('click', async () => {
@@ -181,13 +184,17 @@
                 const r = await fetch('/api/vote/match', { method: 'POST', body: fd });
                 if (!r.ok) throw 0;
                 btns.querySelectorAll('button').forEach(x => x.disabled = true);
+        confirm.textContent = 'Ваш голос учтён';
+        try { localStorage.setItem('voted:'+voteKey, '1'); } catch(_) {}
+        // Сразу скрываем кнопки
+        btns.style.display = 'none';
                 await loadAgg(true);
               } catch (_) {}
             });
             return b;
           };
           btns.append(mkBtn('home','За П1'), mkBtn('draw','За X'), mkBtn('away','За П2'));
-          wrap.append(title, bar, legend, btns);
+      wrap.append(title, bar, legend, btns, confirm);
           card.appendChild(wrap);
 
           async function loadAgg(withInit){
@@ -200,9 +207,16 @@
               const sum = Math.max(1, h+d+a);
               const ph = Math.round(h*100/sum), pd = Math.round(d*100/sum), pa = Math.round(a*100/sum);
               segH.style.width = ph+'%'; segD.style.width = pd+'%'; segA.style.width = pa+'%';
-              if (agg && agg.my_choice) { btns.querySelectorAll('button').forEach(x=>x.disabled=true); }
+              if (agg && agg.my_choice) {
+                btns.querySelectorAll('button').forEach(x=>x.disabled=true);
+                btns.style.display = 'none';
+                confirm.textContent = 'Ваш голос учтён';
+                try { localStorage.setItem('voted:'+voteKey, '1'); } catch(_) {}
+              }
             } catch(_){ segH.style.width='33%'; segD.style.width='34%'; segA.style.width='33%'; }
           }
+          // Если локально зафиксировано, спрячем кнопки сразу
+          try { if (localStorage.getItem('voted:'+voteKey) === '1') { btns.style.display='none'; confirm.textContent='Ваш голос учтён'; } } catch(_) {}
           loadAgg(true);
         }
       } catch(_) {}
@@ -350,14 +364,14 @@
         header.textContent = `${dateStr}${m.time ? ' ' + m.time : ''}`; card.appendChild(header);
         const center = document.createElement('div'); center.className='match-center';
         const home = document.createElement('div'); home.className='team home';
-        const hImg = document.createElement('img'); hImg.className='logo'; hImg.alt = m.home || ''; loadTeamLogo(hImg, m.home || '');
+  const hImg = document.createElement('img'); hImg.className='logo'; hImg.alt = m.home || ''; try { hImg.loading='lazy'; hImg.decoding='async'; } catch(_) {} loadTeamLogo(hImg, m.home || '');
         const hName = document.createElement('div'); hName.className='team-name'; hName.setAttribute('data-team-name', m.home || ''); hName.textContent = withTeamCount(m.home || '');
         home.append(hImg, hName);
         const score = document.createElement('div'); score.className='score';
         const sH = (m.score_home || '').toString().trim(); const sA = (m.score_away || '').toString().trim();
         score.textContent = (sH && sA) ? `${sH} : ${sA}` : '— : —';
         const away = document.createElement('div'); away.className='team away';
-        const aImg = document.createElement('img'); aImg.className='logo'; aImg.alt = m.away || ''; loadTeamLogo(aImg, m.away || '');
+  const aImg = document.createElement('img'); aImg.className='logo'; aImg.alt = m.away || ''; try { aImg.loading='lazy'; aImg.decoding='async'; } catch(_) {} loadTeamLogo(aImg, m.away || '');
         const aName = document.createElement('div'); aName.className='team-name'; aName.setAttribute('data-team-name', m.away || ''); aName.textContent = withTeamCount(m.away || '');
         away.append(aImg, aName);
         center.append(home, score, away); card.appendChild(center);

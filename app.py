@@ -1492,7 +1492,7 @@ def _compute_match_odds(home: str, away: str, date_key: str|None = None) -> dict
     except Exception:
         fav_target_odds = 1.40
     try:
-        vote_infl_max = float(os.environ.get('BET_VOTE_INFLUENCE_MAX', '0.06'))
+        vote_infl_max = float(os.environ.get('BET_VOTE_INFLUENCE_MAX', '0.09'))
     except Exception:
         vote_infl_max = 0.06
     try:

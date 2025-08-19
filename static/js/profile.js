@@ -925,8 +925,8 @@ document.addEventListener('DOMContentLoaded', () => {
             // Карточка
             const card = document.createElement('div'); card.className = 'match-card home-feature';
             const head = document.createElement('div'); head.className = 'match-header';
-            const when = (m.datetime||'').replace('T',' ');
-            head.textContent = when || (m.date||'');
+            // По требованию: вместо даты показываем надпись "Игра недели"
+            head.textContent = 'Игра недели';
             card.appendChild(head);
             const center = document.createElement('div'); center.className = 'match-center';
             // Локальный загрузчик логотипов (не зависит от других модулей)
@@ -934,11 +934,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 const base = '/static/img/team-logos/';
                 const name = (teamName || '').trim();
                 const candidates = [];
+                try { imgEl.loading = 'lazy'; imgEl.decoding = 'async'; } catch(_) {}
                 if (name) {
                     const norm = name.toLowerCase().replace(/\s+/g, '').replace(/ё/g, 'е');
-                    candidates.push(base + encodeURIComponent(norm + '.png') + `?v=${Date.now()}`);
+                    candidates.push(base + encodeURIComponent(norm + '.png'));
                 }
-                candidates.push(base + 'default.png' + `?v=${Date.now()}`);
+                candidates.push(base + 'default.png');
                 let idx = 0;
                 const tryNext = () => { if (idx >= candidates.length) return; imgEl.onerror = () => { idx++; tryNext(); }; imgEl.src = candidates[idx]; };
                 tryNext();
@@ -956,6 +957,8 @@ document.addEventListener('DOMContentLoaded', () => {
             bar.append(segH, segD, segA);
             const legend = document.createElement('div'); legend.className = 'vote-legend';
             const btns = document.createElement('div'); btns.className = 'vote-inline-btns';
+            const confirm = document.createElement('div'); confirm.className = 'vote-confirm'; confirm.style.fontSize='12px'; confirm.style.color='var(--success)';
+            const voteKey = (() => { try { const raw=m.date?String(m.date):(m.datetime?String(m.datetime):''); const d=raw?raw.slice(0,10):''; return `${(m.home||'').toLowerCase().trim()}__${(m.away||'').toLowerCase().trim()}__${d}`; } catch(_) { return `${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}__`; } })();
             const mkBtn = (code, text) => {
                 const b = document.createElement('button');
                 b.className = 'details-btn';
@@ -972,6 +975,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         const r = await fetch('/api/vote/match', { method: 'POST', body: fd });
                         if (!r.ok) throw 0;
                         btns.querySelectorAll('button').forEach(x => x.disabled = true);
+                        confirm.textContent = 'Ваш голос учтён';
+                        try { localStorage.setItem('voted:'+voteKey, '1'); } catch(_) {}
+                        btns.style.display = 'none';
                         await loadAgg(true);
                     } catch (_) {}
                 });
@@ -979,7 +985,7 @@ document.addEventListener('DOMContentLoaded', () => {
             };
             btns.append(mkBtn('home','За П1'), mkBtn('draw','За X'), mkBtn('away','За П2'));
             legend.innerHTML = '<span>П1</span><span>X</span><span>П2</span>';
-            wrap.append(title, bar, legend, btns);
+            wrap.append(title, bar, legend, btns, confirm);
             // Показываем блок только если матч в ставочных турах
             const toursCache = (() => { try { return JSON.parse(localStorage.getItem('betting:tours') || 'null'); } catch(_) { return null; } })();
             const mkKey = (obj) => { try { const h=(obj?.home||'').toLowerCase().trim(); const a=(obj?.away||'').toLowerCase().trim(); const raw=obj?.date?String(obj.date):(obj?.datetime?String(obj.datetime):''); const d=raw?raw.slice(0,10):''; return `${h}__${a}__${d}`; } catch(_) { return `${(obj?.home||'').toLowerCase()}__${(obj?.away||'').toLowerCase()}__`; } };
@@ -1004,9 +1010,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     const sum = Math.max(1, h+d+a);
                     const ph = Math.round(h*100/sum), pd = Math.round(d*100/sum), pa = Math.round(a*100/sum);
                     segH.style.width = ph+'%'; segD.style.width = pd+'%'; segA.style.width = pa+'%';
-            if (agg && agg.my_choice) { btns.querySelectorAll('button').forEach(x=>x.disabled=true); }
+            if (agg && agg.my_choice) { btns.querySelectorAll('button').forEach(x=>x.disabled=true); btns.style.display='none'; confirm.textContent='Ваш голос учтён'; try { localStorage.setItem('voted:'+voteKey,'1'); } catch(_) {} }
                 } catch(_){ segH.style.width='33%'; segD.style.width='34%'; segA.style.width='33%'; }
             }
+        try { if (localStorage.getItem('voted:'+voteKey) === '1') { btns.style.display='none'; confirm.textContent='Ваш голос учтён'; } } catch(_) {}
         loadAgg(true);
         } catch(_) {}
     }

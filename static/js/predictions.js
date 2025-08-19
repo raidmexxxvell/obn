@@ -217,6 +217,7 @@
       const base = '/static/img/team-logos/';
       const name = (teamName || '').trim();
       const candidates = [];
+      try { imgEl.loading = 'lazy'; imgEl.decoding = 'async'; } catch(_) {}
       if (name) {
         const norm = name.toLowerCase().replace(/\s+/g,'').replace(/ё/g,'е');
         candidates.push(base + encodeURIComponent(norm + '.png'));
