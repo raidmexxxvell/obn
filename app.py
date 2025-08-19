@@ -462,7 +462,17 @@ def api_betting_place():
     if not found:
         return jsonify({'error': 'Матч не найден'}), 404
     if match_dt:
-        now_local = datetime.now()
+        try:
+            tzmin = int(os.environ.get('SCHEDULE_TZ_SHIFT_MIN') or '0')
+        except Exception:
+            tzmin = 0
+        if tzmin == 0:
+            try:
+                tzh = int(os.environ.get('SCHEDULE_TZ_SHIFT_HOURS') or '0')
+            except Exception:
+                tzh = 0
+            tzmin = tzh * 60
+        now_local = datetime.now() + timedelta(minutes=tzmin)
         if match_dt <= now_local:
             return jsonify({'error': 'Ставки на начавшийся матч недоступны'}), 400
         # Закрываем прием ставок за BET_LOCK_AHEAD_MINUTES до старта
@@ -2290,7 +2300,18 @@ def _build_schedule_payload_from_sheet():
     flush_curr()
 
     # ближайшие 3 тура (как в api), исключая матчи, завершённые более 3 часов назад
-    now_local = datetime.now()
+    # now с учётом смещения расписания
+    try:
+        _tz_min = int(os.environ.get('SCHEDULE_TZ_SHIFT_MIN') or '0')
+    except Exception:
+        _tz_min = 0
+    if _tz_min == 0:
+        try:
+            _tz_h = int(os.environ.get('SCHEDULE_TZ_SHIFT_HOURS') or '0')
+        except Exception:
+            _tz_h = 0
+        _tz_min = _tz_h * 60
+    now_local = datetime.now() + timedelta(minutes=_tz_min)
     today = now_local.date()
     def tour_is_upcoming(t):
         for m in t.get('matches', []):
@@ -2819,7 +2840,17 @@ def api_match_status_get():
     home = (request.args.get('home') or '').strip()
     away = (request.args.get('away') or '').strip()
     dt = _get_match_datetime(home, away)
-    now = datetime.now()
+    try:
+        tz_m = int(os.environ.get('SCHEDULE_TZ_SHIFT_MIN') or '0')
+    except Exception:
+        tz_m = 0
+    if tz_m == 0:
+        try:
+            tz_hh = int(os.environ.get('SCHEDULE_TZ_SHIFT_HOURS') or '0')
+        except Exception:
+            tz_hh = 0
+        tz_m = tz_hh * 60
+    now = datetime.now() + timedelta(minutes=tz_m)
     if not dt:
         return jsonify({'status':'scheduled', 'soon': False, 'live_started_at': ''})
     if (dt - timedelta(minutes=10)) <= now < dt:
@@ -5470,7 +5501,18 @@ def api_streams_get():
                             raise StopIteration
         except StopIteration:
             pass
-        now = int(time.time()*1000)
+        # Сдвигаем текущее время по настройке SCHEDULE_TZ_SHIFT_*
+        try:
+            tz_min = int(os.environ.get('SCHEDULE_TZ_SHIFT_MIN') or '0')
+        except Exception:
+            tz_min = 0
+        if tz_min == 0:
+            try:
+                tz_h = int(os.environ.get('SCHEDULE_TZ_SHIFT_HOURS') or '0')
+            except Exception:
+                tz_h = 0
+            tz_min = tz_h * 60
+        now = int((time.time() + tz_min*60) * 1000)
         if not start_ts or (start_ts - now) > win*60*1000:
             return jsonify({'available': False})
         # найдём подтверждение
