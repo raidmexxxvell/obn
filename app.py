@@ -470,7 +470,14 @@ def api_betting_place():
             return jsonify({'error': 'Недостаточно кредитов'}), 400
         # коэффициенты на момент ставки
         if market == '1x2':
-            odds_map = _compute_match_odds(home, away)
+            # вычислим date_key из известной даты матча (если есть)
+            dk = None
+            try:
+                if match_dt:
+                    dk = (match_dt.date().isoformat())
+            except Exception:
+                dk = None
+            odds_map = _compute_match_odds(home, away, dk)
             k = odds_map.get(sel) or 2.00
             selection_to_store = sel
             market_to_store = '1x2'
@@ -1449,7 +1456,7 @@ def _dc_outcome_probs(lam: float, mu: float, rho: float, max_goals: int = 8) -> 
                 mat[i][j] = mat[i][j] / s
     return P, mat
 
-def _compute_match_odds(home: str, away: str) -> dict:
+def _compute_match_odds(home: str, away: str, date_key: str|None = None) -> dict:
     """Коэффициенты 1X2 по Dixon–Coles (Поассоны с коррекцией)."""
     try:
         rho = float(os.environ.get('BET_DC_RHO', '-0.05'))
@@ -1459,6 +1466,19 @@ def _compute_match_odds(home: str, away: str) -> dict:
         max_goals = int(os.environ.get('BET_MAX_GOALS', '8'))
     except Exception:
         max_goals = 8
+    # Параметры «заострения» и влияния голосований
+    try:
+        softmax_gamma = float(os.environ.get('BET_SOFTMAX_GAMMA', '1.30'))
+    except Exception:
+        softmax_gamma = 1.30
+    try:
+        fav_target_odds = float(os.environ.get('BET_FAV_TARGET_ODDS', '1.40'))
+    except Exception:
+        fav_target_odds = 1.40
+    try:
+        vote_infl_max = float(os.environ.get('BET_VOTE_INFLUENCE_MAX', '0.06'))
+    except Exception:
+        vote_infl_max = 0.06
 
     lam, mu = _estimate_goal_rates(home, away)
     probs, _mat = _dc_outcome_probs(lam, mu, rho=rho, max_goals=max_goals)
@@ -1469,7 +1489,61 @@ def _compute_match_odds(home: str, away: str) -> dict:
     s = pH + pD + pA
     if s > 0:
         pH, pD, pA = pH/s, pD/s, pA/s
+
+    # Влияние голосований (если есть дата и БД)
+    if SessionLocal is not None and date_key:
+        try:
+            db = get_db()
+            try:
+                rows = db.query(MatchVote.choice, func.count(MatchVote.id)).filter(
+                    MatchVote.home==home, MatchVote.away==away, MatchVote.date_key==date_key
+                ).group_by(MatchVote.choice).all()
+            finally:
+                db.close()
+            agg = {'home':0,'draw':0,'away':0}
+            for c, cnt in rows:
+                k = str(c).lower()
+                if k in agg: agg[k] = int(cnt)
+            total = max(1, agg['home']+agg['draw']+agg['away'])
+            vh, vd, va = agg['home']/total, agg['draw']/total, agg['away']/total
+            dh, dd, da = (vh-1/3), (vd-1/3), (va-1/3)
+            k = max(0.0, min(1.0, vote_infl_max))
+            pH *= (1.0 + k*dh)
+            pD *= (1.0 + k*dd)
+            pA *= (1.0 + k*da)
+            s2 = pH + pD + pA
+            if s2 > 0:
+                pH, pD, pA = pH/s2, pD/s2, pA/s2
+        except Exception:
+            pass
+
+    # «Заострим» распределение, чтобы фаворит получал короче кэф
+    try:
+        if softmax_gamma and softmax_gamma > 1.0:
+            _ph, _pd, _pa = max(1e-9,pH)**softmax_gamma, max(1e-9,pD)**softmax_gamma, max(1e-9,pA)**softmax_gamma
+            z = _ph + _pd + _pa
+            if z>0:
+                pH, pD, pA = _ph/z, _pd/z, _pa/z
+    except Exception:
+        pass
+
+    # Подтяжка к целевому кэфу фаворита (например, 1.40)
     overround = 1.0 + BET_MARGIN
+    try:
+        arr = [pH,pD,pA]
+        fav_idx = max(range(3), key=lambda i: arr[i])
+        pmax = arr[fav_idx]
+        cur_odds = 1.0 / max(1e-9, pmax*overround)
+        target = max(1.10, fav_target_odds)
+        if cur_odds > target:
+            need_p = min(0.92, max(0.05, 1.0/(target*overround)))
+            need_p = max(pmax, need_p)
+            others_sum = (pH+pD+pA) - pmax
+            if others_sum > 1e-9 and need_p < 0.98:
+                scale = (1.0 - need_p)/others_sum
+                pH, pD, pA = [ (need_p if i==fav_idx else max(0.01, v*scale)) for i,v in enumerate([pH,pD,pA]) ]
+    except Exception:
+        pass
     def to_odds(p):
         try:
             return round(max(1.10, 1.0 / (p * overround)), 2)
@@ -2443,7 +2517,16 @@ def _build_betting_tours_payload():
                     finally:
                         db.close()
                 m['lock'] = bool(lock)
-                m['odds'] = _compute_match_odds(m.get('home',''), m.get('away',''))
+                # date_key для влияния голосования
+                dk = None
+                try:
+                    if m.get('datetime'):
+                        dk = datetime.fromisoformat(m['datetime']).date().isoformat()
+                    elif m.get('date'):
+                        dk = datetime.fromisoformat(m['date']).date().isoformat()
+                except Exception:
+                    dk = None
+                m['odds'] = _compute_match_odds(m.get('home',''), m.get('away',''), dk)
                 totals = []
                 for ln in (3.5, 4.5, 5.5):
                     totals.append({'line': ln, 'odds': _compute_totals_odds(m.get('home',''), m.get('away',''), ln)})

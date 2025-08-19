@@ -684,6 +684,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Инициализация рекламной карусели на Главной
     try { initHomeAdsCarousel(); } catch(_) {}
+    try { renderTopMatchOfWeek(); } catch(_) {}
 
         // подвкладки НЛО
     const subtabItems = document.querySelectorAll('#ufo-subtabs .subtab-item');
@@ -1047,6 +1048,66 @@ document.addEventListener('DOMContentLoaded', () => {
         window.addEventListener('resize', () => { apply(); });
         // Инициал
         apply();
+    }
+
+    // Блок «Топ матч недели» под рекламой на Главной
+    async function renderTopMatchOfWeek() {
+        try {
+            const res = await fetch('/api/schedule');
+            const data = await res.json();
+            const m = data?.match_of_week;
+            const host = document.getElementById('home-pane');
+            if (!host) return;
+            host.innerHTML = '';
+            if (!m) { host.innerHTML = '<div style="color: var(--gray);">Скоро анонс матча недели</div>'; return; }
+            // Карточка
+            const card = document.createElement('div'); card.className = 'match-card home-feature';
+            const head = document.createElement('div'); head.className = 'match-header';
+            const when = (m.datetime||'').replace('T',' ');
+            head.textContent = when || (m.date||'');
+            card.appendChild(head);
+            const center = document.createElement('div'); center.className = 'match-center';
+            const L = (name) => { const t = document.createElement('div'); t.className = 'team'; const i = document.createElement('img'); i.className='logo'; loadTeamLogo(i, name||''); const n = document.createElement('div'); n.className='team-name'; n.textContent = name||''; t.append(i, n); return t; };
+            center.append(L(m.home), (()=>{const s=document.createElement('div'); s.className='score'; s.textContent='VS'; return s;})(), L(m.away));
+            card.appendChild(center);
+            // Горизонтальная полоса голосования «П1 • X • П2»
+            const wrap = document.createElement('div'); wrap.className = 'vote-inline';
+            const title = document.createElement('div'); title.className = 'vote-title'; title.textContent = 'Голосование';
+            const bar = document.createElement('div'); bar.className = 'vote-strip';
+            const segH = document.createElement('div'); segH.className = 'seg seg-h';
+            const segD = document.createElement('div'); segD.className = 'seg seg-d';
+            const segA = document.createElement('div'); segA.className = 'seg seg-a';
+            bar.append(segH, segD, segA);
+            const legend = document.createElement('div'); legend.className = 'vote-legend';
+            const btns = document.createElement('div'); btns.className = 'vote-inline-btns';
+            const mkBtn = (code, text) => { const b=document.createElement('button'); b.className='details-btn'; b.textContent=text; b.addEventListener('click', async ()=>{
+                try { const fd = new FormData(); fd.append('initData', window.Telegram?.WebApp?.initData||''); fd.append('home', m.home||''); fd.append('away', m.away||''); fd.append('date', (m.date||'').slice(0,10)); fd.append('choice', code); const r = await fetch('/api/vote/match',{method:'POST', body: fd}); if (!r.ok) throw 0; await loadAgg(); } catch(_){}
+            }); return b; };
+            btns.append(mkBtn('home','За П1'), mkBtn('draw','За X'), mkBtn('away','За П2'));
+            legend.innerHTML = '<span>П1</span><span>X</span><span>П2</span>';
+            wrap.append(title, bar, legend, btns);
+            card.appendChild(wrap);
+            // кнопка перехода в Прогнозы
+            const footer = document.createElement('div'); footer.className='match-footer';
+            const goPred = document.createElement('button'); goPred.className='details-btn'; goPred.textContent='Сделать прогноз';
+            goPred.addEventListener('click', ()=>{
+                try { document.querySelector('.nav-item[data-tab="predictions"]').click(); } catch(_) {}
+            });
+            footer.appendChild(goPred); card.appendChild(footer);
+            host.appendChild(card);
+
+            async function loadAgg(){
+                try {
+                    const params = new URLSearchParams({ home: m.home||'', away: m.away||'', date: (m.date||'').slice(0,10) });
+                    const agg = await fetch(`/api/vote/match-aggregates?${params.toString()}`).then(r=>r.json());
+                    const h = Number(agg?.home||0), d = Number(agg?.draw||0), a = Number(agg?.away||0);
+                    const sum = Math.max(1, h+d+a);
+                    const ph = Math.round(h*100/sum), pd = Math.round(d*100/sum), pa = Math.round(a*100/sum);
+                    segH.style.width = ph+'%'; segD.style.width = pd+'%'; segA.style.width = pa+'%';
+                } catch(_){ segH.style.width='33%'; segD.style.width='34%'; segA.style.width='33%'; }
+            }
+            loadAgg();
+        } catch(_) {}
     }
 
     // Подвкладки Магазина — инициализация сразу (без вложенного DOMContentLoaded)
@@ -1782,30 +1843,23 @@ document.addEventListener('DOMContentLoaded', () => {
                     center.append(home, score, away);
                     card.appendChild(center);
 
-                    // Блок голосования под логотипами
-                    const voteWrap = document.createElement('div');
-                    voteWrap.className = 'match-vote';
-                    const mkBar = (label) => {
-                        const row = document.createElement('div'); row.className = 'vote-row';
-                        const lbl = document.createElement('span'); lbl.className = 'vote-label'; lbl.textContent = label;
-                        const bar = document.createElement('div'); bar.className = 'vote-bar';
-                        const fill = document.createElement('div'); fill.className = 'vote-fill'; bar.appendChild(fill);
-                        const pct = document.createElement('span'); pct.className = 'vote-pct'; pct.textContent = '—%';
-                        row.append(lbl, bar, pct); return { row, fill, pct };
-                    };
-                    const homeBar = mkBar('П1');
-                    const drawBar = mkBar('X');
-                    const awayBar = mkBar('П2');
-                    voteWrap.append(homeBar.row, drawBar.row, awayBar.row);
+                    // Голосование: одна общая полоса
+                    const voteWrap = document.createElement('div'); voteWrap.className = 'vote-inline';
+                    const voteTitle = document.createElement('div'); voteTitle.className = 'vote-title'; voteTitle.textContent = 'Голосование';
+                    const strip = document.createElement('div'); strip.className = 'vote-strip';
+                    const segH = document.createElement('div'); segH.className = 'seg seg-h';
+                    const segD = document.createElement('div'); segD.className = 'seg seg-d';
+                    const segA = document.createElement('div'); segA.className = 'seg seg-a';
+                    strip.append(segH, segD, segA);
+                    const legend = document.createElement('div'); legend.className = 'vote-legend'; legend.innerHTML = '<span>П1</span><span>X</span><span>П2</span>';
+                    voteWrap.append(voteTitle, strip, legend);
                     card.appendChild(voteWrap);
 
                     const updateAgg = (agg) => {
                         const h = Number(agg?.home||0), d = Number(agg?.draw||0), a = Number(agg?.away||0);
                         const sum = Math.max(1, h+d+a);
                         const ph = Math.round(h*100/sum), pd = Math.round(d*100/sum), pa = Math.round(a*100/sum);
-                        homeBar.fill.style.width = ph+'%'; homeBar.pct.textContent = ph+'%';
-                        drawBar.fill.style.width = pd+'%'; drawBar.pct.textContent = pd+'%';
-                        awayBar.fill.style.width = pa+'%'; awayBar.pct.textContent = pa+'%';
+                        segH.style.width = ph+'%'; segD.style.width = pd+'%'; segA.style.width = pa+'%';
                     };
                     try {
                         const params = new URLSearchParams({ home: m.home||'', away: m.away||'', date: (m.date||'').slice(0,10) });
