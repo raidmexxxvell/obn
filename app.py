@@ -8,7 +8,7 @@ from datetime import datetime, date, timezone
 from datetime import timedelta
 from urllib.parse import parse_qs, urlparse
 
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, send_from_directory
 # Optional gzip/br compression via flask-compress (lazy/dynamic import to avoid hard dependency in dev)
 Compress = None
 try:
@@ -352,6 +352,8 @@ class MatchVote(Base):
     )
 
 def _match_date_key(m: dict) -> str:
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     try:
         if m.get('date'):
             return str(m['date'])[:10]
@@ -5240,6 +5242,138 @@ def api_streams_list():
     except Exception as e:
         app.logger.error(f"streams/list error: {e}")
         return jsonify({'items': []})
+
+@app.route('/api/streams/upcoming', methods=['GET'])
+def api_streams_upcoming():
+    """Админ: список матчей, которые начнутся в ближайшее окно (минуты).
+    Параметры: window_min (по умолчанию 60).
+    Возвращает: { matches: [{home, away, datetime}] }
+    """
+    try:
+        try:
+            window_min = int(request.args.get('window_min') or '60')
+        except Exception:
+            window_min = 60
+        window_min = max(10, min(240, window_min))
+        now = datetime.now()
+        until = now + timedelta(minutes=window_min)
+        # Достаём расписание из снапшота; если пусто — из таблицы
+        tours = []
+        if SessionLocal is not None:
+            dbx = get_db()
+            try:
+                snap = _snapshot_get(dbx, 'schedule')
+                payload = snap and snap.get('payload')
+                tours = payload and payload.get('tours') or []
+            finally:
+                dbx.close()
+        if not tours:
+            tours = _load_all_tours_from_sheet()
+        matches = []
+        for t in tours or []:
+            for m in (t.get('matches') or []):
+                try:
+                    dt = None
+                    if m.get('datetime'):
+                        dt = datetime.fromisoformat(str(m['datetime']))
+                    elif m.get('date'):
+                        d = datetime.fromisoformat(str(m['date'])).date()
+                        tm = None
+                        try:
+                            tm = datetime.strptime((m.get('time') or '00:00'), "%H:%M").time()
+                        except Exception:
+                            tm = datetime.min.time()
+                        dt = datetime.combine(d, tm)
+                    if not dt:
+                        continue
+                    if now <= dt <= until:
+                        matches.append({ 'home': m.get('home',''), 'away': m.get('away',''), 'datetime': dt.isoformat() })
+                except Exception:
+                    continue
+        # Отсортируем по времени начала
+        try:
+            matches.sort(key=lambda x: x.get('datetime') or '')
+        except Exception:
+            pass
+        return jsonify({ 'matches': matches })
+    except Exception as e:
+        app.logger.error(f"streams/upcoming error: {e}")
+        return jsonify({ 'matches': [] }), 200
+
+@app.route('/api/streams/set', methods=['POST'])
+def api_streams_set():
+    """Админский эндпоинт (совместим с фронтом): сохранить ссылку на трансляцию.
+    Поля: initData, home, away, datetime(iso optional), vk (строка: video_ext или прямая ссылка)
+    """
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData',''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID','')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+        home = (request.form.get('home') or '').strip()
+        away = (request.form.get('away') or '').strip()
+        dt_raw = (request.form.get('datetime') or '').strip()
+        vk_raw = (request.form.get('vk') or '').strip()
+        if not home or not away:
+            return jsonify({'error': 'home/away обязательны'}), 400
+        # Определим дату для ключа
+        date_str = ''
+        try:
+            if dt_raw:
+                date_str = datetime.fromisoformat(dt_raw).date().isoformat()
+        except Exception:
+            date_str = ''
+        # Разобрать vk_raw в vkVideoId или vkPostUrl
+        vk_id = ''
+        vk_url = ''
+        s = vk_raw
+        try:
+            if 'video_ext.php' in s:
+                u = urlparse(s)
+                q = parse_qs(u.query)
+                oid = (q.get('oid',[None])[0])
+                vid = (q.get('id',[None])[0])
+                if oid and vid:
+                    vk_id = f"{oid}_{vid}"
+            elif '/video' in s:
+                path = urlparse(s).path or ''
+                import re as _re
+                m = _re.search(r"/video(-?\d+_\d+)", path)
+                if m:
+                    vk_id = m.group(1)
+            else:
+                # Похоже на обычную ссылку
+                vk_url = s
+        except Exception:
+            # Если не смогли распарсить — считаем это обычной ссылкой
+            vk_url = s
+        if not vk_id and not vk_url:
+            return jsonify({'error': 'vk ссылка пуста'}), 400
+        if vk_id and not re.match(r'^-?\d+_\d+$', vk_id):
+            return jsonify({'error': 'vkVideoId должен быть формата oid_id'}), 400
+        if SessionLocal is None:
+            return jsonify({'error': 'БД недоступна'}), 500
+        db: Session = get_db()
+        try:
+            row = db.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None)).first()
+            now_ts = datetime.now(timezone.utc)
+            if not row:
+                row = MatchStream(home=home, away=away, date=(date_str or None))
+                db.add(row)
+            row.vk_video_id = vk_id or None
+            row.vk_post_url = vk_url or None
+            row.confirmed_at = now_ts
+            row.updated_at = now_ts
+            db.commit()
+            return jsonify({'status': 'ok'})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"streams/set error: {e}")
+        return jsonify({'error': 'Не удалось сохранить'}), 500
 
 @app.route('/api/streams/get', methods=['GET'])
 def api_streams_get():

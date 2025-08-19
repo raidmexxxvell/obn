@@ -71,9 +71,10 @@
     if (!list || !msg || !winInput || !refreshBtn) return;
     list.innerHTML = '';
     try {
-      const winMin = Math.max(15, Math.min(240, Number(winInput.value)||60));
-      const params = new URLSearchParams({ window_min: String(winMin) });
-      const r = await fetch(`/api/streams/upcoming?${params}`); const data = await r.json();
+  const winMin = Math.max(15, Math.min(240, Number(winInput.value)||60));
+  const params = new URLSearchParams({ window_min: String(winMin) });
+  const r = await fetch(`/api/streams/upcoming?${params}`);
+  const data = await r.json();
       list.innerHTML = '';
       (data.matches||[]).forEach(m => {
         const card = document.createElement('div'); card.className='store-item';
@@ -84,10 +85,12 @@
         btn.addEventListener('click', async () => {
           try {
             btn.disabled = true; const o = btn.textContent; btn.textContent = '...';
-            const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
+            const fd = new FormData();
+            fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
             fd.append('home', m.home || ''); fd.append('away', m.away || '');
             fd.append('datetime', m.datetime || ''); fd.append('vk', input.value || '');
-            const rr = await fetch('/api/streams/set', { method:'POST', body: fd }); if (!rr.ok) throw 0;
+            const rr = await fetch('/api/streams/set', { method:'POST', body: fd });
+            if (!rr.ok) throw 0;
             btn.textContent = 'Сохранено';
           } catch(_) { btn.disabled=false; btn.textContent='Подтвердить'; }
         });

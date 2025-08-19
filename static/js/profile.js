@@ -665,10 +665,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Наполняем левую панель (иконка/название второй лиги) и кликом переключаем
         function updateNavLeaguePanel() {
+            // Всегда показываем подпись «Лига», иконку оставляем текущей альтернативы
             const act = getActiveLeague();
             const other = act === 'BLB' ? 'UFO' : 'BLB';
             leagueIcon.textContent = other === 'UFO' ? '🛸' : '❔';
-            leagueText.textContent = other === 'UFO' ? 'НЛО' : 'БЛБ';
+            leagueText.textContent = 'Лига';
         }
         leagueBtn?.addEventListener('click', () => {
             // Открываем полку выбора лиг по нажатию на мини-кнопку
@@ -991,6 +992,35 @@ document.addEventListener('DOMContentLoaded', () => {
             const mkKey = (obj) => { try { const h=(obj?.home||'').toLowerCase().trim(); const a=(obj?.away||'').toLowerCase().trim(); const raw=obj?.date?String(obj.date):(obj?.datetime?String(obj.datetime):''); const d=raw?raw.slice(0,10):''; return `${h}__${a}__${d}`; } catch(_) { return `${(obj?.home||'').toLowerCase()}__${(obj?.away||'').toLowerCase()}__`; } };
             const tourMatches = new Set(); try { const tours=toursCache?.data?.tours || toursCache?.tours || []; tours.forEach(t => (t.matches||[]).forEach(x => tourMatches.add(mkKey(x)))); } catch(_) {}
             if (tourMatches.has(mkKey(m))) { card.appendChild(wrap); }
+            // Если матч идёт прямо сейчас — клика по карточке открывает детали матча
+            try {
+                const now = new Date();
+                let isLive = false;
+                if (m.datetime) {
+                    const dt = new Date(m.datetime); const dtEnd = new Date(dt.getTime() + 2*60*60*1000);
+                    isLive = now >= dt && now < dtEnd;
+                } else if (m.date && m.time) {
+                    const dt = new Date(m.date + 'T' + (m.time?.length===5? m.time+':00': m.time||''));
+                    const dtEnd = new Date(dt.getTime() + 2*60*60*1000);
+                    isLive = now >= dt && now < dtEnd;
+                }
+                if (isLive) {
+                    card.style.cursor = 'pointer';
+                    card.addEventListener('click', () => {
+                        const params = new URLSearchParams({ home: m.home || '', away: m.away || '' });
+                        const cacheKey = `md:${(m.home||'').toLowerCase()}::${(m.away||'').toLowerCase()}`;
+                        const cached = (() => { try { return JSON.parse(localStorage.getItem(cacheKey) || 'null'); } catch(_) { return null; } })();
+                        const fetchWithETag = (etag) => fetch(`/api/match-details?${params.toString()}`, { headers: etag ? { 'If-None-Match': etag } : {} })
+                          .then(async r => { if (r.status === 304 && cached) return cached; const data = await r.json(); const version = data.version || r.headers.get('ETag') || null; const toStore = { data, version, ts: Date.now() }; try { localStorage.setItem(cacheKey, JSON.stringify(toStore)); } catch(_) {} return toStore; });
+                        const go = (store) => { try { window.openMatchScreen?.({ home: m.home, away: m.away, date: m.date, time: m.time }, store?.data || store); } catch(_) {} };
+                        const FRESH_TTL = 10 * 60 * 1000;
+                        if (cached && (Date.now() - (cached.ts||0) < FRESH_TTL)) { go(cached); }
+                        else if (cached && cached.version) { fetchWithETag(cached.version).then(go).catch(() => { go(cached); }); }
+                        else if (cached) { go(cached); }
+                        else { fetchWithETag(null).then(go).catch(()=>{}); }
+                    });
+                }
+            } catch(_) {}
             // кнопка перехода в Прогнозы
             const footer = document.createElement('div'); footer.className='match-footer';
             const goPred = document.createElement('button'); goPred.className='details-btn'; goPred.textContent='Сделать прогноз';
@@ -1846,7 +1876,7 @@ document.addEventListener('DOMContentLoaded', () => {
     aName.textContent = withTeamCount(match.away || '');
         setLogo(hLogo, match.home || '');
         setLogo(aLogo, match.away || '');
-        score.textContent = '— : —';
+    score.textContent = '— : —';
         try {
             if (match.date || match.time) {
                 const d = match.date ? new Date(match.date) : null;
@@ -2094,15 +2124,86 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Если доступно API статуса — отметим LIVE индикатором в заголовке деталей
+        // LIVE-индикатор и обновление счёта в онлайне
+        let scorePoll = null;
+        const applyScore = (sh, sa) => {
+            try {
+                if (sh == null || sa == null) return; // не меняем если нет данных
+                score.textContent = `${Number(sh)} : ${Number(sa)}`;
+            } catch(_) {}
+        };
+        const fetchScore = async () => {
+            try {
+                const r = await fetch(`/api/match/score/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}`);
+                const d = await r.json();
+                if (typeof d?.score_home === 'number' && typeof d?.score_away === 'number') applyScore(d.score_home, d.score_away);
+            } catch(_) {}
+        };
         try {
             fetch(`/api/match/status/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}`)
                 .then(r=>r.json()).then(s => {
                     if (s?.status === 'live') {
                         const live = document.createElement('span'); live.className = 'live-badge';
                         const dot = document.createElement('span'); dot.className = 'live-dot';
-                        const lbl = document.createElement('span'); lbl.textContent = 'В ЭФИРЕ';
+                        const lbl = document.createElement('span'); lbl.textContent = 'Матч идет';
                         live.append(dot, lbl);
                         dt.appendChild(live);
+                        // Во время лайва показываем стартовый 0 : 0, если ещё нет счёта
+                        if (score.textContent.trim() === '— : —') score.textContent = '0 : 0';
+                        // Запускаем поллинг счёта
+                        fetchScore();
+                        scorePoll = setInterval(fetchScore, 15000);
+                        // Админ-контролы +/- около счёта
+                        try {
+                            const adminId = document.body.getAttribute('data-admin');
+                            const currentId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id ? String(window.Telegram.WebApp.initDataUnsafe.user.id) : '';
+                            const isAdmin = !!(adminId && currentId && String(adminId) === currentId);
+                            if (isAdmin) {
+                                const center = score.parentElement || dt.parentElement;
+                                const ctrl = document.createElement('div');
+                                ctrl.className = 'admin-score-ctrls';
+                                ctrl.style.marginTop = '6px';
+                                ctrl.style.display = 'flex';
+                                ctrl.style.gap = '12px';
+                                ctrl.style.justifyContent = 'center';
+                                const mkBtn = (txt) => { const b = document.createElement('button'); b.className = 'details-btn'; b.textContent = txt; b.style.padding = '2px 8px'; b.style.minWidth = 'unset'; return b; };
+                                const boxH = document.createElement('div'); boxH.style.display='flex'; boxH.style.gap='6px'; boxH.style.alignItems='center';
+                                const hMinus = mkBtn('−'); const hPlus = mkBtn('+');
+                                const hLab = document.createElement('span'); hLab.style.fontSize='12px'; hLab.style.opacity='.9'; hLab.textContent = 'Команда 1';
+                                boxH.append(hMinus, hLab, hPlus);
+                                const boxA = document.createElement('div'); boxA.style.display='flex'; boxA.style.gap='6px'; boxA.style.alignItems='center';
+                                const aMinus = mkBtn('−'); const aPlus = mkBtn('+');
+                                const aLab = document.createElement('span'); aLab.style.fontSize='12px'; aLab.style.opacity='.9'; aLab.textContent = 'Команда 2';
+                                boxA.append(aMinus, aLab, aPlus);
+                                ctrl.append(boxH, boxA);
+                                center.appendChild(ctrl);
+                                const tg = window.Telegram?.WebApp || null;
+                                const parseScore = () => {
+                                    try { const t = score.textContent||''; const m = t.match(/(\d+)\s*:\s*(\d+)/); if (m) return [parseInt(m[1],10)||0, parseInt(m[2],10)||0]; } catch(_) {}
+                                    return [0,0];
+                                };
+                                const postScore = async (sh, sa) => {
+                                    try {
+                                        const fd = new FormData();
+                                        fd.append('initData', tg?.initData || '');
+                                        fd.append('home', match.home || '');
+                                        fd.append('away', match.away || '');
+                                        fd.append('score_home', String(Math.max(0, sh)));
+                                        fd.append('score_away', String(Math.max(0, sa)));
+                                        const r = await fetch('/api/match/score/set', { method: 'POST', body: fd });
+                                        const d = await r.json().catch(()=>({}));
+                                        if (!r.ok || d?.error) throw new Error(d?.error || 'Ошибка сохранения');
+                                        applyScore(d.score_home, d.score_away);
+                                    } catch(e) {
+                                        try { tg?.showAlert?.(e?.message || 'Не удалось сохранить счёт'); } catch(_) {}
+                                    }
+                                };
+                                hMinus.addEventListener('click', () => { const [h,a] = parseScore(); postScore(Math.max(0, h-1), a); });
+                                hPlus.addEventListener('click', () => { const [h,a] = parseScore(); postScore(h+1, a); });
+                                aMinus.addEventListener('click', () => { const [h,a] = parseScore(); postScore(h, Math.max(0, a-1)); });
+                                aPlus.addEventListener('click', () => { const [h,a] = parseScore(); postScore(h, a+1); });
+                            }
+                        } catch(_) {}
                     }
                 }).catch(()=>{});
         } catch(_) {}
@@ -2168,6 +2269,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // очистка
             homePane.innerHTML = '';
             awayPane.innerHTML = '';
+            try { if (scorePoll) { clearInterval(scorePoll); scorePoll = null; } } catch(_) {}
             // останов поллинга комментариев, если был
             try { if (typeof streamPane.__stopCommentsPoll === 'function') streamPane.__stopCommentsPoll(); } catch(_) {}
             // Поставить видео на паузу (VK iframe не управляем напрямую, делаем reset src)

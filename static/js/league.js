@@ -136,7 +136,7 @@
         else if (m.date && m.time) { const dt = new Date(m.date + 'T' + (m.time.length===5? m.time+':00': m.time)); const dtEnd = new Date(dt.getTime() + 2*60*60*1000); const now = new Date(); isLive = now >= dt && now < dtEnd; }
       } catch(_) {}
       const headerText = document.createElement('span'); headerText.textContent = `${dateStr}${timeStr ? ' ' + timeStr : ''}`; header.appendChild(headerText);
-      if (isLive) { const live = document.createElement('span'); live.className='live-badge'; const dot=document.createElement('span'); dot.className='live-dot'; const lbl=document.createElement('span'); lbl.textContent='В ЭФИРЕ'; live.append(dot,lbl); header.appendChild(live); }
+  if (isLive) { const live = document.createElement('span'); live.className='live-badge'; const dot=document.createElement('span'); dot.className='live-dot'; const lbl=document.createElement('span'); lbl.textContent='Матч идет'; live.append(dot,lbl); header.appendChild(live); }
       card.appendChild(header);
 
       const center = document.createElement('div'); center.className='match-center';
