@@ -25,6 +25,7 @@ from google.oauth2.service_account import Credentials
 from sqlalchemy import (
     create_engine, Column, Integer, String, Text, DateTime, Date, func, case, and_, Index
 )
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 import threading
 
@@ -1483,6 +1484,19 @@ def _compute_match_odds(home: str, away: str, date_key: str|None = None) -> dict
         fav_pull = float(os.environ.get('BET_FAV_PULL', '0.50'))  # 0..1 — доля подтяжки к таргету (0=нет, 1=жестко)
     except Exception:
         fav_pull = 0.50
+    try:
+        softmax_draw_gamma = float(os.environ.get('BET_SOFTMAX_DRAW_GAMMA', '1.00'))  # отдельная гамма для ничьей
+    except Exception:
+        softmax_draw_gamma = 1.00
+    # Доп. усиление вероятности ничьей для "равных" команд
+    try:
+        draw_boost_max = float(os.environ.get('BET_DRAW_BOOST_MAX', '0.25'))  # максимум увеличения pD при паритете
+    except Exception:
+        draw_boost_max = 0.25
+    try:
+        draw_max_prob = float(os.environ.get('BET_DRAW_MAX_PROB', '0.35'))   # верхняя граница pD после буста
+    except Exception:
+        draw_max_prob = 0.35
 
     lam, mu = _estimate_goal_rates(home, away)
     probs, _mat = _dc_outcome_probs(lam, mu, rho=rho, max_goals=max_goals)
@@ -1493,6 +1507,24 @@ def _compute_match_odds(home: str, away: str, date_key: str|None = None) -> dict
     s = pH + pD + pA
     if s > 0:
         pH, pD, pA = pH/s, pD/s, pA/s
+
+    # Усиливаем pD (ничью), если команды равные: оцениваем паритет по близости pH и pA
+    try:
+        parity = 1.0 - min(1.0, abs(pH - pA) / 0.30)  # 1.0 при pH≈pA; 0.0 при сильном перекосе
+        if draw_boost_max > 0 and parity > 0:
+            pD_boosted = pD * (1.0 + draw_boost_max * max(0.0, min(1.0, parity)))
+            # Нормируем, уменьшая pH/pA пропорционально, чтобы сумма = 1
+            others = max(1e-9, (pH + pA))
+            scale = max(1e-9, (1.0 - pD_boosted) / others)
+            pH = max(0.01, pH * scale)
+            pA = max(0.01, pA * scale)
+            pD = max(0.01, min(draw_max_prob, pD_boosted))
+            # Финальная нормализация
+            s3 = pH + pD + pA
+            if s3 > 0:
+                pH, pD, pA = pH/s3, pD/s3, pA/s3
+    except Exception:
+        pass
 
     # Влияние голосований (если есть дата и БД)
     if SessionLocal is not None and date_key:
@@ -1521,10 +1553,12 @@ def _compute_match_odds(home: str, away: str, date_key: str|None = None) -> dict
         except Exception:
             pass
 
-    # «Заострим» распределение, чтобы фаворит получал короче кэф
+    # «Заострим» распределение, чтобы фаворит получал короче кэф (для ничьей отдельная гамма)
     try:
         if softmax_gamma and softmax_gamma > 1.0:
-            _ph, _pd, _pa = max(1e-9,pH)**softmax_gamma, max(1e-9,pD)**softmax_gamma, max(1e-9,pA)**softmax_gamma
+            _ph = max(1e-9,pH) ** softmax_gamma
+            _pd = max(1e-9,pD) ** max(1.0, softmax_draw_gamma)
+            _pa = max(1e-9,pA) ** softmax_gamma
             z = _ph + _pd + _pa
             if z>0:
                 pH, pD, pA = _ph/z, _pd/z, _pa/z
@@ -3979,9 +4013,14 @@ def api_vote_match():
             if existing:
                 # Запрещаем менять голос: просто сообщаем, что уже голосовал
                 return jsonify({'status': 'exists', 'choice': existing.choice}), 200
-            db.add(MatchVote(home=home, away=away, date_key=date_key, user_id=uid, choice=choice))
-            db.commit()
-            return jsonify({'status': 'ok'})
+            try:
+                db.add(MatchVote(home=home, away=away, date_key=date_key, user_id=uid, choice=choice))
+                db.commit()
+                return jsonify({'status': 'ok'})
+            except IntegrityError:
+                db.rollback()
+                # Дубликат по уникальному индексу — считаем, что уже голосовал
+                return jsonify({'status': 'exists'}), 200
         finally:
             db.close()
     except Exception as e:

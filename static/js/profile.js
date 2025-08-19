@@ -1053,7 +1053,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Блок «Топ матч недели» под рекламой на Главной
     async function renderTopMatchOfWeek() {
         try {
-            const res = await fetch('/api/schedule');
+            const res = await fetch(`/api/schedule?_=${Date.now()}`);
             const data = await res.json();
             const m = data?.match_of_week;
             const host = document.getElementById('home-pane');
@@ -1084,13 +1084,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 const b = document.createElement('button');
                 b.className = 'details-btn';
                 b.textContent = text;
-                b.addEventListener('click', async () => {
+        b.addEventListener('click', async () => {
                     try {
                         const fd = new FormData();
-                        fd.append('initData', window.Telegram?.WebApp?.initData || '');
-                        fd.append('home', m.home || '');
-                        fd.append('away', m.away || '');
-                        fd.append('date', (m.date || '').slice(0, 10));
+            fd.append('initData', window.Telegram?.WebApp?.initData || '');
+            fd.append('home', m.home || '');
+            fd.append('away', m.away || '');
+            const dkey = (m.date ? String(m.date) : (m.datetime ? String(m.datetime) : '')).slice(0,10);
+            fd.append('date', dkey);
                         fd.append('choice', code);
                         const r = await fetch('/api/vote/match', { method: 'POST', body: fd });
                         if (!r.ok) throw 0;
@@ -1117,9 +1118,10 @@ document.addEventListener('DOMContentLoaded', () => {
             footer.appendChild(goPred); card.appendChild(footer);
             host.appendChild(card);
 
-        async function loadAgg(withInit){
+            async function loadAgg(withInit){
                 try {
-            const params = new URLSearchParams({ home: m.home||'', away: m.away||'', date: (m.date||'').slice(0,10) });
+            const dkey = (m.date ? String(m.date) : (m.datetime ? String(m.datetime) : '')).slice(0,10);
+            const params = new URLSearchParams({ home: m.home||'', away: m.away||'', date: dkey });
             if (withInit) params.append('initData', (window.Telegram?.WebApp?.initData || ''));
                     const agg = await fetch(`/api/vote/match-aggregates?${params.toString()}`).then(r=>r.json());
                     const h = Number(agg?.home||0), d = Number(agg?.draw||0), a = Number(agg?.away||0);
@@ -2482,7 +2484,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const nav = document.getElementById('bottom-nav');
         if (!drawer) return;
         // скрыть нижнее меню быстро
-        if (nav) { nav.style.transition = 'transform .12s ease, opacity .12s ease'; nav.style.transform = 'translateY(100%)'; nav.style.opacity = '0'; }
+    if (nav) { nav.style.transition = 'transform .12s ease, opacity .12s ease'; nav.style.transform = 'translateX(-50%) translateY(100%)'; nav.style.opacity = '0'; }
         drawer.style.display = 'block';
         requestAnimationFrame(() => { drawer.style.transform = 'translateX(0)'; drawer.setAttribute('aria-hidden', 'false'); });
         const onClick = (e) => {
@@ -2505,7 +2507,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!drawer) return;
         drawer.style.transform = 'translateX(100%)';
         setTimeout(() => { drawer.style.display = 'none'; drawer.setAttribute('aria-hidden', 'true'); }, 280);
-        if (nav) { nav.style.transform = 'translateY(0)'; nav.style.opacity = '1'; nav.style.transition = ''; }
+        if (nav) {
+            nav.style.transform = 'translateX(-50%) translateY(0)';
+            nav.style.opacity = '1';
+            // немного отложим сброс transition, чтобы анимация вернулась корректно
+            setTimeout(() => { if (nav) nav.style.transition = ''; }, 60);
+        }
     }
 
     function initBLBSubtabs() {
