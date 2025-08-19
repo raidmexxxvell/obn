@@ -1533,18 +1533,27 @@ document.addEventListener('DOMContentLoaded', () => {
         const ufoContent = document.getElementById('ufo-content');
         const blbBlock = document.getElementById('blb-block');
         if (!ufoTabs || !ufoContent || !blbBlock) return;
-        if (animate) playLeagueTransition('UFO');
     setActiveLeague('UFO');
         if (overlay) overlay.style.display = 'none';
         blbBlock.style.display = 'none';
         ufoTabs.style.display = '';
         ufoContent.style.display = '';
         if (!_silent) {
-            loadLeagueTable();
-            loadStatsTable();
-            loadSchedule();
-            loadResults();
+            // Ждём, пока оверлей полностью закроет экран, и ещё 1 сек — затем подгружаем
+            const onCovered = () => {
+                setTimeout(() => {
+                    try { loadLeagueTable(); } catch(_) {}
+                    try { loadStatsTable(); } catch(_) {}
+                    try { loadSchedule(); } catch(_) {}
+                    try { loadResults(); } catch(_) {}
+                }, 1000);
+                window.removeEventListener('league:transition-covered', onCovered);
+            };
+            window.addEventListener('league:transition-covered', onCovered);
+            // На случай, если анимации нет — фолбэк сразу
+            if (!animate) { window.removeEventListener('league:transition-covered', onCovered); onCovered(); }
         }
+    if (animate) playLeagueTransition('UFO');
     }
 
     function selectBLBLeague(animate=false) {
@@ -1553,13 +1562,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const ufoContent = document.getElementById('ufo-content');
         const blbBlock = document.getElementById('blb-block');
         if (!ufoTabs || !ufoContent || !blbBlock) return;
-        if (animate) playLeagueTransition('BLB');
         setActiveLeague('BLB');
         if (overlay) overlay.style.display = 'none';
         ufoTabs.style.display = 'none';
         ufoContent.style.display = 'none';
         blbBlock.style.display = '';
-        initBLBSubtabs();
+        // Небольшая задержка показа контента БЛБ после покрытия оверлеем
+        const showBLB = () => { initBLBSubtabs(); window.removeEventListener('league:transition-covered', showBLB); };
+        window.addEventListener('league:transition-covered', showBLB);
+        if (!animate) { window.removeEventListener('league:transition-covered', showBLB); showBLB(); }
+    if (animate) playLeagueTransition('BLB');
     }
 
     function playLeagueTransition(to) {
@@ -1582,6 +1594,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 layer.style.background = 'linear-gradient(135deg, #0b0b0b, #000000)';
                 // Фаза 1: заливка снизу вверх (1s)
                 layer.classList.add('lt-fill-bottom');
+                // Сразу после старта заливки считаем экран покрытым
+                try { window.dispatchEvent(new CustomEvent('league:transition-covered', { detail: { to } })); } catch(_) {}
         setTimeout(() => {
                     // Смена темы/топ-бара во время полной заливки (пользователь не видит)
                     document.body.classList.add('theme-blb');
@@ -1609,6 +1623,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 layer.style.background = `linear-gradient(135deg, ${dark}, ${darker})`;
                 // Фаза 1: заливка сверху вниз (1s)
                 layer.classList.add('lt-fill-top');
+                // Сразу после старта заливки считаем экран покрытым
+                try { window.dispatchEvent(new CustomEvent('league:transition-covered', { detail: { to } })); } catch(_) {}
                 setTimeout(() => {
                     // Смена темы/топ-бара во время полной заливки
                     document.body.classList.remove('theme-blb');

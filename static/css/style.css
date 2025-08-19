@@ -44,7 +44,7 @@ body {
     background: rgba(10, 18, 40, 0.92);
     backdrop-filter: blur(12px);
     border-radius: 0; /* без закруглений */
-    padding: 10px 10px calc(10px + env(safe-area-inset-bottom, 0px));
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
     display: flex;
     justify-content: space-between;
     z-index: 1000;
@@ -116,8 +116,17 @@ body {
 .nav-league-btn .icon { font-size: 16px; line-height: 1; }
 .nav-league-btn .text { white-space: nowrap; display: none; } /* текст скрыт — только иконка */
 
-.nav-icon { font-size: 16px; line-height: 1; margin-bottom: 0; }
-.nav-label { display: none; }
+.nav-icon { font-size: 16px; line-height: 1; margin-bottom: 2px; }
+.nav-label {
+    display: block;
+    font-size: 10px;
+    line-height: 1.1;
+    white-space: nowrap;
+    max-width: 72px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: .9;
+}
 .nav-item .nav-badge { position: absolute; top: -2px; right: 2px; background: #ef4444; color: #fff; border-radius: 999px; padding: 1px 5px; font-size: 10px; font-weight: 800; line-height: 1; border: 1px solid rgba(255,255,255,0.6); box-shadow: 0 0 0 1px rgba(0,0,0,0.4); }
 
 /* Полка выбора лиг (красивое открытие) */
@@ -846,7 +855,9 @@ body.theme-blb .share-btn {
 .vote-pct { color: var(--gray); font-size: 12px; text-align: right; }
 
 /* --- Новый вид голосования: одна горизонтальная полоса с тремя сегментами --- */
-.home-feature { text-align: center; margin-left: -12px; margin-right: -12px; border-left-width: 0; border-right-width: 0; border-radius: 0; }
+.home-feature { text-align: center; width: 100vw; max-width: 100vw; margin-left: calc(50% - 50vw); margin-right: calc(50% - 50vw); border-left: none; border-right: none; border-radius: 0; }
+.home-feature { display: block; }
+#home-pane { display: block !important; padding: 0 !important; }
 .home-feature .vote-inline { margin-top: 10px; display: grid; gap: 6px; text-align: center; }
 .vote-title { font-weight: 900; letter-spacing: .3px; color: var(--light); text-align: center; }
 .vote-strip { display:flex; height: 12px; border-radius: 999px; overflow: hidden; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); box-shadow: inset 0 2px 6px rgba(0,0,0,0.2); }
