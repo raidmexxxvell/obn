@@ -637,8 +637,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     if (tab === 'leaderboard' && lead) { lead.style.display = ''; ensureLeaderboardInit(); }
-    if (tab === 'shop' && shop) { shop.style.display = ''; try { initShopUI(); } catch(_) {} }
-    if (tab === 'admin' && admin) { admin.style.display = ''; ensureAdminInit(); }
+    if (tab === 'shop' && shop) { shop.style.display = ''; try { window.Shop?.initShopUI?.(); } catch(_) {} }
+    if (tab === 'admin' && admin) { admin.style.display = ''; try { window.Admin?.ensureAdminInit?.(); } catch(_) {} }
                 // прокрутка к верху при смене вкладки
                 window.scrollTo({ top: 0, behavior: 'smooth' });
             });
@@ -796,93 +796,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
 
-        // --- Админ: подвкладка «Трансляции» ---
-        try {
-            const adminTabs = document.querySelectorAll('#admin-subtabs .subtab-item');
-            const paneService = document.getElementById('admin-pane-service');
-            const paneOrders = document.getElementById('admin-pane-orders');
-            const paneStreams = document.getElementById('admin-pane-streams');
-            const adminWrap = document.getElementById('tab-admin');
-            const adminId = document.body.getAttribute('data-admin');
-            const currentId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id ? String(window.Telegram.WebApp.initDataUnsafe.user.id) : '';
-            const isOwner = !!(adminId && currentId && String(adminId) === currentId);
-            if (adminWrap && isOwner) {
-                // показать вкладку Админ
-                const navAdmin = document.getElementById('nav-admin'); if (navAdmin) navAdmin.style.display = '';
-                // переключение подвкладок
-                adminTabs.forEach(tab => tab.addEventListener('click', () => {
-                    adminTabs.forEach(t => t.classList.remove('active')); tab.classList.add('active');
-                    const key = tab.getAttribute('data-atab');
-                    paneService.style.display = key==='service' ? '' : 'none';
-                    paneOrders.style.display = key==='orders' ? '' : 'none';
-                    paneStreams.style.display = key==='streams' ? '' : 'none';
-                    if (key==='streams') initAdminStreams();
-                }));
-                // автопоказ сервиса по умолчанию
-            }
-        } catch(_) {}
-
-        async function initAdminStreams() {
-            const list = document.getElementById('admin-streams-list');
-            const msg = document.getElementById('admin-streams-msg');
-            const winInput = document.getElementById('admin-streams-window');
-            const refreshBtn = document.getElementById('admin-streams-refresh');
-            const winMin = Math.max(10, Math.min(240, parseInt(winInput.value||'60',10)));
-            const now = Date.now();
-            msg.textContent = 'Загружаю расписание...';
-            try {
-                const res = await fetch('/api/schedule');
-                const data = await res.json();
-                const tours = data?.tours || [];
-                const upcoming = [];
-                tours.forEach(t => (t.matches||[]).forEach(m => {
-                    let start = 0; try { start = m.datetime ? Date.parse(m.datetime) : 0; } catch(_){}
-                    if (start && (start - now) <= winMin*60*1000 && (start - now) > -180*60*1000) {
-                        upcoming.push({ tour: t.tour, title: t.title, ...m, start });
-                    }
-                }));
-                upcoming.sort((a,b)=>a.start-b.start);
-                list.innerHTML = '';
-                if (!upcoming.length) {
-                    list.innerHTML = '<div class="store-item" style="opacity:.85"><div class="store-name">В ближайшие '+winMin+' минут матчей нет</div></div>';
-                } else {
-                    // Получим текущие подтверждения
-                    const cur = await (await fetch('/api/streams/list')).json().catch(()=>({ items: [] }));
-                    const confirmed = new Set((cur.items||[]).map(x=>`${(x.home||'').toLowerCase()}__${(x.away||'').toLowerCase()}__${(x.date||'')}`));
-                    upcoming.forEach(m => {
-                        const row = document.createElement('div'); row.className='store-item';
-                        const inner = document.createElement('div'); inner.className='stream-row';
-                        const title = document.createElement('div'); title.className='title'; title.textContent = `${m.home} — ${m.away}`;
-                        const time = document.createElement('div'); time.className='time';
-                        try { time.textContent = new Date(m.start).toLocaleString(); } catch(_) { time.textContent = m.datetime || ''; }
-                        const input = document.createElement('input'); input.type='text'; input.placeholder='vk video id или URL поста'; input.value='';
-                        const btn = document.createElement('button'); btn.className='details-btn confirm'; btn.textContent='Подтвердить';
-                        btn.onclick = async () => {
-                            const val = (input.value||'').trim(); if (!val) { msg.textContent='Укажите ссылку или id.'; return; }
-                            const fd = new FormData();
-                            fd.append('initData', window.Telegram?.WebApp?.initData || '');
-                            fd.append('home', m.home || '');
-                            fd.append('away', m.away || '');
-                            fd.append('date', (m.datetime||'').slice(0,10));
-                            if (/^[-]?\d+_\d+$/.test(val)) fd.append('vkVideoId', val); else fd.append('vkPostUrl', val);
-                            const r = await fetch('/api/streams/confirm', { method: 'POST', body: fd });
-                            const j = await r.json().catch(()=>({}));
-                            if (!r.ok) { msg.textContent = j?.error || 'Не удалось сохранить'; return; }
-                            msg.textContent = 'Сохранено'; btn.disabled = true; input.disabled = true;
-                        };
-                        inner.append(title, time, input, btn); row.appendChild(inner); list.appendChild(row);
-                        // пометка, если уже подтверждено
-                        const k = `${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}__${(m.datetime||'').slice(0,10)}`;
-                        if (confirmed.has(k)) { btn.disabled = true; input.disabled = true; }
-                    });
-                }
-                msg.textContent = 'Готово';
-            } catch (e) {
-                console.error('admin streams load', e); msg.textContent = 'Ошибка загрузки';
-            }
-            refreshBtn.onclick = initAdminStreams;
-            winInput.onchange = initAdminStreams;
-        }
+    // Админ-вкладки и потоки вынесены в window.Admin.ensureAdminInit()
         const shareBtn = document.getElementById('share-ref');
         if (shareBtn) {
             shareBtn.setAttribute('data-throttle', '1200');
@@ -906,67 +820,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // ---------- ADMIN TAB ----------
-    let _adminInited = false;
-    function ensureAdminInit() {
-        if (_adminInited) return; _adminInited = true;
-        const btnAll = document.getElementById('admin-refresh-all');
-        const btnUsers = document.getElementById('admin-users-refresh');
-        const btnSync = document.getElementById('admin-sync-refresh');
-        const lblUsers = document.getElementById('admin-users-stats');
-        const lblSync = document.getElementById('admin-sync-summary');
-        // Подвкладки Админа
-        try {
-            const tabs = document.querySelectorAll('#admin-subtabs .subtab-item');
-            const panes = {
-                service: document.getElementById('admin-pane-service'),
-                orders: document.getElementById('admin-pane-orders')
-            };
-            tabs.forEach(btn => {
-                btn.setAttribute('data-throttle', '600');
-                btn.addEventListener('click', () => {
-                    const key = btn.getAttribute('data-atab');
-                    tabs.forEach(b => b.classList.remove('active'));
-                    btn.classList.add('active');
-                    Object.values(panes).forEach(p => { if (p) p.style.display = 'none'; });
-                    if (panes[key]) panes[key].style.display = '';
-                    if (key === 'orders') renderAdminOrders();
-                });
-            });
-        } catch(_) {}
-        // Обновить все
-        if (btnAll) btnAll.addEventListener('click', () => {
-            const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
-            btnAll.disabled = true; const orig = btnAll.textContent; btnAll.textContent = 'Обновляю...';
-            Promise.allSettled([
-                fetch('/api/league-table/refresh', { method: 'POST', body: fd }),
-                fetch('/api/stats-table/refresh', { method: 'POST', body: fd }),
-                fetch('/api/schedule/refresh', { method: 'POST', body: fd }),
-                fetch('/api/results/refresh', { method: 'POST', body: fd })
-            ]).finally(() => { btnAll.disabled = false; btnAll.textContent = orig; });
-        });
-        // Онлайн/уникальные
-        if (btnUsers && lblUsers) btnUsers.addEventListener('click', () => {
-            const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
-            btnUsers.disabled = true; const o = btnUsers.textContent; btnUsers.textContent = '...';
-            fetch('/api/admin/users-stats', { method: 'POST', body: fd })
-                .then(r => r.json()).then(d => {
-                    const s = `Всего: ${d.total_users||0} • Онлайн: ${d.online_5m||0} (5м) / ${d.online_15m||0} (15м)`;
-                    lblUsers.textContent = s;
-                })
-                .finally(()=>{ btnUsers.disabled=false; btnUsers.textContent=o; });
-        });
-        // Метрики синка
-        if (btnSync && lblSync) btnSync.addEventListener('click', () => {
-            btnSync.disabled = true; const o = btnSync.textContent; btnSync.textContent='...';
-            fetch('/health/sync').then(r=>r.json()).then(m => {
-                const last = m.last_sync || {}; const st = m.last_sync_status || {}; const dur = m.last_sync_duration_ms || {};
-                const keys = ['league-table','stats-table','schedule','results','betting-tours','leaderboards'];
-                const lines = keys.map(k => `${k}: ${st[k]||'—'}, ${dur[k]||0}мс, at ${last[k]||'—'}`);
-                lblSync.textContent = lines.join(' | ');
-            }).finally(()=>{ btnSync.disabled=false; btnSync.textContent=o; });
-        });
-    }
+    // Админ-логика вынесена в static/js/admin.js (window.Admin)
 
     // ---------- Главная: рекламная карусель ----------
     function initHomeAdsCarousel() {
@@ -1143,391 +997,40 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch(_) {}
     }
 
-    // Подвкладки Магазина — инициализация сразу (без вложенного DOMContentLoaded)
-    let _shopInited = false;
-    function initShopUI() {
-        if (_shopInited) { try { updateCartBadge(); } catch(_) {}; return; }
-        const tabs = document.querySelectorAll('#shop-subtabs .subtab-item');
-    const panes = { store: document.getElementById('shop-pane-store'), cart: document.getElementById('shop-pane-cart'), myorders: document.getElementById('shop-pane-myorders') };
-        tabs.forEach(btn => {
-            btn.setAttribute('data-throttle', '600');
-            btn.addEventListener('click', () => {
-                const key = btn.getAttribute('data-stab');
-                tabs.forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                Object.values(panes).forEach(p => { if (p) p.style.display = 'none'; });
-                if (panes[key]) panes[key].style.display = '';
-        if (key === 'cart') renderCart();
-        if (key === 'myorders') renderMyOrders();
-            });
-        });
-        initShop();
-        updateCartBadge();
-        _shopInited = true;
-    }
-
-    // ---------- МАГАЗИН ----------
-    function readCart() {
-        try { return JSON.parse(localStorage.getItem('shop:cart') || '[]'); } catch(_) { return []; }
-    }
-    function writeCart(items) {
-        try { localStorage.setItem('shop:cart', JSON.stringify(items)); } catch(_) {}
-        try { updateCartBadge(); } catch(_) {}
-    }
-    function addToCart(item) {
-        const cart = readCart();
-        const idx = cart.findIndex(x => x.id === item.id);
-        if (idx >= 0) { cart[idx].qty = (cart[idx].qty || 1) + 1; }
-        else { cart.push({ ...item, qty: 1 }); }
-        writeCart(cart);
-    try { window.Telegram?.WebApp?.showAlert?.('Товар добавлен в корзину'); } catch(_) {}
-    renderCart();
-    }
-    function removeFromCart(id) {
-        let cart = readCart();
-        cart = cart.filter(x => x.id !== id);
-        writeCart(cart);
-        renderCart();
-    }
-    function renderCart() {
-        const pane = document.getElementById('shop-pane-cart');
-        if (!pane) return;
-        const cart = readCart();
-        const wrap = document.createElement('div');
-        wrap.className = 'cart-list';
-        if (!cart.length) {
-            pane.innerHTML = '<div style="padding:12px; color: var(--gray);">Корзина пуста.</div>';
-            return;
-        }
-        let total = 0;
-        cart.forEach(it => {
-            total += (it.price || 0) * (it.qty || 1);
-            const qty = Math.max(1, it.qty || 1);
-            const name = document.createElement('div'); name.className = 'cart-left'; name.textContent = it.name;
-            const qtyWrap = document.createElement('div'); qtyWrap.style.display='flex'; qtyWrap.style.alignItems='center'; qtyWrap.style.gap='6px';
-            const minus = document.createElement('button'); minus.className = 'details-btn'; minus.textContent = '−'; minus.style.minWidth='28px'; minus.setAttribute('data-throttle','400');
-            const qlbl = document.createElement('div'); qlbl.textContent = String(qty);
-            const plus = document.createElement('button'); plus.className = 'details-btn'; plus.textContent = '+'; plus.style.minWidth='28px'; plus.setAttribute('data-throttle','400');
-            qtyWrap.append(minus, qlbl, plus);
-            const sum = document.createElement('div'); sum.className = 'cart-right'; sum.textContent = `${(it.price * qty).toLocaleString()} кр.`;
-            const del = document.createElement('button'); del.className = 'details-btn'; del.textContent = 'Убрать'; del.style.marginLeft = '8px'; del.setAttribute('data-throttle','600');
-            del.addEventListener('click', () => removeFromCart(it.id));
-            // handlers
-            minus.addEventListener('click', () => {
-                const items = readCart();
-                const idx = items.findIndex(x => x.id === it.id);
-                if (idx >= 0) {
-                    items[idx].qty = Math.max(0, (items[idx].qty || 1) - 1);
-                    if (items[idx].qty === 0) items.splice(idx,1);
-                    writeCart(items); renderCart();
-                }
-            });
-            plus.addEventListener('click', () => {
-                const items = readCart();
-                const idx = items.findIndex(x => x.id === it.id);
-                if (idx >= 0) { items[idx].qty = (items[idx].qty || 1) + 1; writeCart(items); renderCart(); }
-            });
-            const line = document.createElement('div'); line.className = 'cart-line';
-            line.append(name, qtyWrap, sum, del);
-            wrap.appendChild(line);
-        });
-        const totalEl = document.createElement('div'); totalEl.className = 'cart-total'; totalEl.textContent = `Итого: ${total.toLocaleString()} кредитов`;
-        const checkout = document.createElement('button'); checkout.className = 'details-btn'; checkout.textContent = 'Оформить заказ'; checkout.style.marginTop='8px'; checkout.setAttribute('data-throttle','1200');
-        checkout.addEventListener('click', () => placeOrder());
-        pane.innerHTML = '';
-        pane.appendChild(wrap);
-        pane.appendChild(totalEl);
-        pane.appendChild(checkout);
-    }
-    function initShop() {
-        // Подвяжем кнопки «В корзину» и метаданные товаров
-        const cards = document.querySelectorAll('#shop-pane-store .store-item');
-        const catalogue = [];
-        cards.forEach((card, i) => {
-            const id = card.getAttribute('data-id') || `item_${i+1}`;
-            const name = card.getAttribute('data-name') || (card.querySelector('.store-name')?.textContent || `Товар ${i+1}`);
-            // Все цены фиксированы на 300
-            const price = 300;
-            // Обновим видимую цену на карточке
-            const priceEl = card.querySelector('.store-price');
-            if (priceEl) priceEl.textContent = `${price.toLocaleString()} кредитов`;
-            catalogue.push({ id, name, price });
-            const btn = card.querySelector('button');
-            if (btn) {
-                btn.disabled = false;
-                btn.setAttribute('data-throttle','600');
-                btn.addEventListener('click', () => addToCart({ id, name, price }));
-            }
-        });
-    }
-
-    // -------------- ЗАКАЗЫ (LocalStorage) --------------
-    function readOrders() {
-        try { return JSON.parse(localStorage.getItem('shop:orders') || '[]'); } catch(_) { return []; }
-    }
-    function writeOrders(items) {
-        try { localStorage.setItem('shop:orders', JSON.stringify(items)); } catch(_) {}
-    }
-    async function placeOrder() {
-        const cart = readCart();
-        if (!cart.length) { try { window.Telegram?.WebApp?.showAlert?.('Корзина пуста'); } catch(_) {}; return; }
-        const totalLocal = cart.reduce((s, it) => s + (it.price||0) * (it.qty||1), 0);
-        const initData = window.Telegram?.WebApp?.initData || '';
-        const items = cart.map(it => ({ code: it.id, qty: it.qty||1 }));
-        try {
-            if (!initData) throw new Error('no-telegram');
-            const form = new FormData();
-            form.append('initData', initData);
-            form.append('items', JSON.stringify(items));
-            const resp = await fetch('/api/shop/checkout', { method: 'POST', body: form });
-            if (resp.status === 401) throw new Error('unauthorized');
-            const data = await resp.json();
-            if (!resp.ok) throw new Error(data && data.error || 'Ошибка оформления');
-            writeCart([]);
-            renderCart();
-            try { window.Telegram?.WebApp?.showAlert?.(`Заказ оформлен\n№${data.order_id}\nСумма: ${Number(data.total||0).toLocaleString()}`); } catch(_) {}
-            // Обновим баланс, если сервер вернул его
-            try {
-                if (typeof data.balance === 'number') {
-                    const el = document.getElementById('credits');
-                    if (el) el.textContent = Number(data.balance||0).toLocaleString();
-                }
-            } catch(_) {}
-            try { renderAdminOrders(); } catch(_) {}
-            return;
-        } catch (e) {
-            console.warn('Checkout failed (server-only mode)', e);
-            // В режиме «только сервер» не создаём локальные заказы и не очищаем корзину
-            const msg = (e && e.message) ? e.message : 'Не удалось оформить заказ. Попробуйте ещё раз.';
-            try { window.Telegram?.WebApp?.showAlert?.(msg); } catch(_) {}
-            // Можно дополнительно показать toast, если доступен
-        }
-    }
-    async function renderAdminOrders() {
-        const tbody = document.querySelector('#admin-orders-table tbody');
-        if (!tbody) return;
-        const initData = window.Telegram?.WebApp?.initData || '';
-        try {
-            if (!initData) throw new Error('no-telegram');
-            const form = new FormData(); form.append('initData', initData);
-            const resp = await fetch('/api/admin/orders', { method: 'POST', body: form, headers: { 'If-None-Match': window._adminOrdersETag || '' } });
-            if (resp.status === 304) return; // unchanged
-            const et = resp.headers.get('ETag'); if (et) window._adminOrdersETag = et;
-            const data = await resp.json();
-            if (!resp.ok) throw new Error(data && data.error || 'Ошибка загрузки заказов');
-            const orders = (data && data.orders) ? data.orders.slice() : [];
-            orders.sort((a,b) => String(b.created_at||'').localeCompare(String(a.created_at||'')));
-            tbody.innerHTML = '';
-            orders.forEach((o, idx) => {
-                const tr = document.createElement('tr');
-                const when = (()=>{ try { return new Date(o.created_at).toLocaleString(); } catch(_) { return o.created_at || ''; } })();
-                const userId = String(o.user_id||'');
-                const uname = (o.username||'').replace(/^@+/, '');
-                const userLabel = uname ? `@${uname}` : `ID ${userId}`;
-                const userHref = uname ? `https://t.me/${encodeURIComponent(uname)}` : `https://t.me/user?id=${encodeURIComponent(userId)}`;
-                const items = String(o.items_preview || '');
-                const qty = Number(o.items_qty || 0);
-                // Статус + селект для изменения
-        const statusCell = (() => {
-                    const td = document.createElement('td');
-                    const sel = document.createElement('select');
-                    sel.className = 'order-status-select';
-                    const opts = [
-            { v: 'new', t: 'Новый' },
-            { v: 'paid', t: 'Оплачен' },
-            { v: 'cancelled', t: 'Отменён' }
-                    ];
-                    opts.forEach(opt => { const oEl = document.createElement('option'); oEl.value = opt.v; oEl.textContent = opt.t; if ((o.status||'new')===opt.v) oEl.selected = true; sel.appendChild(oEl); });
-                    sel.addEventListener('change', async () => {
-                        try {
-                            sel.disabled = true;
-                            const form = new FormData(); form.append('initData', (window.Telegram?.WebApp?.initData || '')); form.append('status', sel.value);
-                            const r = await fetch(`/api/admin/orders/${encodeURIComponent(o.id)}/status`, { method: 'POST', body: form });
-                            const d = await r.json().catch(()=>({}));
-                            if (!r.ok) { throw new Error(d && (d.message||d.error) || 'Ошибка сохранения'); }
-                            // ok
-                        } catch (e) {
-                            console.warn('update status failed', e);
-                            try { window.Telegram?.WebApp?.showAlert?.('Не удалось обновить статус'); } catch(_) {}
-                        } finally { sel.disabled = false; }
-                    });
-                    td.appendChild(sel); return td;
-                })();
-                tr.innerHTML = `<td>${escapeHtml(String(o.id||String(idx+1)))}</td>`+
-                               `<td><a href="${userHref}" target="_blank" rel="noopener noreferrer" class="user-link">${escapeHtml(userLabel)}</a></td>`+
-                               `<td>${escapeHtml(items)}</td>`+
-                               `<td>${qty}</td>`+
-                               `<td>${Number(o.total||0).toLocaleString()}</td>`+
-                               `<td>${when}</td>`;
-                tr.appendChild(statusCell);
-                tbody.appendChild(tr);
-            });
-            const upd = document.getElementById('admin-orders-updated');
-            if (upd) { try { upd.textContent = `Обновлено: ${new Date().toLocaleString()}`; } catch(_) {} }
-        } catch (e) {
-            console.warn('Admin orders fallback to local', e);
-            const orders = readOrders().slice().sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
-            tbody.innerHTML = '';
-            orders.forEach((o, idx) => {
-                const tr = document.createElement('tr');
-                const when = (()=>{ try { return new Date(o.created_at).toLocaleString(); } catch(_) { return o.created_at || ''; } })();
-                // Сводим локальные позиции в preview и qty
-                const itemsArr = Array.isArray(o.items) ? o.items : [];
-                const itemsPreview = itemsArr.map(it => `${(it.name||it.id||'Товар')}×${Number(it.qty||it.quantity||1)}`).join(', ');
-                const itemsQty = itemsArr.reduce((s,it)=> s + Number(it.qty||it.quantity||1), 0);
-                const userId = String(o.user_id||'');
-                const userLabel = `ID ${userId}`;
-                tr.innerHTML = `<td>${escapeHtml(o.id||String(idx+1))}</td>`+
-                               `<td><a href="https://t.me/user?id=${encodeURIComponent(userId)}" target="_blank" rel="noopener noreferrer" class="user-link">${escapeHtml(userLabel)}</a></td>`+
-                               `<td>${escapeHtml(itemsPreview)}</td>`+
-                               `<td>${itemsQty}</td>`+
-                               `<td>${Number(o.total||0).toLocaleString()}</td>`+
-                               `<td>${when}</td>`;
-                tbody.appendChild(tr);
-            });
-            const upd = document.getElementById('admin-orders-updated');
-            if (upd) { try { upd.textContent = `Обновлено: ${new Date().toLocaleString()}`; } catch(_) {} }
-        }
-    }
-
-    // ---------- Мои заказы ----------
-    async function renderMyOrders() {
-        const pane = document.getElementById('shop-pane-myorders');
-        if (!pane) return;
-        pane.innerHTML = '<div style="padding:12px; color: var(--gray);">Загрузка...</div>';
-        const initData = window.Telegram?.WebApp?.initData || '';
-        try {
-            if (!initData) throw new Error('no-telegram');
-            const form = new FormData(); form.append('initData', initData);
-            const resp = await fetch('/api/shop/my-orders', { method: 'POST', body: form });
-            const data = await resp.json();
-            if (!resp.ok) throw new Error(data && data.error || 'Ошибка загрузки');
-            const orders = (data && data.orders) ? data.orders.slice() : [];
-            if (!orders.length) { pane.innerHTML = '<div style="padding:12px; color: var(--gray);">Заказов пока нет.</div>'; return; }
-            const wrap = document.createElement('div');
-            wrap.className = 'cart-list';
-            const statusRu = (s) => ({ new: 'Новый', paid: 'Оплачен', cancelled: 'Отменён' }[s] || s);
-            orders.forEach(o => {
-                const line = document.createElement('div'); line.className = 'cart-line';
-                const id = document.createElement('div'); id.className = 'cart-left'; id.textContent = `Заказ №${o.id}`;
-                const sum = document.createElement('div'); sum.className = 'cart-right'; sum.textContent = `${Number(o.total||0).toLocaleString()} кр.`;
-                const when = document.createElement('div'); when.style.flex='1'; when.style.textAlign='center'; when.style.color='var(--gray)'; when.textContent = (()=>{ try { return new Date(o.created_at).toLocaleString(); } catch(_) { return o.created_at || ''; } })();
-                // Статус
-                const st = document.createElement('div'); st.style.minWidth = '84px'; st.style.textAlign = 'right'; st.textContent = statusRu(o.status||'new');
-                line.append(id, when, sum, st);
-                wrap.appendChild(line);
-            });
-            pane.innerHTML = '';
-            pane.appendChild(wrap);
-        } catch (e) {
-            console.warn('My orders fallback to local', e);
-            const orders = readOrders().slice().sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
-            if (!orders.length) { pane.innerHTML = '<div style="padding:12px; color: var(--gray);">Заказов пока нет.</div>'; return; }
-            const wrap = document.createElement('div');
-            wrap.className = 'cart-list';
-            orders.forEach(o => {
-                const line = document.createElement('div'); line.className = 'cart-line';
-                const id = document.createElement('div'); id.className = 'cart-left'; id.textContent = `${o.id}`;
-                const sum = document.createElement('div'); sum.className = 'cart-right'; sum.textContent = `${Number(o.total||0).toLocaleString()} кр.`;
-                const when = document.createElement('div'); when.style.flex='1'; when.style.textAlign='center'; when.style.color='var(--gray)'; when.textContent = (()=>{ try { return new Date(o.created_at).toLocaleString(); } catch(_) { return o.created_at || ''; } })();
-                line.append(id, when, sum);
-                wrap.appendChild(line);
-            });
-            pane.innerHTML = '';
-            pane.appendChild(wrap);
-        }
-    }
-
-    // -------------- Бейдж корзины --------------
-    function updateCartBadge() {
-        try {
-            const navItem = document.querySelector('.nav-item[data-tab="shop"]');
-            if (!navItem) return;
-            const cart = readCart();
-            const count = cart.reduce((s, it) => s + (it.qty||1), 0);
-            // Fallback: update label text for accessibility
-            const label = navItem.querySelector('.nav-label');
-            if (label) label.textContent = count > 0 ? `Магазин (${count})` : 'Магазин';
-            // Badge element
-            let badge = navItem.querySelector('.nav-badge');
-            if (count > 0) {
-                if (!badge) { badge = document.createElement('div'); badge.className = 'nav-badge'; navItem.appendChild(badge); }
-                badge.textContent = String(count);
-            } else if (badge) {
-                badge.remove();
-            }
-        } catch(_) {}
-    }
+    // Магазин вынесен в static/js/shop.js (window.Shop)
 
     let _leagueLoading = false;
     function loadLeagueTable() {
         if (_leagueLoading) return;
-    const table = document.getElementById('league-table');
-    const updatedWrap = document.getElementById('league-table-updated');
-    const updatedText = document.getElementById('league-updated-text');
+        const table = document.getElementById('league-table');
+        const updatedWrap = document.getElementById('league-table-updated');
+        const updatedText = document.getElementById('league-updated-text');
         if (!table) return;
         _leagueLoading = true;
-        fetch('/api/league-table').then(r => r.json()).then(data => {
-            const tbody = table.querySelector('tbody');
-            tbody.innerHTML = '';
-            const rows = data.values || [];
-        for (let i = 0; i < 10; i++) {
-                const r = rows[i] || [];
-                const tr = document.createElement('tr');
-                for (let j = 0; j < 8; j++) {
-                    const td = document.createElement('td');
-            td.textContent = (r[j] ?? '').toString();
-                    tr.appendChild(td);
+        fetch('/api/league-table')
+            .then(r => r.json())
+            .then(data => {
+                try { window.League?.renderLeagueTable?.(table, updatedText, data); } catch(_) {
+                    // fallback: nothing, errors are non-fatal
                 }
-                tbody.appendChild(tr);
-            }
-            // подсветка топ-3 только для строк 2..4, т.к. первая строка — заголовки
-            const trs = tbody.querySelectorAll('tr');
-            trs.forEach((rowEl, idx) => {
-                // idx: 0..9 — если 0 это заголовок, подсвечиваем 1..3
-                if (idx === 1) rowEl.classList.add('rank-1');
-                if (idx === 2) rowEl.classList.add('rank-2');
-                if (idx === 3) rowEl.classList.add('rank-3');
-            });
-            if (updatedText && data.updated_at) {
-                setUpdatedLabelSafely(updatedText, data.updated_at);
-            }
-            // показать кнопку обновления для админа (обработчик навешивается один раз выше)
-            const refreshBtn = document.getElementById('league-refresh-btn');
-            const adminId = document.body.getAttribute('data-admin');
-            const currentId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : '';
-            if (updatedWrap && refreshBtn && adminId && currentId && String(adminId) === currentId) {
-                refreshBtn.style.display = '';
-            }
-            // после первой успешной загрузки таблицы, если достижения уже готовы — можно сигналить all-ready
-            _tableLoaded = true;
-            trySignalAllReady();
-        }).catch(err => {
-            console.error('league table load error', err);
-        }).finally(() => {
-            // не блокируем сплэш: считаем таблицу загруженной даже при ошибке
-            _tableLoaded = true;
-            trySignalAllReady();
-            _leagueLoading = false;
-        });
+                // показать кнопку обновления для админа (обработчик навешивается один раз выше)
+                const refreshBtn = document.getElementById('league-refresh-btn');
+                const adminId = document.body.getAttribute('data-admin');
+                const currentId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : '';
+                if (updatedWrap && refreshBtn && adminId && currentId && String(adminId) === currentId) {
+                    refreshBtn.style.display = '';
+                }
+                _tableLoaded = true;
+                trySignalAllReady();
+            })
+            .catch(err => { console.error('league table load error', err); })
+            .finally(() => { _tableLoaded = true; trySignalAllReady(); _leagueLoading = false; });
     }
 
     // Безопасное обновление метки "Обновлено":
     // - хранит текущий ISO в data-updated-iso
     // - обновляет текст только если новый ts >= текущего
-    function setUpdatedLabelSafely(labelEl, newIso) {
-        try {
-            const prevIso = labelEl.getAttribute('data-updated-iso');
-            const prevTs = prevIso ? Date.parse(prevIso) : 0;
-            const nextTs = Date.parse(newIso);
-            if (!Number.isFinite(nextTs)) return;
-            if (nextTs >= prevTs) {
-                labelEl.setAttribute('data-updated-iso', newIso);
-                const d = new Date(newIso);
-                labelEl.textContent = `Обновлено: ${d.toLocaleString()}`;
-            }
-        } catch(_) {}
-    }
+    function setUpdatedLabelSafely(labelEl, newIso) { try { window.League?.setUpdatedLabelSafely?.(labelEl, newIso); } catch(_) {} }
 
     let _statsLoading = false;
     function loadStatsTable() {
@@ -1536,34 +1039,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const updated = document.getElementById('stats-table-updated');
         if (!table) return;
         _statsLoading = true;
-        fetch('/api/stats-table').then(r => r.json()).then(data => {
-            const tbody = table.querySelector('tbody');
-            tbody.innerHTML = '';
-            const rows = data.values || [];
-            for (let i = 0; i < 11; i++) {
-                const r = rows[i] || [];
-                const tr = document.createElement('tr');
-                for (let j = 0; j < 7; j++) {
-                    const td = document.createElement('td');
-                    td.textContent = (r[j] ?? '').toString();
-                    tr.appendChild(td);
-                }
-                tbody.appendChild(tr);
-            }
-            // подсветка топ-3 для строк 2..4 (0 — заголовки)
-            const trs = tbody.querySelectorAll('tr');
-            trs.forEach((rowEl, idx) => {
-                if (idx === 1) rowEl.classList.add('rank-1');
-                if (idx === 2) rowEl.classList.add('rank-2');
-                if (idx === 3) rowEl.classList.add('rank-3');
-            });
-            if (updated && data.updated_at) {
-                const d = new Date(data.updated_at);
-                updated.textContent = `Обновлено: ${d.toLocaleString()}`;
-            }
-    }).catch(err => {
-            console.error('stats table load error', err);
-    }).finally(() => { _statsLoading = false; });
+        fetch('/api/stats-table')
+            .then(r => r.json())
+            .then(data => { try { window.League?.renderStatsTable?.(table, updated, data); } catch(_) {} })
+            .catch(err => { console.error('stats table load error', err); })
+            .finally(() => { _statsLoading = false; });
     }
 
     // --------- ЛИДЕРБОРД ---------
@@ -1798,290 +1278,14 @@ document.addEventListener('DOMContentLoaded', () => {
             tryNext();
         };
     const renderSchedule = (data) => {
-            const ds = data?.tours ? data : (data?.data || {});
-            const tours = ds.tours || [];
-            if (!tours.length) {
-                // Если уже есть контент, не затираем его пустым ответом
-                if (pane.childElementCount > 0 || pane.dataset.hasContent === '1') {
-                    return;
+            try { window.League?.renderSchedule?.(pane, data?.data || data); } catch(_) {
+                // fall back: preserve existing empty state
+                const ds = data?.tours ? data : (data?.data || {});
+                const tours = ds.tours || [];
+                if (!tours.length && !(pane.childElementCount > 0 || pane.dataset.hasContent === '1')) {
+                    pane.innerHTML = '<div class="schedule-empty">Нет ближайших туров</div>';
                 }
-                pane.innerHTML = '<div class="schedule-empty">Нет ближайших туров</div>';
-                return;
             }
-            pane.innerHTML = '';
-            tours.forEach(t => {
-                const tourEl = document.createElement('div');
-                tourEl.className = 'tour-block';
-                const title = document.createElement('div');
-                title.className = 'tour-title';
-                title.textContent = t.title || `Тур ${t.tour || ''}`;
-                tourEl.appendChild(title);
-
-                (t.matches || []).forEach(m => {
-                    const card = document.createElement('div');
-                    card.className = 'match-card';
-                    const header = document.createElement('div');
-                    header.className = 'match-header';
-                    const dateStr = (() => {
-                        try {
-                            if (m.date) {
-                                const d = new Date(m.date);
-                                const dd = d.toLocaleDateString();
-                                return dd;
-                            }
-                        } catch(_) {}
-                        return '';
-                    })();
-                    const timeStr = m.time || '';
-                    // LIVE вычисление: если есть точное datetime, используем его; иначе, если дата сегодня и время пусто, считаем не LIVE
-                    const now = new Date();
-                    let isLive = false;
-                    try {
-                        if (m.datetime) {
-                            const dt = new Date(m.datetime);
-                            // считаем live, если dt <= now < dt+2ч
-                            const dtEnd = new Date(dt.getTime() + 2*60*60*1000);
-                            isLive = now >= dt && now < dtEnd;
-                        } else if (m.date && m.time) {
-                            const dt = new Date(m.date + 'T' + (m.time.length===5? m.time+':00': m.time));
-                            const dtEnd = new Date(dt.getTime() + 2*60*60*1000);
-                            isLive = now >= dt && now < dtEnd;
-                        }
-                    } catch(_) {}
-                    const headerText = document.createElement('span');
-                    headerText.textContent = `${dateStr}${timeStr ? ' ' + timeStr : ''}`;
-                    header.appendChild(headerText);
-                    if (isLive) {
-                        const live = document.createElement('span'); live.className = 'live-badge';
-                        const dot = document.createElement('span'); dot.className = 'live-dot';
-                        const lbl = document.createElement('span'); lbl.textContent = 'В ЭФИРЕ';
-                        live.append(dot, lbl);
-                        header.appendChild(live);
-                    }
-                    card.appendChild(header);
-
-                    const center = document.createElement('div');
-                    center.className = 'match-center';
-                    const home = document.createElement('div'); home.className = 'team home';
-                    const hImg = document.createElement('img'); hImg.className = 'logo'; hImg.alt = m.home || '';
-                    loadTeamLogo(hImg, m.home || '');
-                    const hName = document.createElement('div'); hName.className = 'team-name'; hName.setAttribute('data-team-name', m.home || ''); hName.textContent = withTeamCount(m.home || '');
-                    home.append(hImg, hName);
-                    const score = document.createElement('div'); score.className = 'score'; score.textContent = 'VS';
-                    const away = document.createElement('div'); away.className = 'team away';
-                    const aImg = document.createElement('img'); aImg.className = 'logo'; aImg.alt = m.away || '';
-                    loadTeamLogo(aImg, m.away || '');
-                    const aName = document.createElement('div'); aName.className = 'team-name'; aName.setAttribute('data-team-name', m.away || ''); aName.textContent = withTeamCount(m.away || '');
-                    away.append(aImg, aName);
-                    center.append(home, score, away);
-                    card.appendChild(center);
-
-                    // Голосование: показываем только если на этот матч есть ставки
-                    const mkKey = (obj) => {
-                        try {
-                            const h = (obj?.home || '').toLowerCase().trim();
-                            const a = (obj?.away || '').toLowerCase().trim();
-                            const raw = obj?.date ? String(obj.date) : (obj?.datetime ? String(obj.datetime) : '');
-                            const d = raw ? raw.slice(0, 10) : '';
-                            return `${h}__${a}__${d}`;
-                        } catch(_) { return `${(obj?.home||'').toLowerCase()}__${(obj?.away||'').toLowerCase()}__`; }
-                    };
-                    const toursCache = (() => { try { return JSON.parse(localStorage.getItem('betting:tours') || 'null'); } catch(_) { return null; } })();
-                    const tourMatches = new Set();
-                    try { const tours = toursCache?.data?.tours || toursCache?.tours || []; tours.forEach(t => (t.matches||[]).forEach(x => tourMatches.add(mkKey(x)))); } catch(_) {}
-                    const thisKey = mkKey(m);
-                    const hasBetting = tourMatches.has(thisKey);
-                    if (hasBetting) {
-                        const voteWrap = document.createElement('div'); voteWrap.className = 'vote-inline';
-                        const voteTitle = document.createElement('div'); voteTitle.className = 'vote-title'; voteTitle.textContent = 'Голосование';
-                        const strip = document.createElement('div'); strip.className = 'vote-strip';
-                        const segH = document.createElement('div'); segH.className = 'seg seg-h';
-                        const segD = document.createElement('div'); segD.className = 'seg seg-d';
-                        const segA = document.createElement('div'); segA.className = 'seg seg-a';
-                        strip.append(segH, segD, segA);
-                        const legend = document.createElement('div'); legend.className = 'vote-legend'; legend.innerHTML = '<span>П1</span><span>X</span><span>П2</span>';
-                        voteWrap.append(voteTitle, strip, legend);
-                        card.appendChild(voteWrap);
-                        // функции updateAgg и загрузки перенесены ниже (используют segH/segD/segA)
-                    }
-
-                    const updateAgg = (agg) => {
-                        const h = Number(agg?.home||0), d = Number(agg?.draw||0), a = Number(agg?.away||0);
-                        const sum = Math.max(1, h+d+a);
-                        const ph = Math.round(h*100/sum), pd = Math.round(d*100/sum), pa = Math.round(a*100/sum);
-                        segH.style.width = ph+'%'; segD.style.width = pd+'%'; segA.style.width = pa+'%';
-                        try {
-                            const my = (agg && agg.my_choice) ? String(agg.my_choice).toLowerCase() : null;
-                            if (my) { voteBtns.querySelectorAll('button').forEach(b=>b.disabled=true); }
-                        } catch(_) {}
-                    };
-                    try {
-                        if (hasBetting) {
-                            const params = new URLSearchParams({ home: m.home||'', away: m.away||'', date: (m.date||'').slice(0,10) });
-                            params.append('initData', (window.Telegram?.WebApp?.initData || ''));
-                            fetch(`/api/vote/match-aggregates?${params.toString()}`).then(r=>r.json()).then(updateAgg).catch(()=>{});
-                        }
-                    } catch(_) {}
-
-                    // Кнопки голосования
-            const voteBtns = document.createElement('div'); voteBtns.className = 'vote-btns';
-            const mkBtn = (code, text) => { const b = document.createElement('button'); b.className = 'details-btn'; b.textContent = text; b.addEventListener('click', async ()=>{
-                        try {
-                            const tg = window.Telegram?.WebApp || null; const fd = new FormData();
-                            fd.append('initData', tg?.initData || ''); fd.append('home', m.home||''); fd.append('away', m.away||''); fd.append('date', (m.date||'').slice(0,10)); fd.append('choice', code);
-                const r = await fetch('/api/vote/match', { method:'POST', body: fd }); const d = await r.json().catch(()=>({})); if (!r.ok) { throw new Error(d?.error||'Ошибка'); }
-                // блокируем дальнейшие голоса
-                voteBtns.querySelectorAll('button').forEach(x=>x.disabled=true);
-                // перезагрузим агрегаты с initData, чтобы отобразился my_choice
-                const params = new URLSearchParams({ home: m.home||'', away: m.away||'', date: (m.date||'').slice(0,10) });
-                params.append('initData', tg?.initData || '');
-                const agg = await fetch(`/api/vote/match-aggregates?${params.toString()}`).then(x=>x.json()).catch(()=>null);
-                            if (agg) updateAgg(agg);
-                        } catch(err) { try { window.Telegram?.WebApp?.showAlert?.('Не удалось сохранить голос'); } catch(_) {} }
-                    }); return b; };
-                    if (hasBetting) {
-                        voteBtns.style.display = 'flex';
-                        voteBtns.style.justifyContent = 'center';
-                        voteBtns.style.gap = '10px';
-                        voteBtns.append(mkBtn('home','За П1'), mkBtn('draw','За X'), mkBtn('away','За П2'));
-                        card.appendChild(voteBtns);
-                    }
-
-                    const footer = document.createElement('div');
-                    footer.className = 'match-footer';
-                    // Кнопка «⭐ На главную» для админа (назначить Матч недели)
-                    try {
-                        const adminId = document.body.getAttribute('data-admin');
-                        const currentId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id ? String(window.Telegram.WebApp.initDataUnsafe.user.id) : '';
-                        if (adminId && currentId && adminId === currentId) {
-                            const star = document.createElement('button');
-                            star.className = 'details-btn';
-                            star.textContent = '⭐ На главную';
-                            star.style.marginRight = '8px';
-                            star.addEventListener('click', async () => {
-                                try {
-                                    star.disabled = true; const orig = star.textContent; star.textContent = '...';
-                                    const fd = new FormData();
-                                    fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
-                                    fd.append('home', m.home || '');
-                                    fd.append('away', m.away || '');
-                                    if (m.date) fd.append('date', String(m.date).slice(0,10));
-                                    if (m.datetime) fd.append('datetime', String(m.datetime));
-                                    const r = await fetch('/api/feature-match/set', { method: 'POST', body: fd });
-                                    const j = await r.json().catch(()=>({}));
-                                    if (!r.ok) throw new Error(j?.error || 'Ошибка');
-                                    star.textContent = 'Назначено';
-                                } catch(e) {
-                                    try { window.Telegram?.WebApp?.showAlert?.('Не удалось назначить матч недели'); } catch(_) {}
-                                } finally { /* leave disabled to avoid спам */ }
-                            });
-                            footer.appendChild(star);
-                        }
-                    } catch(_) {}
-                    // Кнопка «Детали» (как было)
-                    const btnDetails = document.createElement('button');
-                    btnDetails.className = 'details-btn';
-                    btnDetails.textContent = 'Детали';
-                    btnDetails.setAttribute('data-throttle', '800');
-                    btnDetails.addEventListener('click', () => {
-                        const original = btnDetails.textContent;
-                        btnDetails.disabled = true; btnDetails.textContent = 'Загрузка контента...';
-                        const params = new URLSearchParams({ home: m.home || '', away: m.away || '' });
-                        const cacheKey = `md:${(m.home||'').toLowerCase()}::${(m.away||'').toLowerCase()}`;
-                        const cached = (() => { try { return JSON.parse(localStorage.getItem(cacheKey) || 'null'); } catch(_) { return null; } })();
-                        const fetchWithETag = (etag) => fetch(`/api/match-details?${params.toString()}`, { headers: etag ? { 'If-None-Match': etag } : {} })
-                            .then(async r => {
-                                if (r.status === 304 && cached) return cached;
-                                const data = await r.json();
-                                const version = data.version || r.headers.get('ETag') || null;
-                                const toStore = { data, version, ts: Date.now() };
-                                try { localStorage.setItem(cacheKey, JSON.stringify(toStore)); } catch(_) {}
-                                return toStore;
-                            });
-                        const go = (store) => {
-                            openMatchScreen({ home: m.home, away: m.away, date: m.date, time: m.time }, store?.data || store);
-                            btnDetails.disabled = false; btnDetails.textContent = original;
-                        };
-                        const FRESH_TTL = 10 * 60 * 1000;
-                        if (cached && (Date.now() - (cached.ts||0) < FRESH_TTL)) { go(cached); }
-                        else if (cached && cached.version) { fetchWithETag(cached.version).then(go).catch(() => { go(cached); }); }
-                        else if (cached) { go(cached); }
-                        else {
-                            fetchWithETag(null).then(go).catch(err => {
-                                console.error('match details load error', err);
-                                try { window.Telegram?.WebApp?.showAlert?.('Не удалось загрузить данные матча'); } catch(_) {}
-                                btnDetails.disabled = false; btnDetails.textContent = original;
-                            });
-                        }
-                    });
-                    footer.appendChild(btnDetails);
-                    // Кнопка «Сделать прогноз» показывается, только если ЭТОТ матч (с этой датой) есть в турах для ставок
-                    const btn = document.createElement('button');
-                    btn.className = 'details-btn';
-                    btn.setAttribute('data-throttle', '800');
-                    // toursCache, mkKey, tourMatches, thisKey уже объявлены выше — используем их
-                    const matchHasPrediction = tourMatches.has(thisKey);
-                    if (matchHasPrediction) {
-                        btn.textContent = 'Сделать прогноз';
-                        btn.addEventListener('click', async () => {
-                            // Переключаемся на вкладку Прогнозы
-                            try {
-                                document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-                                const navPred = document.querySelector('.nav-item[data-tab="predictions"]');
-                                if (navPred) navPred.classList.add('active');
-                                const prof = document.getElementById('tab-profile');
-                                const ufo = document.getElementById('tab-ufo');
-                                const preds = document.getElementById('tab-predictions');
-                                const lead = document.getElementById('tab-leaderboard');
-                                const shop = document.getElementById('tab-shop');
-                                const admin = document.getElementById('tab-admin');
-                                [prof, ufo, preds, lead, shop, admin].forEach(el => { if (el) el.style.display = 'none'; });
-                                if (preds) preds.style.display = '';
-                            } catch(_) {}
-                            // Убедимся, что туры загружены
-                            try { window.loadBetTours?.(); } catch(_) {}
-                            // Подождём до 1.5с появления карточек
-                            const waitForCard = () => new Promise((resolve) => {
-                                const started = Date.now();
-                                const tick = () => {
-                                    const host = document.getElementById('pred-tours');
-                                    if (host && host.querySelector('.match-card')) { resolve(); return; }
-                                    if (Date.now() - started > 1500) { resolve(); return; }
-                                    requestAnimationFrame(tick);
-                                };
-                                tick();
-                            });
-                            await waitForCard();
-                            // Прокрутка к нужной карточке и подсветка
-                            try {
-                                const host = document.getElementById('pred-tours');
-                                if (!host) return;
-                                const cards = host.querySelectorAll('.match-card');
-                                const targetH = (m.home||'').toLowerCase();
-                                const targetA = (m.away||'').toLowerCase();
-                                for (const c of cards) {
-                                    const h = (c.getAttribute('data-home') || '').toLowerCase();
-                                    const a = (c.getAttribute('data-away') || '').toLowerCase();
-                                    if (h === targetH && a === targetA) {
-                                        c.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                        c.classList.add('highlight');
-                                        setTimeout(()=> c.classList.remove('highlight'), 1600);
-                                        break;
-                                    }
-                                }
-                            } catch(_) {}
-                        });
-                        footer.appendChild(btn);
-                    }
-                    card.appendChild(footer);
-
-                    tourEl.appendChild(card);
-                });
-
-                pane.appendChild(tourEl);
-            });
-            // пометим, что контент есть
-            pane.dataset.hasContent = '1';
         };
 
         if (cached && (Date.now() - (cached.ts||0) < FRESH_TTL)) {
@@ -2154,78 +1358,12 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
     const renderResults = (data) => {
-            const all = data?.results || [];
-            if (!all.length) {
-                if (pane.childElementCount > 0 || pane.dataset.hasContent === '1') {
-                    return;
+            try { window.League?.renderResults?.(pane, data?.data || data); } catch(_) {
+                const all = data?.results || data?.data?.results || [];
+                if (!all.length && !(pane.childElementCount > 0 || pane.dataset.hasContent === '1')) {
+                    pane.innerHTML = '<div class="schedule-empty">Нет прошедших матчей</div>';
                 }
-                pane.innerHTML = '<div class="schedule-empty">Нет прошедших матчей</div>';
-                return;
             }
-            pane.innerHTML = '';
-            // Группируем по туру
-            const byTour = new Map();
-            all.forEach(m => { const t = m.tour || 0; if (!byTour.has(t)) byTour.set(t, []); byTour.get(t).push(m); });
-            // Список туров по убыванию номера/даты
-            const tourList = Array.from(byTour.keys()).sort((a,b)=>b-a);
-            const container = document.createElement('div');
-            container.className = 'results-container';
-            // Pager
-            const pager = document.createElement('div'); pager.className = 'results-pager';
-            const prev = document.createElement('button'); prev.className = 'pager-btn'; prev.textContent = '←';
-            const title = document.createElement('div'); title.className = 'pager-title';
-            const next = document.createElement('button'); next.className = 'pager-btn'; next.textContent = '→';
-            pager.append(prev, title, next);
-            const listWrap = document.createElement('div'); listWrap.className = 'results-list';
-            container.append(pager, listWrap);
-            pane.appendChild(container);
-
-            let idx = 0;
-            const renderPage = () => {
-                const tour = tourList[idx];
-                title.textContent = `${tour} Тур`;
-                listWrap.innerHTML = '';
-                const matches = (byTour.get(tour) || []).slice();
-                // сортируем внутри тура по времени (новые сверху)
-                matches.sort((m1,m2)=>{
-                    const d1 = m1.datetime || m1.date || ''; const d2 = m2.datetime || m2.date || '';
-                    return (d2 > d1) ? 1 : (d2 < d1 ? -1 : 0);
-                });
-                matches.forEach(m => {
-                    const card = document.createElement('div');
-                    card.className = 'match-card result';
-                    const header = document.createElement('div'); header.className = 'match-header';
-                    const dateStr = (() => { try { if (m.date) { const d = new Date(m.date); return d.toLocaleDateString(); } } catch(_) {} return ''; })();
-                    header.textContent = `${dateStr}${m.time ? ' ' + m.time : ''}`;
-                    card.appendChild(header);
-
-                    const center = document.createElement('div'); center.className = 'match-center';
-                    const home = document.createElement('div'); home.className = 'team home';
-                    const hImg = document.createElement('img'); hImg.className = 'logo'; hImg.alt = m.home || '';
-                    loadTeamLogo(hImg, m.home || '');
-                    const hName = document.createElement('div'); hName.className = 'team-name'; hName.setAttribute('data-team-name', m.home || ''); hName.textContent = withTeamCount(m.home || '');
-                    home.append(hImg, hName);
-                    const score = document.createElement('div'); score.className = 'score';
-                    const sH = (m.score_home || '').toString().trim(); const sA = (m.score_away || '').toString().trim();
-                    score.textContent = (sH && sA) ? `${sH} : ${sA}` : '— : —';
-                    const away = document.createElement('div'); away.className = 'team away';
-                    const aImg = document.createElement('img'); aImg.className = 'logo'; aImg.alt = m.away || '';
-                    loadTeamLogo(aImg, m.away || '');
-                    const aName = document.createElement('div'); aName.className = 'team-name'; aName.setAttribute('data-team-name', m.away || ''); aName.textContent = withTeamCount(m.away || '');
-                    away.append(aImg, aName);
-
-                    // Подсветка победителя отключена по требованию
-
-                    center.append(home, score, away);
-                    card.appendChild(center);
-                    listWrap.appendChild(card);
-                });
-                prev.disabled = idx <= 0; next.disabled = idx >= tourList.length - 1;
-            };
-            prev.onclick = () => { if (idx > 0) { idx--; renderPage(); window.scrollTo({ top: 0, behavior: 'smooth' }); } };
-            next.onclick = () => { if (idx < tourList.length - 1) { idx++; renderPage(); window.scrollTo({ top: 0, behavior: 'smooth' }); } };
-            renderPage();
-            pane.dataset.hasContent = '1';
         };
 
         const go = (store) => { renderResults(store?.data || store); _resultsLoading = false; _resultsPreloaded = true; trySignalAllReady(); };
@@ -3104,6 +2242,7 @@ document.addEventListener('DOMContentLoaded', () => {
             start();
         }
     }
+    try { window.openMatchScreen = openMatchScreen; } catch(_) {}
 
     // Рендер спецсобытий (внутри деталей матча)
     function renderSpecialsPane(host, m) {
@@ -3500,6 +2639,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Стартовая предзагрузка UFO-данных во время заставки
     preloadUfoData();
     setupEventListeners();
+    try { window.Shop?.updateCartBadge?.(); } catch(_) {}
 
     // ---------- LIVE notifications ----------
     const LiveWatcher = (() => {

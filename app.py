@@ -3161,9 +3161,11 @@ def parse_and_verify_telegram_init_data(init_data: str, max_age_seconds: int = 2
     data_check_string = '\n'.join([f"{k}={v[0]}" for k, v in sorted(parsed.items())])
 
     # Секретный ключ по требованиям Telegram WebApp:
-    # secret_key = HMAC_SHA256(key=bot_token, data="WebAppData")
-    # Ранее здесь аргументы были перепутаны, что приводило к ошибке валидации initData
-    secret_key = hmac.new(bot_token.encode(), b"WebAppData", hashlib.sha256).digest()
+    # secret_key = HMAC_SHA256(key="WebAppData", data=bot_token)
+    # Затем calculated_hash = HMAC_SHA256(key=secret_key, data=data_check_string)
+    # Важно: первым параметром в hmac.new идёт ключ (key), вторым — сообщение (msg)
+    # Ранее здесь был перепутан порядок аргументов, из-за чего валидация всегда падала
+    secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
     calculated_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
     if calculated_hash != received_hash:
         return None
