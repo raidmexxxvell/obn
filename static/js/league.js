@@ -151,6 +151,62 @@
       center.append(home, score, away);
       card.appendChild(center);
 
+      // Голосование (П1/X/П2) — показываем только если матч входит в ставочные туры
+      try {
+        const toursCache = (() => { try { return JSON.parse(localStorage.getItem('betting:tours') || 'null'); } catch(_) { return null; } })();
+        const mkKey = (obj) => { try { const h=(obj?.home||'').toLowerCase().trim(); const a=(obj?.away||'').toLowerCase().trim(); const raw=obj?.date?String(obj.date):(obj?.datetime?String(obj.datetime):''); const d=raw?raw.slice(0,10):''; return `${h}__${a}__${d}`; } catch(_) { return `${(obj?.home||'').toLowerCase()}__${(obj?.away||'').toLowerCase()}__`; } };
+        const tourMatches = new Set();
+        try { const tours=toursCache?.data?.tours || toursCache?.tours || []; tours.forEach(t => (t.matches||[]).forEach(x => tourMatches.add(mkKey(x)))); } catch(_) {}
+        if (tourMatches.has(mkKey(m))) {
+          const wrap = document.createElement('div'); wrap.className = 'vote-inline';
+          const title = document.createElement('div'); title.className = 'vote-title'; title.textContent = 'Голосование';
+          const bar = document.createElement('div'); bar.className = 'vote-strip';
+          const segH = document.createElement('div'); segH.className = 'seg seg-h';
+          const segD = document.createElement('div'); segD.className = 'seg seg-d';
+          const segA = document.createElement('div'); segA.className = 'seg seg-a';
+          bar.append(segH, segD, segA);
+          const legend = document.createElement('div'); legend.className = 'vote-legend'; legend.innerHTML = '<span>П1</span><span>X</span><span>П2</span>';
+          const btns = document.createElement('div'); btns.className = 'vote-inline-btns';
+          const mkBtn = (code, text) => {
+            const b = document.createElement('button'); b.className = 'details-btn'; b.textContent = text;
+            b.addEventListener('click', async () => {
+              try {
+                const fd = new FormData();
+                fd.append('initData', window.Telegram?.WebApp?.initData || '');
+                fd.append('home', m.home || '');
+                fd.append('away', m.away || '');
+                const dkey = (m.date ? String(m.date) : (m.datetime ? String(m.datetime) : '')).slice(0,10);
+                fd.append('date', dkey);
+                fd.append('choice', code);
+                const r = await fetch('/api/vote/match', { method: 'POST', body: fd });
+                if (!r.ok) throw 0;
+                btns.querySelectorAll('button').forEach(x => x.disabled = true);
+                await loadAgg(true);
+              } catch (_) {}
+            });
+            return b;
+          };
+          btns.append(mkBtn('home','За П1'), mkBtn('draw','За X'), mkBtn('away','За П2'));
+          wrap.append(title, bar, legend, btns);
+          card.appendChild(wrap);
+
+          async function loadAgg(withInit){
+            try {
+              const dkey = (m.date ? String(m.date) : (m.datetime ? String(m.datetime) : '')).slice(0,10);
+              const params = new URLSearchParams({ home: m.home||'', away: m.away||'', date: dkey });
+              if (withInit) params.append('initData', (window.Telegram?.WebApp?.initData || ''));
+              const agg = await fetch(`/api/vote/match-aggregates?${params.toString()}`).then(r=>r.json());
+              const h = Number(agg?.home||0), d = Number(agg?.draw||0), a = Number(agg?.away||0);
+              const sum = Math.max(1, h+d+a);
+              const ph = Math.round(h*100/sum), pd = Math.round(d*100/sum), pa = Math.round(a*100/sum);
+              segH.style.width = ph+'%'; segD.style.width = pd+'%'; segA.style.width = pa+'%';
+              if (agg && agg.my_choice) { btns.querySelectorAll('button').forEach(x=>x.disabled=true); }
+            } catch(_){ segH.style.width='33%'; segD.style.width='34%'; segA.style.width='33%'; }
+          }
+          loadAgg(true);
+        }
+      } catch(_) {}
+
       // Кнопка «Детали» и админ-«⭐ На главную» из прежней логики
       const footer = document.createElement('div'); footer.className='match-footer';
       try {
@@ -167,6 +223,8 @@
               if (m.date) fd.append('date', String(m.date).slice(0,10)); if (m.datetime) fd.append('datetime', String(m.datetime));
               const r = await fetch('/api/feature-match/set', { method: 'POST', body: fd }); const j = await r.json().catch(()=>({}));
               if (!r.ok) throw new Error(j?.error || 'Ошибка'); star.textContent = 'Назначено';
+              try { window.renderTopMatchOfWeek?.(); } catch(_) {}
+              try { document.dispatchEvent(new CustomEvent('feature-match:set', { detail: { match: m } })); } catch(_) {}
             } catch(_) { try { window.Telegram?.WebApp?.showAlert?.('Не удалось назначить матч недели'); } catch(_) {} }
           });
           footer.appendChild(star);

@@ -929,7 +929,21 @@ document.addEventListener('DOMContentLoaded', () => {
             head.textContent = when || (m.date||'');
             card.appendChild(head);
             const center = document.createElement('div'); center.className = 'match-center';
-            const L = (name) => { const t = document.createElement('div'); t.className = 'team'; const i = document.createElement('img'); i.className='logo'; loadTeamLogo(i, name||''); const n = document.createElement('div'); n.className='team-name'; n.textContent = name||''; t.append(i, n); return t; };
+            // Локальный загрузчик логотипов (не зависит от других модулей)
+            const loadLogo = (imgEl, teamName) => {
+                const base = '/static/img/team-logos/';
+                const name = (teamName || '').trim();
+                const candidates = [];
+                if (name) {
+                    const norm = name.toLowerCase().replace(/\s+/g, '').replace(/ё/g, 'е');
+                    candidates.push(base + encodeURIComponent(norm + '.png') + `?v=${Date.now()}`);
+                }
+                candidates.push(base + 'default.png' + `?v=${Date.now()}`);
+                let idx = 0;
+                const tryNext = () => { if (idx >= candidates.length) return; imgEl.onerror = () => { idx++; tryNext(); }; imgEl.src = candidates[idx]; };
+                tryNext();
+            };
+            const L = (name) => { const t = document.createElement('div'); t.className = 'team'; const i = document.createElement('img'); i.className='logo'; loadLogo(i, name||''); const n = document.createElement('div'); n.className='team-name'; n.textContent = name||''; t.append(i, n); return t; };
             center.append(L(m.home), (()=>{const s=document.createElement('div'); s.className='score'; s.textContent='VS'; return s;})(), L(m.away));
             card.appendChild(center);
             // Горизонтальная полоса голосования «П1 • X • П2» (показываем только если на матч есть ставки)
@@ -996,6 +1010,8 @@ document.addEventListener('DOMContentLoaded', () => {
         loadAgg(true);
         } catch(_) {}
     }
+    // Сделаем доступной глобально для вызова из других модулей (например, после назначения матча недели)
+    try { window.renderTopMatchOfWeek = renderTopMatchOfWeek; } catch(_) {}
 
     // Магазин вынесен в static/js/shop.js (window.Shop)
 
