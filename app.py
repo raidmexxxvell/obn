@@ -5914,8 +5914,8 @@ def api_streams_get():
             win = int(request.args.get('window') or '60')
         except Exception:
             win = 60
-        # минимальное окно 10 минут, максимум 480 минут (8 часов)
-        win = max(10, min(480, win))
+        # минимальное окно 10 минут
+        win = max(10, min(240, win))
         # найдём матч и время старта
         start_ts = None
         try:
@@ -5969,6 +5969,25 @@ def api_streams_get():
                                 raise StopIteration
         except StopIteration:
             pass
+        # Если по указанной дате не нашли старт — попробуем вычислить его без учёта даты
+        if start_ts is None and date_str:
+            try:
+                for t in tours or []:
+                    for m in (t.get('matches') or []):
+                        if (m.get('home') == home and m.get('away') == away):
+                            if m.get('datetime'):
+                                start_ts = int(datetime.fromisoformat(m['datetime']).timestamp() * 1000)
+                                raise StopIteration
+                            if m.get('date'):
+                                d = datetime.fromisoformat(str(m['date'])).date()
+                                try:
+                                    tm = datetime.strptime((m.get('time') or '00:00'), "%H:%M").time()
+                                except Exception:
+                                    tm = datetime.min.time()
+                                start_ts = int(datetime.combine(d, tm).timestamp() * 1000)
+                                raise StopIteration
+            except StopIteration:
+                pass
         # Сдвигаем текущее время по настройке SCHEDULE_TZ_SHIFT_*
         try:
             tz_min = int(os.environ.get('SCHEDULE_TZ_SHIFT_MIN') or '0')

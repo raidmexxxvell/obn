@@ -2102,6 +2102,19 @@ document.addEventListener('DOMContentLoaded', () => {
                         // больше не проверяем
                         if (streamPane.__streamTimer) { clearTimeout(streamPane.__streamTimer); streamPane.__streamTimer = null; }
                     } else {
+                        // Попробуем локальный реестр (если подключен streams.js) как резервный источник
+                        try {
+                            if (window.__STREAMS__ && typeof window.__STREAMS__.findStream === 'function') {
+                                const alt = window.__STREAMS__.findStream(match);
+                                if (alt) {
+                                    streamPane.__streamInfo = alt;
+                                    const isActiveAlt = subtabs?.querySelector('[data-mdtab="stream"]')?.classList.contains('active');
+                                    if (isActiveAlt && !streamPane.__inited) setTimeout(() => buildStream(alt), 50);
+                                    if (streamPane.__streamTimer) { clearTimeout(streamPane.__streamTimer); streamPane.__streamTimer = null; }
+                                    return;
+                                }
+                            }
+                        } catch(_) {}
                         // если есть кэш и матч ещё не закончился — используем кэш, чтобы вкладка не пропадала
                         const cached = readCached();
                         const now = Date.now();
