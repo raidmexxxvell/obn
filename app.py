@@ -5254,8 +5254,20 @@ def api_streams_upcoming():
             window_min = int(request.args.get('window_min') or '60')
         except Exception:
             window_min = 60
-        window_min = max(10, min(240, window_min))
-        now = datetime.now()
+        # Минимум 20 минут, чтобы матч гарантированно появился заранее
+        window_min = max(20, min(240, window_min))
+        # Сдвиг локального времени расписания относительно системного времени сервера
+        try:
+            tz_min = int(os.environ.get('SCHEDULE_TZ_SHIFT_MIN') or '0')
+        except Exception:
+            tz_min = 0
+        if tz_min == 0:
+            try:
+                tz_h = int(os.environ.get('SCHEDULE_TZ_SHIFT_HOURS') or '0')
+            except Exception:
+                tz_h = 0
+            tz_min = tz_h * 60
+        now = datetime.now() + timedelta(minutes=tz_min)
         until = now + timedelta(minutes=window_min)
         # Достаём расписание из снапшота; если пусто — из таблицы
         tours = []
@@ -5278,7 +5290,6 @@ def api_streams_upcoming():
                         dt = datetime.fromisoformat(str(m['datetime']))
                     elif m.get('date'):
                         d = datetime.fromisoformat(str(m['date'])).date()
-                        tm = None
                         try:
                             tm = datetime.strptime((m.get('time') or '00:00'), "%H:%M").time()
                         except Exception:
@@ -5286,6 +5297,7 @@ def api_streams_upcoming():
                         dt = datetime.combine(d, tm)
                     if not dt:
                         continue
+                    # Показываем матчи, которые начнутся в течение окна, а также те, что уже в статусе soon/live (по времени)
                     if now <= dt <= until:
                         matches.append({ 'home': m.get('home',''), 'away': m.get('away',''), 'datetime': dt.isoformat() })
                 except Exception:

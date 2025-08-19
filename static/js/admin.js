@@ -71,7 +71,7 @@
     if (!list || !msg || !winInput || !refreshBtn) return;
     list.innerHTML = '';
     try {
-  const winMin = Math.max(15, Math.min(240, Number(winInput.value)||60));
+  const winMin = Math.max(20, Math.min(240, Number(winInput.value)||60));
   const params = new URLSearchParams({ window_min: String(winMin) });
   const r = await fetch(`/api/streams/upcoming?${params}`);
   const data = await r.json();
@@ -97,8 +97,12 @@
         const row = document.createElement('div'); row.append(input, btn);
         card.append(name, when, row); list.appendChild(card);
       });
-      msg.textContent = 'Готово';
-      refreshBtn.onclick = initAdminStreams; winInput.onchange = initAdminStreams;
+      if (!data.matches || data.matches.length === 0) {
+        msg.textContent = `В ближайшие ${winMin} мин. матчей нет`;
+      } else {
+        msg.textContent = 'Готово';
+      }
+      refreshBtn.onclick = initAdminStreams; winInput.onchange = initAdminStreams; winInput.onkeyup = (e)=>{ if(e.key==='Enter'){ initAdminStreams(); } };
     } catch (e) { console.error('admin streams load', e); msg.textContent = 'Ошибка загрузки'; }
   }
   window.Admin = { ensureAdminInit, renderAdminOrders, initAdminStreams };

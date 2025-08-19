@@ -926,9 +926,25 @@ document.addEventListener('DOMContentLoaded', () => {
             // Карточка
             const card = document.createElement('div'); card.className = 'match-card home-feature';
             const head = document.createElement('div'); head.className = 'match-header';
-            // По требованию: вместо даты показываем надпись "Игра недели"
+            // Заголовок: жирный и крупнее
             head.textContent = 'Игра недели';
             card.appendChild(head);
+            // Подзаголовок: дата/время тонким шрифтом под заголовком
+            const sub = document.createElement('div'); sub.className = 'match-subheader';
+            const dtText = (() => {
+                try {
+                    if (m.datetime) {
+                        const dt = new Date(m.datetime);
+                        return dt.toLocaleString(undefined, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+                    }
+                    if (m.date) {
+                        if (m.time) return `${m.date} ${m.time}`;
+                        return String(m.date);
+                    }
+                } catch(_) {}
+                return '';
+            })();
+            if (dtText) { sub.textContent = dtText; card.appendChild(sub); }
             const center = document.createElement('div'); center.className = 'match-center';
             // Локальный загрузчик логотипов (не зависит от других модулей)
             const loadLogo = (imgEl, teamName) => {
