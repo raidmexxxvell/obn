@@ -1941,6 +1941,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     const footer = document.createElement('div');
                     footer.className = 'match-footer';
+                    // Кнопка «⭐ На главную» для админа (назначить Матч недели)
+                    try {
+                        const adminId = document.body.getAttribute('data-admin');
+                        const currentId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id ? String(window.Telegram.WebApp.initDataUnsafe.user.id) : '';
+                        if (adminId && currentId && adminId === currentId) {
+                            const star = document.createElement('button');
+                            star.className = 'details-btn';
+                            star.textContent = '⭐ На главную';
+                            star.style.marginRight = '8px';
+                            star.addEventListener('click', async () => {
+                                try {
+                                    star.disabled = true; const orig = star.textContent; star.textContent = '...';
+                                    const fd = new FormData();
+                                    fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
+                                    fd.append('home', m.home || '');
+                                    fd.append('away', m.away || '');
+                                    if (m.date) fd.append('date', String(m.date).slice(0,10));
+                                    if (m.datetime) fd.append('datetime', String(m.datetime));
+                                    const r = await fetch('/api/feature-match/set', { method: 'POST', body: fd });
+                                    const j = await r.json().catch(()=>({}));
+                                    if (!r.ok) throw new Error(j?.error || 'Ошибка');
+                                    star.textContent = 'Назначено';
+                                } catch(e) {
+                                    try { window.Telegram?.WebApp?.showAlert?.('Не удалось назначить матч недели'); } catch(_) {}
+                                } finally { /* leave disabled to avoid спам */ }
+                            });
+                            footer.appendChild(star);
+                        }
+                    } catch(_) {}
                     // Кнопка «Детали» (как было)
                     const btnDetails = document.createElement('button');
                     btnDetails.className = 'details-btn';

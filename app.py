@@ -2079,6 +2079,75 @@ def _snapshot_set(db: Session, key: str, payload: dict):
         return False
 
 # ---------------------- BUILDERS FROM SHEETS ----------------------
+@app.route('/api/feature-match/set', methods=['POST'])
+def api_feature_match_set():
+    """Админ: вручную назначить «Матч недели» для главной. Поля: initData, home, away, [date], [datetime].
+    Хранится в снапшоте 'feature-match' и используется до завершения этого матча; после завершения автоподбор.
+    """
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Unauthorized'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+        home = (request.form.get('home') or '').strip()
+        away = (request.form.get('away') or '').strip()
+        date_key = (request.form.get('date') or '').strip()[:10]
+        dt_str = (request.form.get('datetime') or '').strip() or None
+        if not home or not away:
+            return jsonify({'error': 'match required'}), 400
+        if SessionLocal is None:
+            return jsonify({'error': 'DB unavailable'}), 500
+        db: Session = get_db()
+        try:
+            payload = {
+                'match': {
+                    'home': home,
+                    'away': away,
+                    'date': (date_key or None),
+                    'datetime': dt_str,
+                },
+                'set_by': user_id,
+                'set_at': datetime.now(timezone.utc).isoformat()
+            }
+            ok = _snapshot_set(db, 'feature-match', payload)
+            if not ok:
+                return jsonify({'error': 'store failed'}), 500
+            return jsonify({'status': 'ok'})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"feature-match set error: {e}")
+        return jsonify({'error': 'server error'}), 500
+
+@app.route('/api/feature-match/clear', methods=['POST'])
+def api_feature_match_clear():
+    """Админ: сбросить ручной выбор «Матча недели». Поля: initData."""
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Unauthorized'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+        if SessionLocal is None:
+            return jsonify({'error': 'DB unavailable'}), 500
+        db: Session = get_db()
+        try:
+            ok = _snapshot_set(db, 'feature-match', {'match': None, 'set_by': user_id, 'set_at': datetime.now(timezone.utc).isoformat()})
+            if not ok:
+                return jsonify({'error': 'store failed'}), 500
+            return jsonify({'status': 'ok'})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"feature-match clear error: {e}")
+        return jsonify({'error': 'server error'}), 500
+
+# ---------------------- BUILDERS FROM SHEETS ----------------------
 def _build_league_payload_from_sheet():
     ws = get_table_sheet()
     _metrics_inc('sheet_reads', 1)
@@ -3091,8 +3160,10 @@ def parse_and_verify_telegram_init_data(init_data: str, max_age_seconds: int = 2
     # Строка для подписи — все пары (key=value) кроме hash, отсортированные по ключу
     data_check_string = '\n'.join([f"{k}={v[0]}" for k, v in sorted(parsed.items())])
 
-    # Секретный ключ = HMAC_SHA256("WebAppData", bot_token)
-    secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
+    # Секретный ключ по требованиям Telegram WebApp:
+    # secret_key = HMAC_SHA256(key=bot_token, data="WebAppData")
+    # Ранее здесь аргументы были перепутаны, что приводило к ошибке валидации initData
+    secret_key = hmac.new(bot_token.encode(), b"WebAppData", hashlib.sha256).digest()
     calculated_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
     if calculated_hash != received_hash:
         return None
@@ -3967,21 +4038,55 @@ def api_schedule():
                         resp.headers['ETag'] = _etag
                         resp.headers['Cache-Control'] = 'public, max-age=900, stale-while-revalidate=600'
                         return resp
-                    # «Матч недели» берём из ближайшего тура ставок (если есть снапшот betting-tours)
+                    # «Матч недели»: сначала пытаемся взять ручной выбор админа из снапшота 'feature-match'
                     try:
+                        manual = None
                         if SessionLocal is not None:
-                            db = get_db()
+                            db2 = get_db()
                             try:
-                                bt = _snapshot_get(db, 'betting-tours')
-                                tours_src = (bt or {}).get('payload', {}).get('tours') or payload.get('tours') or []
+                                fm = _snapshot_get(db2, 'feature-match') or {}
+                                manual = (fm.get('payload') or {}).get('match') or None
                             finally:
-                                db.close()
-                        else:
-                            tours_src = payload.get('tours') or []
-                        best = _pick_match_of_week(tours_src)
-                        if best:
+                                db2.close()
+                        # если есть ручной выбор — проверим, не завершился ли матч
+                        use_manual = False
+                        if manual and isinstance(manual, dict):
+                            mh, ma = manual.get('home'), manual.get('away')
+                            if mh and ma:
+                                st = api_match_status_get.__wrapped__ if hasattr(api_match_status_get, '__wrapped__') else None
+                                # безопасная проверка статуса без HTTP-ответа: используем внутреннюю функцию времени матча
+                                try:
+                                    status = 'scheduled'
+                                    dt = _get_match_datetime(mh, ma)
+                                    now = datetime.now()
+                                    if dt:
+                                        if dt <= now < dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
+                                            status = 'live'
+                                        elif now >= dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
+                                            status = 'finished'
+                                    # показываем manual, если не finished
+                                    if status != 'finished':
+                                        use_manual = True
+                                except Exception:
+                                    use_manual = True
+                        if use_manual:
                             payload = dict(payload)
-                            payload['match_of_week'] = best
+                            payload['match_of_week'] = manual
+                        else:
+                            # fallback: автоподбор по ближайшему туру ставок
+                            if SessionLocal is not None:
+                                db3 = get_db()
+                                try:
+                                    bt = _snapshot_get(db3, 'betting-tours')
+                                    tours_src = (bt or {}).get('payload', {}).get('tours') or payload.get('tours') or []
+                                finally:
+                                    db3.close()
+                            else:
+                                tours_src = payload.get('tours') or []
+                            best = _pick_match_of_week(tours_src)
+                            if best:
+                                payload = dict(payload)
+                                payload['match_of_week'] = best
                     except Exception:
                         pass
                     resp = jsonify({**payload, 'version': _etag})
@@ -3993,19 +4098,49 @@ def api_schedule():
         # Bootstrap
         payload = _build_schedule_payload_from_sheet()
         try:
-            # На bootstrap тоже попробуем опираться на туры ставок при наличии
-            tours_src = payload.get('tours') or []
+            # При первом построении тоже используем ручной выбор, если есть и матч не завершён
+            manual = None
             if SessionLocal is not None:
-                db = get_db()
+                db2 = get_db()
                 try:
-                    bt = _snapshot_get(db, 'betting-tours')
-                    tours_src = (bt or {}).get('payload', {}).get('tours') or tours_src
+                    fm = _snapshot_get(db2, 'feature-match') or {}
+                    manual = (fm.get('payload') or {}).get('match') or None
                 finally:
-                    db.close()
-            best = _pick_match_of_week(tours_src)
-            if best:
+                    db2.close()
+            use_manual = False
+            if manual and isinstance(manual, dict):
+                mh, ma = manual.get('home'), manual.get('away')
+                if mh and ma:
+                    try:
+                        status = 'scheduled'
+                        dt = _get_match_datetime(mh, ma)
+                        now = datetime.now()
+                        if dt:
+                            if dt <= now < dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
+                                status = 'live'
+                            elif now >= dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
+                                status = 'finished'
+                        if status != 'finished':
+                            use_manual = True
+                    except Exception:
+                        use_manual = True
+            if use_manual:
                 payload = dict(payload)
-                payload['match_of_week'] = best
+                payload['match_of_week'] = manual
+            else:
+                # автоподбор
+                tours_src = payload.get('tours') or []
+                if SessionLocal is not None:
+                    db3 = get_db()
+                    try:
+                        bt = _snapshot_get(db3, 'betting-tours')
+                        tours_src = (bt or {}).get('payload', {}).get('tours') or tours_src
+                    finally:
+                        db3.close()
+                best = _pick_match_of_week(tours_src)
+                if best:
+                    payload = dict(payload)
+                    payload['match_of_week'] = best
         except Exception:
             pass
         _core = {'tours': payload.get('tours')}
