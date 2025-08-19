@@ -1015,6 +1015,20 @@ document.addEventListener('DOMContentLoaded', () => {
                                 card.addEventListener('click', (e) => {
                                         // Не реагируем на клики по кнопкам внутри карточки
                                         try { if (e?.target?.closest('button')) return; } catch(_) {}
+                                    // Переключаемся на вкладку НЛО, чтобы экран деталей был видим
+                                    try {
+                                        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+                                        const navUfo = document.querySelector('.nav-item[data-tab="ufo"]');
+                                        if (navUfo) navUfo.classList.add('active');
+                                        const elHome = document.getElementById('tab-home');
+                                        const elUfo = document.getElementById('tab-ufo');
+                                        const elPreds = document.getElementById('tab-predictions');
+                                        const elLead = document.getElementById('tab-leaderboard');
+                                        const elShop = document.getElementById('tab-shop');
+                                        const elAdmin = document.getElementById('tab-admin');
+                                        [elHome, elUfo, elPreds, elLead, elShop, elAdmin].forEach(el => { if (el) el.style.display = 'none'; });
+                                        if (elUfo) elUfo.style.display = '';
+                                    } catch(_) {}
                                         const params = new URLSearchParams({ home: m.home || '', away: m.away || '' });
                                         const cacheKey = `md:${(m.home||'').toLowerCase()}::${(m.away||'').toLowerCase()}`;
                                         const cached = (() => { try { return JSON.parse(localStorage.getItem(cacheKey) || 'null'); } catch(_) { return null; } })();
@@ -1591,7 +1605,12 @@ document.addEventListener('DOMContentLoaded', () => {
             // На случай, если анимации нет — фолбэк сразу
             if (!animate) { window.removeEventListener('league:transition-covered', onCovered); onCovered(); }
         }
-    if (animate) playLeagueTransition('UFO');
+    if (animate) {
+        // Показать подсказку после завершения анимации (один раз для пользователя)
+        const onEnd = () => { try { showLeagueHint(); } catch(_) {} };
+        window.addEventListener('league:transition-end', onEnd, { once: true });
+        playLeagueTransition('UFO');
+    }
     }
 
     function selectBLBLeague(animate=false) {
@@ -1609,7 +1628,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const showBLB = () => { initBLBSubtabs(); window.removeEventListener('league:transition-covered', showBLB); };
         window.addEventListener('league:transition-covered', showBLB);
         if (!animate) { window.removeEventListener('league:transition-covered', showBLB); showBLB(); }
-    if (animate) playLeagueTransition('BLB');
+    if (animate) {
+        // Показать подсказку после завершения анимации (один раз для пользователя)
+        const onEnd = () => { try { showLeagueHint(); } catch(_) {} };
+        window.addEventListener('league:transition-end', onEnd, { once: true });
+        playLeagueTransition('BLB');
+    }
     }
 
     function playLeagueTransition(to) {
@@ -1788,10 +1812,11 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Подсказка: стрелка к нижнему меню (вкладка ЛИГИ/НЛО) с текстом «щёлкни два раза»
+    // Подсказка: стрелка к вкладке «Лига» с текстом (один раз). Сначала стрелка, через 2с — надпись.
     function showLeagueHint() {
         try {
-            // Если уже показана — не дублируем
+            // Только один раз для пользователя
+            try { if (localStorage.getItem('hint:league-shown') === '1') return; } catch(_) {}
             if (document.getElementById('league-hint-tip')) return;
             const target = document.querySelector('.nav-item[data-tab="ufo"]');
             const nav = document.querySelector('nav.nav');
@@ -1803,42 +1828,58 @@ document.addEventListener('DOMContentLoaded', () => {
             tip.style.position = 'fixed';
             tip.style.zIndex = '1200';
             tip.style.pointerEvents = 'none';
-            // Контейнер с текстом над стрелкой
-            const label = document.createElement('div');
-            label.textContent = 'щёлкни два раза';
-            label.style.position = 'absolute';
-            label.style.left = '50%';
-            label.style.transform = 'translateX(-50%)';
-            label.style.bottom = '28px';
-            label.style.fontSize = '11px';
-            label.style.fontWeight = '800';
-            label.style.color = '#fff';
-            label.style.whiteSpace = 'nowrap';
-            label.style.textShadow = '0 1px 2px rgba(0,0,0,.6)';
-            // Стрелка
+            // Стрелка (анимированная)
             const arrow = document.createElement('div');
             arrow.style.width = '0';
             arrow.style.height = '0';
-            arrow.style.borderLeft = '6px solid transparent';
-            arrow.style.borderRight = '6px solid transparent';
-            arrow.style.borderTop = '10px solid #fff';
+            arrow.style.borderLeft = '7px solid transparent';
+            arrow.style.borderRight = '7px solid transparent';
+            arrow.style.borderTop = '12px solid #fff';
             arrow.style.filter = 'drop-shadow(0 1px 2px rgba(0,0,0,.6))';
             arrow.style.position = 'absolute';
             arrow.style.left = '50%';
             arrow.style.transform = 'translateX(-50%)';
             arrow.style.bottom = '14px';
-            tip.appendChild(label);
+            arrow.style.animation = 'hint-bounce 1s ease-in-out infinite';
+            // Текст (появится позже)
+            const label = document.createElement('div');
+            label.textContent = 'Двойной нажатие для выбора лиги';
+            label.style.position = 'absolute';
+            label.style.left = '50%';
+            label.style.transform = 'translateX(-50%)';
+            label.style.bottom = '30px';
+            label.style.fontSize = '11px';
+            label.style.fontWeight = '800';
+            label.style.color = '#fff';
+            label.style.whiteSpace = 'nowrap';
+            label.style.textShadow = '0 1px 2px rgba(0,0,0,.6)';
+            label.style.opacity = '0';
+            label.style.transition = 'opacity .25s ease';
             tip.appendChild(arrow);
+            tip.appendChild(label);
             document.body.appendChild(tip);
             // Позиционирование по центру иконки лиги
             const centerX = r.left + r.width / 2;
             tip.style.left = `${Math.round(centerX)}px`;
             tip.style.bottom = `${Math.round((window.innerHeight - rn.top) + 6)}px`;
-            // Убрать подсказку по любому клику/тапу по нижнему меню
-            const cleanup = () => { try { tip.remove(); } catch(_) {} document.removeEventListener('click', onDocClick, true); };
+            // Показать текст через 2 секунды после завершения анимации перехода (мы вызываем функцию после окончания)
+            setTimeout(() => { label.style.opacity = '1'; }, 2000);
+            // Убрать подсказку по клику по нижнему меню или через таймаут, и больше не показывать
+            const cleanup = () => {
+                try { localStorage.setItem('hint:league-shown', '1'); } catch(_) {}
+                try { tip.remove(); } catch(_) {}
+                document.removeEventListener('click', onDocClick, true);
+            };
             const onDocClick = (e) => { if (e.target.closest('nav.nav')) cleanup(); };
             document.addEventListener('click', onDocClick, true);
-            setTimeout(cleanup, 6000);
+            setTimeout(cleanup, 7000);
+            // Встроенная keyframes-анимация
+            if (!document.getElementById('hint-bounce-style')) {
+                const st = document.createElement('style');
+                st.id = 'hint-bounce-style';
+                st.textContent = `@keyframes hint-bounce{0%,100%{transform:translateX(-50%) translateY(0)}50%{transform:translateX(-50%) translateY(-6px)}}`;
+                document.head.appendChild(st);
+            }
         } catch(_) {}
     }
 
