@@ -197,14 +197,10 @@ document.addEventListener('DOMContentLoaded', () => {
         ready = true;
     }, { once: true });
 
-    // Лёгкая проверка версии приложения раз в день
-    (function versionCheckOncePerDay(){
+    // Проверка версии при входе (без фонового опроса)
+    (function versionCheckOnLoad(){
         try {
             const VER_KEY = 'appVersion:lastSeen';
-            const DATE_KEY = 'appVersion:lastCheck';
-            const today = new Date().toISOString().slice(0,10);
-            const lastCheck = localStorage.getItem(DATE_KEY) || '';
-            if (lastCheck === today) { info('Version check skipped (already checked today)'); return; }
             fetch('/api/version', { cache: 'no-store' })
                 .then(r => r.json())
                 .then(data => {
@@ -216,71 +212,21 @@ document.addEventListener('DOMContentLoaded', () => {
                         let agree = false;
                         try { agree = window.confirm(ask); } catch(_) { agree = false; }
                         if (agree) {
-                            // Жёсткий перезагруз: cache-bust URL
                             try {
                                 const base = window.location.href.split('#')[0];
                                 const sep = base.includes('?') ? '&' : '?';
                                 window.location.replace(base + sep + 'v=' + ver + '&t=' + Date.now());
-                                return; // прервём цепочку; браузер уйдёт на reload
+                                return;
                             } catch(_) { try { window.location.reload(true); } catch(_) { window.location.reload(); } }
                         }
                     }
                     try { localStorage.setItem(VER_KEY, String(ver)); } catch(_) {}
                 })
-                .catch(() => {})
-                .finally(() => { try { localStorage.setItem(DATE_KEY, today); } catch(_) {} });
+                .catch(() => {});
         } catch (_) { /* no-op */ }
     })();
 
-    // Пинг версии раз в N минут, чтобы ловить bump от админа без перезахода
-    (function startVersionPolling(){
-        try {
-            const VER_KEY = 'appVersion:lastSeen';
-            const getPollMin = () => {
-                try { const v = Number(window.__APP_VERSION_POLL_MIN); if (isFinite(v) && v >= 3 && v <= 120) return v; } catch(_) {}
-                return 10; // по умолчанию 10 минут
-            };
-            const intervalMs = getPollMin() * 60 * 1000;
-            let pollTimer = null;
-            const schedule = (delayMs = intervalMs) => {
-                try { if (pollTimer) clearTimeout(pollTimer); } catch(_) {}
-                pollTimer = setTimeout(run, delayMs);
-            };
-            const run = () => {
-                // Если вкладка не видима — откладываем проверку на минуту
-                if (document.visibilityState && document.visibilityState !== 'visible') {
-                    schedule(60 * 1000);
-                    return;
-                }
-                fetch('/api/version', { cache: 'no-store' })
-                    .then(r => r.json())
-                    .then(data => {
-                        const ver = Number(data?.ver || 0) || 0;
-                        const lastSeen = Number(localStorage.getItem(VER_KEY) || '0') || 0;
-                        if (ver > lastSeen) {
-                            const ask = 'Доступно обновление, перезагрузить?';
-                            let agree = false;
-                            try { agree = window.confirm(ask); } catch(_) { agree = false; }
-                            if (agree) {
-                                try {
-                                    const base = window.location.href.split('#')[0];
-                                    const sep = base.includes('?') ? '&' : '?';
-                                    window.location.replace(base + sep + 'v=' + ver + '&t=' + Date.now());
-                                    return;
-                                } catch(_) { try { window.location.reload(true); } catch(_) { window.location.reload(); } }
-                            }
-                            try { localStorage.setItem(VER_KEY, String(ver)); } catch(_) {}
-                        }
-                    })
-                    .catch(() => {})
-                    .finally(() => schedule());
-            };
-            // Первая проверка через 15 секунд
-            schedule(15000);
-            // Мгновенная проверка при возврате во вкладку
-            document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { run(); } });
-        } catch(_) { /* no-op */ }
-    })();
+    // Отключено: фоновое периодическое оповещение об обновлении версии. По требованию клиента
 
     // Если все прошло штатно — чистим аварийный таймер при скрытии
     // Сохраняем аварийный таймер как ранее, но теперь он только форсит готовность

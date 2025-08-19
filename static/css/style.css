@@ -185,11 +185,16 @@ body {
 .comments-hint { color: var(--gray); font-size: 11px; margin-top: 6px; }
 
 /* --- Админ: трансляции --- */
-.stream-row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.stream-row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:8px; }
 .stream-row .title { flex: 1 1 auto; font-weight: 700; }
 .stream-row .time { color: var(--gray); font-size: 12px; }
-.stream-row input[type="text"] { flex: 1 1 280px; min-width: 180px; padding: 8px 10px; border-radius: 10px; border:1px solid rgba(255,255,255,0.2); background: transparent; color:#fff; }
-.stream-row .confirm { white-space: nowrap; }
+.stream-row input[type="text"] { flex: 1 1 360px; min-width: 180px; max-width: 100%; padding: 8px 10px; border-radius: 10px; border:1px solid rgba(255,255,255,0.2); background: transparent; color:#fff; box-sizing: border-box; }
+.stream-row .confirm { white-space: nowrap; margin-left: auto; }
+
+/* Подпись сохранения ссылки трансляции */
+.save-hint { margin-top: 6px; font-size: 12px; color: var(--gray); text-align: left; }
+.save-hint.success { color: var(--success); }
+.save-hint.error { color: var(--danger); }
 
 
 /* --- ВЕРХНЯЯ ПАНЕЛЬ --- */

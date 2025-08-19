@@ -97,22 +97,31 @@
         const card = document.createElement('div'); card.className='store-item';
         const name = document.createElement('div'); name.className='store-name'; name.textContent = `${m.home||''} — ${m.away||''}`;
         const when = document.createElement('div'); when.className='store-price'; when.textContent = m.datetime || m.date || '';
-        const input = document.createElement('input'); input.placeholder = 'Ссылка VK Live'; input.style.cssText='width:100%; margin-top:6px; padding:6px 8px; border-radius:8px; border:1px solid rgba(255,255,255,.2); background:transparent; color:#fff;';
-        const btn = document.createElement('button'); btn.className='details-btn'; btn.textContent='Подтвердить';
+        const input = document.createElement('input'); input.type='text'; input.placeholder = 'Ссылка VK Live';
+        const btn = document.createElement('button'); btn.className='details-btn confirm'; btn.textContent='Подтвердить';
+        const hint = document.createElement('div'); hint.className = 'save-hint';
         btn.addEventListener('click', async () => {
           try {
+            const val = (input.value || '').trim();
+            if (!val) {
+              hint.textContent = 'Введите ссылку';
+              hint.classList.remove('success'); hint.classList.add('error');
+              return;
+            }
             btn.disabled = true; const o = btn.textContent; btn.textContent = '...';
             const fd = new FormData();
             fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
             fd.append('home', m.home || ''); fd.append('away', m.away || '');
-            fd.append('datetime', m.datetime || ''); fd.append('vk', input.value || '');
+            fd.append('datetime', m.datetime || ''); fd.append('vk', val);
             const rr = await fetch('/api/streams/set', { method:'POST', body: fd });
-            if (!rr.ok) throw 0;
+            if (!rr.ok) { throw new Error('save'); }
             btn.textContent = 'Сохранено';
+            hint.textContent = 'Ссылка успешно сохранена';
+            hint.classList.remove('error'); hint.classList.add('success');
           } catch(_) { btn.disabled=false; btn.textContent='Подтвердить'; }
         });
-        const row = document.createElement('div'); row.append(input, btn);
-        card.append(name, when, row); list.appendChild(card);
+        const row = document.createElement('div'); row.className='stream-row'; row.append(input, btn);
+        card.append(name, when, row, hint); list.appendChild(card);
       });
       if (!data.matches || data.matches.length === 0) {
         msg.textContent = `В ближайшие ${winMin} мин. матчей нет`;

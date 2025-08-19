@@ -1959,18 +1959,51 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const dateStr = (match?.datetime || match?.date || '').toString().slice(0,10);
             const url = `/api/streams/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}&date=${encodeURIComponent(dateStr)}&window=10`;
-            fetch(url).then(r=>r.json()).then(ans => {
-                const existing = subtabs?.querySelector('[data-mdtab="stream"]');
-                if (ans?.available) {
-                    if (!existing) {
-                        const tab = document.createElement('div'); tab.className='subtab-item'; tab.setAttribute('data-mdtab','stream'); tab.textContent='Трансляция';
-                        subtabs.appendChild(tab);
+            const parseStart = () => {
+                try {
+                    if (match?.datetime) return new Date(match.datetime).getTime();
+                    if (match?.date) {
+                        const d = new Date(match.date);
+                        if (match.time) {
+                            const [hh, mm] = String(match.time).split(':').map(x=>parseInt(x,10)||0);
+                            d.setHours(hh, mm, 0, 0);
+                        }
+                        return d.getTime();
                     }
-                    streamPane.__streamInfo = ans;
-                } else if (existing) {
-                    existing.remove();
-                }
-            }).catch(()=>{});
+                } catch(_) {}
+                return NaN;
+            };
+            const startMs = parseStart();
+            const doCheck = () => {
+                // если панель удалена/скрыта — прекращаем
+                if (!document.body.contains(streamPane)) { streamPane.__streamTimer && clearTimeout(streamPane.__streamTimer); streamPane.__streamTimer = null; return; }
+                fetch(url).then(r=>r.json()).then(ans => {
+                    const existing = subtabs?.querySelector('[data-mdtab="stream"]');
+                    if (ans?.available) {
+                        if (!existing) {
+                            const tab = document.createElement('div'); tab.className='subtab-item'; tab.setAttribute('data-mdtab','stream'); tab.textContent='Трансляция';
+                            subtabs.appendChild(tab);
+                        }
+                        streamPane.__streamInfo = ans;
+                        // больше не проверяем
+                        if (streamPane.__streamTimer) { clearTimeout(streamPane.__streamTimer); streamPane.__streamTimer = null; }
+                    } else {
+                        // если до старта менее 12 минут или матч начался не более 30 минут назад — пробуем ещё раз через 30-45с
+                        if (isFinite(startMs)) {
+                            const now = Date.now();
+                            const delta = startMs - now; // >0 до старта, <0 после
+                            if (delta <= 12*60*1000 && delta >= -30*60*1000) {
+                                const delay = 30000 + Math.floor(Math.random()*15000);
+                                streamPane.__streamTimer && clearTimeout(streamPane.__streamTimer);
+                                streamPane.__streamTimer = setTimeout(doCheck, delay);
+                            }
+                        }
+                        if (existing) { existing.remove(); }
+                    }
+                }).catch(()=>{});
+            };
+            // стартовая проверка
+            doCheck();
         } catch(_) {}
 
     // События будут отображаться внутри вкладок составов
