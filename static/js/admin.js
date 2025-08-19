@@ -5,6 +5,7 @@
     const btnAll = document.getElementById('admin-refresh-all');
     const btnUsers = document.getElementById('admin-users-refresh');
     const btnSync = document.getElementById('admin-sync-refresh');
+  const btnBump = document.getElementById('admin-bump-version');
     const lblUsers = document.getElementById('admin-users-stats');
     const lblSync = document.getElementById('admin-sync-summary');
     try {
@@ -37,7 +38,10 @@
       const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
       btnUsers.disabled = true; const o = btnUsers.textContent; btnUsers.textContent = '...';
       fetch('/api/admin/users-stats', { method: 'POST', body: fd })
-        .then(r => r.json()).then(d => { const s = `Всего: ${d.total_users||0} • Онлайн: ${d.online_5m||0} (5м) / ${d.online_15m||0} (15м)`; lblUsers.textContent = s; })
+        .then(r => r.json()).then(d => {
+          const s = `Всего: ${d.total_users||0} • Онлайн: ${d.online_5m||0} (5м) / ${d.online_15m||0} (15м) • Активные: ${d.active_1d||0} (1д) / ${d.active_7d||0} (7д) / ${d.active_30d||0} (30д) • Новые за 30д: ${d.new_30d||0}`;
+          lblUsers.textContent = s;
+        })
         .finally(()=>{ btnUsers.disabled=false; btnUsers.textContent=o; });
     });
     if (btnSync && lblSync) btnSync.addEventListener('click', () => {
@@ -48,6 +52,19 @@
         const lines = keys.map(k => `${k}: ${st[k]||'—'}, ${dur[k]||0}мс, at ${last[k]||'—'}`);
         lblSync.textContent = lines.join(' | ');
       }).finally(()=>{ btnSync.disabled=false; btnSync.textContent=o; });
+    });
+    if (btnBump) btnBump.addEventListener('click', async () => {
+      try {
+        btnBump.disabled = true; const o = btnBump.textContent; btnBump.textContent = '...';
+        const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
+        const r = await fetch('/api/admin/bump-version', { method: 'POST', body: fd });
+        const d = await r.json().catch(()=>({}));
+        const v = d?.ver != null ? d.ver : '—';
+        const msg = r.ok ? `Версия обновлена до v${v}. Клиентам будет предложено обновление.` : (d?.error || 'Ошибка');
+        try { window.Telegram?.WebApp?.showAlert?.(msg); } catch(_) { alert(msg); }
+      } finally {
+        btnBump.disabled = false; btnBump.textContent = 'Применить';
+      }
     });
   }
   async function renderAdminOrders() {
@@ -71,8 +88,8 @@
     if (!list || !msg || !winInput || !refreshBtn) return;
     list.innerHTML = '';
     try {
-  const winMin = Math.max(20, Math.min(240, Number(winInput.value)||60));
-  const params = new URLSearchParams({ window_min: String(winMin) });
+  const winMin = Math.max(60, Math.min(240, Number(winInput.value)||60));
+  const params = new URLSearchParams({ window_min: String(winMin), include_started_min: '30' });
   const r = await fetch(`/api/streams/upcoming?${params}`);
   const data = await r.json();
       list.innerHTML = '';

@@ -6,9 +6,9 @@
     <title>Лига Обнинска</title>
     <!-- ИСПРАВЛЕНО: Убраны лишние пробелы в URL Telegram WebApp SDK -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <link rel="stylesheet" href="/static/css/style.css?v={{ static_version }}">
-    <link rel="stylesheet" href="/static/css/splash.css?v={{ static_version }}">
-    <link rel="stylesheet" href="/static/css/blb.css?v={{ static_version }}">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/splash.css">
+    <link rel="stylesheet" href="/static/css/blb.css">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>⚽</text></svg>">
 </head>
 <body data-admin="{{ admin_user_id }}">
@@ -379,6 +379,11 @@
                         <button class="details-btn" id="admin-users-refresh">Обновить</button>
                     </div>
                     <div class="store-item">
+                        <div class="store-name">Обновить все данные (сброс кэша клиентов)</div>
+                        <div class="store-price">Инкремент версии ассетов и принудительная перезагрузка у пользователей</div>
+                        <button class="details-btn" id="admin-bump-version">Применить</button>
+                    </div>
+                    <div class="store-item">
                         <div class="store-name">Синхронизация</div>
                         <div class="store-price" id="admin-sync-summary">—</div>
                         <button class="details-btn" id="admin-sync-refresh">Показать</button>
@@ -466,13 +471,13 @@
         </div>
     </div>
 
-    <script src="/static/js/splash.js?v={{ static_version }}"></script>
-    <script src="/static/js/league.js?v={{ static_version }}"></script>
-    <script src="/static/js/shop.js?v={{ static_version }}"></script>
-    <script src="/static/js/admin.js?v={{ static_version }}"></script>
-    <script src="/static/js/profile.js?v={{ static_version }}"></script>
-    <script src="/static/js/streams.js?v={{ static_version }}"></script>
-    <script src="/static/js/predictions.js?v={{ static_version }}"></script>
+    <script src="/static/js/splash.js"></script>
+    <script src="/static/js/league.js"></script>
+    <script src="/static/js/shop.js"></script>
+    <script src="/static/js/admin.js"></script>
+    <script src="/static/js/profile.js"></script>
+    <script src="/static/js/streams.js"></script>
+    <script src="/static/js/predictions.js"></script>
 
 </body>
 </html>

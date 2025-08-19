@@ -2597,7 +2597,8 @@ def start_background_sync():
 
 # ---------------------- Builders for betting tours and leaderboards ----------------------
 def _build_betting_tours_payload():
-    # Build nearest tour with odds, markets, and locks for each match
+    # Build nearest tour with odds, markets, and locks for each match.
+    # Также открываем следующий тур заранее, если до его первого матча осталось <= 2 дней.
     all_tours = _load_all_tours_from_sheet()
     today = datetime.now().date()
 
@@ -2621,7 +2622,36 @@ def _build_betting_tours_payload():
         except Exception:
             return (datetime(2100,1,1), t.get('tour') or 10**9)
     tours.sort(key=sort_key)
-    tours = tours[:1]
+    # Выбираем ближайший тур
+    primary = tours[:1]
+    # Логика раннего открытия следующего тура: берём второй по порядку, если он стартует в ближайшие 2 дня
+    early_open = []
+    if len(tours) >= 2:
+        try:
+            next_t = tours[1]
+            # Вычислим самое раннее время среди матчей следующего тура
+            earliest = None
+            for m in next_t.get('matches', []):
+                dt = None
+                if m.get('datetime'):
+                    dt = datetime.fromisoformat(m['datetime'])
+                elif m.get('date'):
+                    try:
+                        d = datetime.fromisoformat(m['date']).date()
+                        tm_str = (m.get('time') or '00:00')
+                        tm = datetime.strptime(tm_str, "%H:%M").time()
+                        dt = datetime.combine(d, tm)
+                    except Exception:
+                        dt = None
+                if dt is not None:
+                    if earliest is None or dt < earliest:
+                        earliest = dt
+            if earliest is not None:
+                if earliest - datetime.now() <= timedelta(days=2):
+                    early_open = [next_t]
+        except Exception:
+            early_open = []
+    tours = primary + early_open
 
     now_local = datetime.now()
     for t in tours:
@@ -5245,8 +5275,10 @@ def api_streams_list():
 
 @app.route('/api/streams/upcoming', methods=['GET'])
 def api_streams_upcoming():
-    """Админ: список матчей, которые начнутся в ближайшее окно (минуты).
-    Параметры: window_min (по умолчанию 60).
+    """Админ: список матчей рядом со стартом.
+    Параметры:
+      - window_min: показать матчи, которые начнутся в ближайшие N минут (по умолчанию 60, минимум 60, максимум 240)
+      - include_started_min: также включить матчи, которые уже начались за последние N минут (по умолчанию 30)
     Возвращает: { matches: [{home, away, datetime}] }
     """
     try:
@@ -5254,8 +5286,13 @@ def api_streams_upcoming():
             window_min = int(request.args.get('window_min') or '60')
         except Exception:
             window_min = 60
-        # Минимум 20 минут, чтобы матч гарантированно появился заранее
-        window_min = max(20, min(240, window_min))
+        # Минимум 60 минут, чтобы матч гарантированно появился заранее
+        window_min = max(60, min(240, window_min))
+        try:
+            include_started_min = int(request.args.get('include_started_min') or '30')
+        except Exception:
+            include_started_min = 30
+        include_started_min = max(0, min(180, include_started_min))
         # Сдвиг локального времени расписания относительно системного времени сервера
         try:
             tz_min = int(os.environ.get('SCHEDULE_TZ_SHIFT_MIN') or '0')
@@ -5269,6 +5306,7 @@ def api_streams_upcoming():
             tz_min = tz_h * 60
         now = datetime.now() + timedelta(minutes=tz_min)
         until = now + timedelta(minutes=window_min)
+        since = now - timedelta(minutes=include_started_min)
         # Достаём расписание из снапшота; если пусто — из таблицы
         tours = []
         if SessionLocal is not None:
@@ -5297,8 +5335,8 @@ def api_streams_upcoming():
                         dt = datetime.combine(d, tm)
                     if not dt:
                         continue
-                    # Показываем матчи, которые начнутся в течение окна, а также те, что уже в статусе soon/live (по времени)
-                    if now <= dt <= until:
+                    # Показываем матчи, которые начнутся в течение окна, а также те, что уже начались не ранее чем include_started_min минут назад
+                    if since <= dt <= until:
                         matches.append({ 'home': m.get('home',''), 'away': m.get('away',''), 'datetime': dt.isoformat() })
                 except Exception:
                     continue
@@ -5586,7 +5624,12 @@ def api_match_comments_add():
 
 @app.route('/api/admin/users-stats', methods=['POST'])
 def api_admin_users_stats():
-    """Статистика пользователей: онлайн за 5/15 минут и всего пользователей. Только админ по initData."""
+    """Статистика пользователей (только админ):
+    - Всего пользователей
+    - Онлайн за 5/15 минут
+    - Активные уникальные за 1/7/30 дней (updated_at)
+    - Новые пользователи за 30 дней (created_at)
+    """
     try:
         parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
         if not parsed or not parsed.get('user'):
@@ -5596,7 +5639,7 @@ def api_admin_users_stats():
         if not admin_id or user_id != admin_id:
             return jsonify({'error': 'forbidden'}), 403
         if SessionLocal is None:
-            return jsonify({'total_users': 0, 'online_5m': 0, 'online_15m': 0})
+            return jsonify({'total_users': 0, 'online_5m': 0, 'online_15m': 0, 'active_1d': 0, 'active_7d': 0, 'active_30d': 0, 'new_30d': 0})
         db: Session = get_db()
         try:
             total = db.query(func.count(User.user_id)).scalar() or 0
@@ -5605,12 +5648,79 @@ def api_admin_users_stats():
             dt15 = now - timedelta(minutes=15)
             online5 = db.query(func.count(User.user_id)).filter(User.updated_at >= dt5).scalar() or 0
             online15 = db.query(func.count(User.user_id)).filter(User.updated_at >= dt15).scalar() or 0
-            return jsonify({'total_users': int(total), 'online_5m': int(online5), 'online_15m': int(online15), 'ts': now.isoformat()})
+            d1 = now - timedelta(days=1)
+            d7 = now - timedelta(days=7)
+            d30 = now - timedelta(days=30)
+            active1 = db.query(func.count(func.distinct(User.user_id))).filter(User.updated_at >= d1).scalar() or 0
+            active7 = db.query(func.count(func.distinct(User.user_id))).filter(User.updated_at >= d7).scalar() or 0
+            active30 = db.query(func.count(func.distinct(User.user_id))).filter(User.updated_at >= d30).scalar() or 0
+            new30 = db.query(func.count(User.user_id)).filter(User.created_at >= d30).scalar() or 0
+            return jsonify({
+                'total_users': int(total),
+                'online_5m': int(online5), 'online_15m': int(online15),
+                'active_1d': int(active1), 'active_7d': int(active7), 'active_30d': int(active30),
+                'new_30d': int(new30),
+                'ts': now.isoformat()
+            })
         finally:
             db.close()
     except Exception as e:
         app.logger.error(f"Ошибка admin users stats: {e}")
         return jsonify({'error': 'Не удалось получить статистику'}), 500
+
+# ---------------- Version bump to force client cache refresh ----------------
+def _get_app_version(db: Session) -> int:
+    try:
+        snap = _snapshot_get(db, 'app-version')
+        if snap and isinstance(snap.get('payload'), dict):
+            v = int(snap['payload'].get('ver') or 0)
+            return max(0, v)
+    except Exception:
+        pass
+    return 0
+
+def _set_app_version(db: Session, ver: int):
+    _snapshot_set(db, 'app-version', {'ver': int(ver), 'updated_at': datetime.now(timezone.utc).isoformat()})
+
+@app.route('/api/version', methods=['GET'])
+def api_version_get():
+    try:
+        if SessionLocal is None:
+            return jsonify({'ver': 0, 'ts': datetime.now(timezone.utc).isoformat()})
+        db: Session = get_db()
+        try:
+            ver = _get_app_version(db)
+            return jsonify({'ver': int(ver), 'ts': datetime.now(timezone.utc).isoformat()})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"version get error: {e}")
+        return jsonify({'ver': 0})
+
+@app.route('/api/admin/bump-version', methods=['POST'])
+def api_admin_bump_version():
+    """Инкремент глобальной версии ассетов (кэш-бастинг). Только админ по initData."""
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+        if SessionLocal is None:
+            return jsonify({'error': 'БД недоступна'}), 500
+        db: Session = get_db()
+        try:
+            cur = _get_app_version(db)
+            newv = cur + 1
+            _set_app_version(db, newv)
+            return jsonify({'status': 'ok', 'ver': int(newv)})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"bump-version error: {e}")
+        return jsonify({'error': 'Не удалось обновить версию'}), 500
 
 @app.route('/api/stats-table', methods=['GET'])
 def api_stats_table():
