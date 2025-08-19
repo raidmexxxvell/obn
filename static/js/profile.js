@@ -255,7 +255,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         return fetch('/api/user', { method: 'POST', body: formData })
             .then(res => {
-                if (res.status === 401) { showError('Ошибка авторизации'); tg?.close?.(); throw new Error('Unauthorized'); }
+                if (res.status === 401) {
+                    // Не закрываем приложение при ошибке авторизации — показываем сообщение и работаем в ограниченном режиме
+                    showError('Ошибка авторизации');
+                    throw new Error('Unauthorized');
+                }
                 return res.json();
             })
             .then(async data => { renderUserProfile(data); renderCheckinSection(data); await initFavoriteTeamUI(data); return data; })
@@ -482,7 +486,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         fetch('/api/checkin', { method:'POST', body: formData })
             .then(res => {
-                if (res.status === 401) { showError('Ошибка авторизации'); tg?.close?.(); throw new Error('Unauthorized'); }
+                if (res.status === 401) {
+                    // Не закрываем приложение, просто уведомляем пользователя
+                    showError('Ошибка авторизации');
+                    throw new Error('Unauthorized');
+                }
                 return res.json();
             })
             .then(data => {
