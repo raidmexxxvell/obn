@@ -1995,8 +1995,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const thead = document.createElement('thead');
             const trh = document.createElement('tr');
             const nameTh = document.createElement('th'); nameTh.textContent = 'Фамилия Имя'; nameTh.style.border='1px solid rgba(255,255,255,0.15)'; nameTh.style.padding='6px'; nameTh.style.textAlign='left';
+            const getAssetVer = () => { try { return Number(localStorage.getItem('appVersion:lastSeen')||'0')||0; } catch(_) { return 0; } };
+            const vUrl = (u) => { try { const v=getAssetVer(); return v? (u + (u.includes('?')?'&':'?') + 'v='+v): u; } catch(_) { return u; } };
             const iconImg = (srcHint) => { const img = document.createElement('img'); img.style.width='18px'; img.style.height='18px'; img.style.objectFit='contain'; img.alt='';
-                const candidates = [srcHint, '/static/img/icons/photo.png', '/static/img/placeholderlogo.png'].filter(Boolean);
+                const candidates = [vUrl(srcHint), vUrl('/static/img/icons/placeholder.png'), vUrl('/static/img/placeholderlogo.png')].filter(Boolean);
                 let i=0; const next=()=>{ if(i>=candidates.length) return; img.onerror=()=>{ i++; next(); }; img.src=candidates[i]; }; next();
                 return img; };
             const thYellow = mkTh(iconImg('/static/img/icons/yellow.png'));
@@ -2033,12 +2035,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 const td = mkTd();
                 const key = (player||'').trim().toLowerCase();
                 const has = evIdx.get(key) && evIdx.get(key).has(type);
-                if (!isAdmin) {
+        if (!isAdmin) {
                     if (has) {
-                        const img = document.createElement('img'); img.style.width='18px'; img.style.height='18px'; img.style.objectFit='contain';
-                        const srcHint = (type==='yellow')?'/static/img/icons/yellow.png':(type==='red')?'/static/img/icons/red.png':(type==='assist')?'/static/img/shop/boots.png':'/static/img/shop/ball.png';
-                        const candidates=[srcHint, '/static/img/icons/photo.png', '/static/img/placeholderlogo.png'];
-                        let i=0; const next=()=>{ if(i>=candidates.length) return; img.onerror=()=>{ i++; next(); }; img.src=candidates[i]; }; next();
+            const img = document.createElement('img'); img.style.width='18px'; img.style.height='18px'; img.style.objectFit='contain';
+            const srcHint = (type==='yellow')?'/static/img/icons/yellow.png':(type==='red')?'/static/img/icons/red.png':(type==='assist')?'/static/img/icons/assist.png':'/static/img/icons/goal.png';
+            const candidates=[vUrl(srcHint), vUrl('/static/img/icons/placeholder.png'), vUrl('/static/img/placeholderlogo.png')];
+            let i=0; const next=()=>{ if(i>=candidates.length) return; img.onerror=()=>{ i++; next(); }; img.src=candidates[i]; }; next();
                         td.appendChild(img);
                     } else {
                         // пусто для пользователя, если события нет
@@ -2054,8 +2056,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 sel.append(optNo, optYes);
                 if (has) sel.value='yes';
                 const icon = document.createElement('img'); icon.style.width='18px'; icon.style.height='18px'; icon.style.objectFit='contain'; icon.style.opacity = has ? '1' : '0.2';
-                const srcHint = (type==='yellow')?'/static/img/icons/yellow.png':(type==='red')?'/static/img/icons/red.png':(type==='assist')?'/static/img/shop/boots.png':'/static/img/shop/ball.png';
-                const candidates=[srcHint, '/static/img/icons/photo.png', '/static/img/placeholderlogo.png'];
+                const srcHint = (type==='yellow')?'/static/img/icons/yellow.png':(type==='red')?'/static/img/icons/red.png':(type==='assist')?'/static/img/icons/assist.png':'/static/img/icons/goal.png';
+                const candidates=[vUrl(srcHint), vUrl('/static/img/icons/placeholder.png'), vUrl('/static/img/placeholderlogo.png')];
                 let i=0; const next=()=>{ if(i>=candidates.length) return; icon.onerror=()=>{ i++; next(); }; icon.src=candidates[i]; }; next();
                 sel.addEventListener('change', () => {
                     if (sel.value === 'yes' && !has) {
