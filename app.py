@@ -981,6 +981,9 @@ def api_admin_order_set_status(order_id: int):
             row = db.get(ShopOrder, order_id)
             if not row:
                 return jsonify({'error': 'not found'}), 404
+            # Если уже отменён — дальнейшие изменения запрещены (идемпотентно пропускаем одинаковый статус)
+            if (row.status or 'new') == 'cancelled' and st != 'cancelled':
+                return jsonify({'error': 'locked'}), 409
             # Если отмена — вернуть кредиты пользователю (однократно)
             if st == 'cancelled' and (row.status or 'new') != 'cancelled':
                 u = db.get(User, int(row.user_id))
@@ -990,6 +993,25 @@ def api_admin_order_set_status(order_id: int):
             row.status = st
             row.updated_at = datetime.now(timezone.utc)
             db.commit()
+            # Уведомление пользователю о смене статуса (best-effort)
+            try:
+                bot_token = os.environ.get('BOT_TOKEN', '')
+                if bot_token:
+                    # Сообщение по-русски
+                    st_map = { 'new': 'новый', 'accepted': 'принят', 'done': 'завершен', 'cancelled': 'отменен' }
+                    txt = f"Ваш заказ №{order_id}: статус — {st_map.get(st, st)}."
+                    if st == 'cancelled':
+                        # Узнаем текущий баланс
+                        u2 = db.get(User, int(row.user_id)) if 'db' in locals() else None
+                        bal = int(u2.credits or 0) if u2 else 0
+                        txt = f"Ваш заказ №{order_id} отменен. Кредиты возвращены (+{int(row.total or 0)}). Баланс: {bal}."
+                    import requests
+                    requests.post(
+                        f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                        json={"chat_id": int(row.user_id), "text": txt}, timeout=5
+                    )
+            except Exception as _e:
+                app.logger.warning(f"Notify user order status failed: {_e}")
             return jsonify({'status': 'ok'})
         finally:
             db.close()

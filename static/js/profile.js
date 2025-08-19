@@ -2019,8 +2019,8 @@ document.addEventListener('DOMContentLoaded', () => {
             streamPane.style.display = 'none';
             mdPane.querySelector('.modal-body')?.appendChild(streamPane);
         }
-        // Очистка плеера при каждом открытии экрана (ленивая вставка при показе)
-        streamPane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
+    // Очистка плеера при каждом открытии экрана (ленивая вставка при показе)
+    streamPane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
         // Спроси сервер, можно ли показывать вкладку (подтверждено + за N минут до матча)
         try {
             const dateStr = (match?.datetime || match?.date || '').toString().slice(0,10);
@@ -2046,6 +2046,33 @@ document.addEventListener('DOMContentLoaded', () => {
             const endMs = isFinite(startMs) ? startMs + 3*60*60*1000 : NaN; // ~3 часа окно матча
             const readCached = () => { try { const raw = localStorage.getItem(cacheKey); return raw ? JSON.parse(raw) : null; } catch(_) { return null; } };
             const writeCached = (ans) => { try { localStorage.setItem(cacheKey, JSON.stringify({ ans, ts: Date.now() })); } catch(_) {} };
+            const buildStream = (info) => {
+                if (!info) return false;
+                if (streamPane.__inited) return true;
+                try {
+                    if (info && (info.vkVideoId || info.vkPostUrl)) {
+                        const host = document.createElement('div'); host.className = 'stream-wrap';
+                        const ratio = document.createElement('div'); ratio.className = 'stream-aspect';
+                        let src = '';
+                        if (info.vkVideoId) {
+                            src = `https://vk.com/video_ext.php?oid=${encodeURIComponent(info.vkVideoId.split('_')[0])}&id=${encodeURIComponent(info.vkVideoId.split('_')[1])}&hd=2&autoplay=${info.autoplay?1:0}`;
+                        } else if (info.vkPostUrl) {
+                            src = info.vkPostUrl;
+                        }
+                        const ifr = document.createElement('iframe');
+                        ifr.src = src;
+                        ifr.setAttribute('allowfullscreen','true');
+                        ifr.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture; screen-wake-lock;';
+                        ifr.referrerPolicy = 'strict-origin-when-cross-origin';
+                        ratio.appendChild(ifr); host.appendChild(ratio); streamPane.innerHTML=''; streamPane.appendChild(host);
+                        streamPane.__inited = true;
+                        try { initStreamComments(streamPane, match); } catch(_) {}
+                        return true;
+                    }
+                } catch(_) {}
+                return false;
+            };
+
             const doCheck = () => {
                 // если панель удалена/скрыта — прекращаем
                 if (!document.body.contains(streamPane)) { streamPane.__streamTimer && clearTimeout(streamPane.__streamTimer); streamPane.__streamTimer = null; return; }
@@ -2059,6 +2086,11 @@ document.addEventListener('DOMContentLoaded', () => {
                             subtabs.appendChild(tab);
                         }
                         streamPane.__streamInfo = ans;
+                        // Если вкладка уже активна — построим сразу
+                        const isActive = subtabs?.querySelector('[data-mdtab="stream"]')?.classList.contains('active');
+                        if (isActive && !streamPane.__inited) {
+                            buildStream(ans);
+                        }
                         // больше не проверяем
                         if (streamPane.__streamTimer) { clearTimeout(streamPane.__streamTimer); streamPane.__streamTimer = null; }
                     } else {
@@ -2071,6 +2103,10 @@ document.addEventListener('DOMContentLoaded', () => {
                                 subtabs.appendChild(tab);
                             }
                             streamPane.__streamInfo = cached.ans;
+                            const isActive2 = subtabs?.querySelector('[data-mdtab="stream"]')?.classList.contains('active');
+                            if (isActive2 && !streamPane.__inited) {
+                                buildStream(cached.ans);
+                            }
                             // прекращаем дальнейшие проверки
                             if (streamPane.__streamTimer) { clearTimeout(streamPane.__streamTimer); streamPane.__streamTimer = null; }
                             return;
@@ -2091,6 +2127,8 @@ document.addEventListener('DOMContentLoaded', () => {
             };
             // стартовая проверка
             doCheck();
+            // Дадим доступ к повторной проверке из обработчиков вкладок
+            streamPane.__ensureInfo = doCheck;
         } catch(_) {}
 
     // События будут отображаться внутри вкладок составов
@@ -2381,30 +2419,25 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (!streamPane.__inited) {
                         try {
                             const st = streamPane.__streamInfo || null;
-                            if (st && (st.vkVideoId || st.vkPostUrl)) {
-                                const host = document.createElement('div'); host.className = 'stream-wrap';
-                                const ratio = document.createElement('div'); ratio.className = 'stream-aspect';
-                                // Формирование src. Вариант 1: video id типа "-12345_67890"; Вариант 2: пост.
-                                let src = '';
-                                if (st.vkVideoId) {
-                                    // embed-плеер VK
-                                    src = `https://vk.com/video_ext.php?oid=${encodeURIComponent(st.vkVideoId.split('_')[0])}&id=${encodeURIComponent(st.vkVideoId.split('_')[1])}&hd=2&autoplay=${st.autoplay?1:0}`;
-                                } else if (st.vkPostUrl) {
-                                    // На случай ссылки на пост с видео — VK обычно редиректит на плеер
-                                    src = st.vkPostUrl;
-                                }
-                                const ifr = document.createElement('iframe');
-                                ifr.src = src;
-                                // Разрешаем полноэкранный режим и управление медиа
-                                ifr.setAttribute('allowfullscreen','true');
-                                ifr.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture; screen-wake-lock;';
-                                ifr.referrerPolicy = 'strict-origin-when-cross-origin';
-                                ratio.appendChild(ifr); host.appendChild(ratio); streamPane.innerHTML=''; streamPane.appendChild(host);
-                                streamPane.__inited = true;
-                                // Инициализируем комментарии под плеером
-                                initStreamComments(streamPane, match);
+                            if (!st) {
+                                // Попросим актуализировать инфо и подождём немного
+                                try { typeof streamPane.__ensureInfo === 'function' && streamPane.__ensureInfo(); } catch(_) {}
+                                const sk = streamPane.querySelector('.stream-skeleton'); if (sk) sk.textContent = 'Загрузка трансляции...';
+                                let tries = 0;
+                                const wait = () => {
+                                    tries++;
+                                    const cur = streamPane.__streamInfo || null;
+                                    if (cur && !streamPane.__inited) {
+                                        buildStream(cur);
+                                        return;
+                                    }
+                                    if (tries < 20) setTimeout(wait, 250); // до ~5 секунд ожидания
+                                };
+                                wait();
                             } else {
-                                streamPane.querySelector('.stream-skeleton')?.replaceChildren(document.createTextNode('Трансляция недоступна'));
+                                if (!buildStream(st)) {
+                                    const sk = streamPane.querySelector('.stream-skeleton'); if (sk) sk.textContent = 'Трансляция недоступна';
+                                }
                             }
                         } catch(_) {}
                     } else {

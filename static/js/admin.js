@@ -80,7 +80,23 @@
         try { created = new Date(created).toLocaleDateString('ru-RU'); } catch(_) {}
         const userLabel = o.username ? ('@' + o.username) : (o.user_id ? ('ID ' + o.user_id) : '—');
         const tdIdx = document.createElement('td'); tdIdx.textContent = String(idx+1);
-        const tdUser = document.createElement('td'); tdUser.textContent = userLabel;
+        const tdUser = document.createElement('td');
+        const link = document.createElement('a');
+        link.href = o.username ? (`https://t.me/${o.username}`) : (`https://t.me/+${o.user_id}`);
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = userLabel;
+        link.addEventListener('click', (e) => {
+          // Внутри Telegram WebApp попробуем открыть нативно
+          try {
+            if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.openTelegramLink) {
+              e.preventDefault();
+              const url = o.username ? (`https://t.me/${o.username}`) : (`https://t.me/+${o.user_id}`);
+              window.Telegram.WebApp.openTelegramLink(url);
+            }
+          } catch(_) {}
+        });
+        tdUser.appendChild(link);
         const tdItems = document.createElement('td'); tdItems.textContent = o.items_preview || '';
         const tdQty = document.createElement('td'); tdQty.textContent = String(o.items_qty || 0);
         const tdSum = document.createElement('td'); tdSum.textContent = (o.total||0).toLocaleString();
