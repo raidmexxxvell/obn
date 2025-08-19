@@ -2496,10 +2496,23 @@ document.addEventListener('DOMContentLoaded', () => {
             const currentId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id ? String(window.Telegram.WebApp.initDataUnsafe.user.id) : '';
             const isAdmin = !!(adminId && currentId && String(adminId) === currentId);
             const topbar = mdPane.querySelector('.match-details-topbar');
-            if (isAdmin && topbar && !topbar.querySelector('#md-finish-btn')) {
+            if (isAdmin && topbar) {
+                // Всегда пересоздаем кнопку под конкретный матч, чтобы обработчик и видимость были корректными
+                const prev = topbar.querySelector('#md-finish-btn'); if (prev) prev.remove();
                 const btn = document.createElement('button');
                 btn.id = 'md-finish-btn'; btn.className = 'details-btn'; btn.textContent = 'Завершить матч';
                 btn.style.marginLeft = 'auto';
+                // Сессионное хранилище завершенных матчей: только для текущего запуска приложения
+                const finStore = (window.__FINISHED_MATCHES = window.__FINISHED_MATCHES || {});
+                const mkKey = (m) => {
+                    try {
+                        const dateStr = (m?.datetime || m?.date || '').toString().slice(0,10);
+                        return `${(m.home||'').toLowerCase().trim()}__${(m.away||'').toLowerCase().trim()}__${dateStr}`;
+                    } catch(_) { return `${(m.home||'').toLowerCase().trim()}__${(m.away||'').toLowerCase().trim()}__`; }
+                };
+                const mKey = mkKey(match);
+                // Установим видимость кнопки в зависимости от локального статуса только для этого матча
+                btn.style.display = finStore[mKey] ? 'none' : '';
                 const confirmFinish = () => new Promise((resolve) => {
                     let ov = document.querySelector('.modal-overlay');
                     if (!ov) {
@@ -2548,6 +2561,8 @@ document.addEventListener('DOMContentLoaded', () => {
                             // Вкладку не убираем, просто сбрасываем содержимое
                             if (streamPane) { streamPane.style.display = 'none'; streamPane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция недоступна</div></div>'; }
                         } catch(_) {}
+                        // Зафиксируем локально, что именно этот матч завершен в текущей сессии
+                        try { finStore[mKey] = true; } catch(_) {}
                         await fullRefresh();
                         // Скрыть кнопку и пометить статус
                         try {
@@ -2913,6 +2928,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     const pane = document.getElementById('md-pane-stream');
                     if (tab) tab.remove();
                     if (pane) { pane.style.display = 'none'; pane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция недоступна</div></div>'; }
+                    // Отметим завершение только для этого матча в рамках текущей сессии
+                    const finStore = (window.__FINISHED_MATCHES = window.__FINISHED_MATCHES || {});
+                    const mkKey = (mm) => { try { const dstr=(mm?.datetime||mm?.date||'').toString().slice(0,10); return `${(mm.home||'').toLowerCase().trim()}__${(mm.away||'').toLowerCase().trim()}__${dstr}`; } catch(_) { return `${(mm.home||'').toLowerCase().trim()}__${(mm.away||'').toLowerCase().trim()}__`; } };
+                    finStore[mkKey(m)] = true;
                 } catch(_) {}
             } catch(e) {
                 console.error('match settle error', e);
