@@ -2542,6 +2542,8 @@ def _build_schedule_payload_from_sheet():
             except Exception:
                 new_matches.append(m)
         t['matches'] = new_matches
+    # Удалим полностью пустые туры после фильтрации
+    upcoming = [t for t in upcoming if (t.get('matches') or [])]
     def tour_sort_key(t):
         try:
             return (datetime.fromisoformat(t.get('start_at') or '2100-01-01T00:00:00'), t.get('tour') or 10**9)
@@ -5928,7 +5930,16 @@ def api_streams_get():
                     tours = payload and payload.get('tours') or []
                 finally:
                     dbx.close()
-            if not tours:
+            # если в снапшоте не нашли нужный матч — fallback к таблице
+            need_fallback = True
+            for t in tours:
+                for m in t.get('matches', []):
+                    if m.get('home') == home and m.get('away') == away:
+                        need_fallback = False
+                        break
+                if not need_fallback:
+                    break
+            if need_fallback:
                 tours = _load_all_tours_from_sheet()
             for t in tours:
                 for m in t.get('matches', []):
@@ -5981,7 +5992,8 @@ def api_streams_get():
                 tz_h = 0
             tz_min = tz_h * 60
         now = int((time.time() + tz_min*60) * 1000)
-        if not start_ts or (start_ts - now) > win*60*1000:
+    # Разрешим обращаться заранее до 480 минут до старта, даже если на клиенте указано меньшее окно
+    if not start_ts or (start_ts - now) > max(win, 480)*60*1000:
             return jsonify({'available': False})
         # найдём подтверждение
         db: Session = get_db()
@@ -6476,12 +6488,16 @@ def api_match_settle():
                 results = payload.get('results') or []
                 exists = any((r.get('home')==home and r.get('away')==away) for r in results)
                 if not exists:
+                    # добавим запись в результаты: если счёт известен — проставим его,
+                    # иначе достаточно пары команд, чтобы расписание скрыло матч
                     ms = db.query(MatchScore).filter(MatchScore.home==home, MatchScore.away==away).first()
                     if ms and (ms.score_home is not None) and (ms.score_away is not None):
                         results.append({'home': home, 'away': away, 'score_home': int(ms.score_home), 'score_away': int(ms.score_away)})
-                        payload['results'] = results
-                        payload['updated_at'] = datetime.now(timezone.utc).isoformat()
-                        _snapshot_set(db, 'results', payload)
+                    else:
+                        results.append({'home': home, 'away': away, 'score_home': '', 'score_away': ''})
+                    payload['results'] = results
+                    payload['updated_at'] = datetime.now(timezone.utc).isoformat()
+                    _snapshot_set(db, 'results', payload)
             except Exception:
                 pass
             open_bets = db.query(Bet).filter(Bet.status=='open', Bet.home==home, Bet.away==away).all()
@@ -6553,6 +6569,17 @@ def api_match_settle():
                 ms = db.query(MatchScore).filter(MatchScore.home==home, MatchScore.away==away).first()
                 if ms and (ms.score_home is not None) and (ms.score_away is not None):
                     mirror_match_score_to_schedule(home, away, int(ms.score_home), int(ms.score_away))
+            except Exception:
+                pass
+            # Также сразу перестроим снапшот расписания, чтобы матч исчез из выдачи немедленно
+            try:
+                sched_payload = _build_schedule_payload_from_sheet()
+                if SessionLocal is not None:
+                    db2 = get_db()
+                    try:
+                        _snapshot_set(db2, 'schedule', sched_payload)
+                    finally:
+                        db2.close()
             except Exception:
                 pass
             return jsonify({'status':'ok', 'changed': changed, 'won': won_cnt, 'lost': lost_cnt})
