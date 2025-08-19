@@ -1943,8 +1943,14 @@ def mirror_match_score_to_schedule(home: str, away: str, score_home: int|None, s
                 break
         if target_row_idx is None:
             return False
+        # Пишем как числа с USER_ENTERED, чтобы не было ведущего апострофа в ячейках
         rng = f"B{target_row_idx}:D{target_row_idx}"
-        ws.update(rng, [[str(score_home), '', str(score_away)]])
+        try:
+            # gspread Worksheet.update поддерживает value_input_option
+            ws.update(rng, [[int(score_home), '', int(score_away)]], value_input_option='USER_ENTERED')
+        except Exception:
+            # fallback, если вдруг не поддерживается — обычный update (может оставить строку)
+            ws.update(rng, [[int(score_home), '', int(score_away)]])
         _metrics_inc('sheet_writes', 1)
         return True
     except Exception as e:
@@ -2468,6 +2474,22 @@ def _build_schedule_payload_from_sheet():
             except Exception:
                 continue
         return False
+    # Соберём множество завершённых матчей из снапшота результатов (а не по факту наличия счёта 0:0 во время live)
+    finished_pairs = set()
+    if SessionLocal is not None:
+        dbx = get_db()
+        try:
+            snap_res = _snapshot_get(dbx, 'results')
+            payload_res = snap_res and snap_res.get('payload') or {}
+            for r in (payload_res.get('results') or []):
+                try:
+                    finished_pairs.add(((r.get('home') or ''), (r.get('away') or '')))
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        finally:
+            dbx.close()
     upcoming = [t for t in tours if tour_is_upcoming(t)]
     # Внутри каждого тура также отфильтруем сами матчи по этому правилу
     for t in upcoming:
@@ -2481,6 +2503,9 @@ def _build_schedule_payload_from_sheet():
                 elif m.get('date'):
                     d = datetime.fromisoformat(m['date']).date()
                     keep = (d >= today)
+                # скрыть, если матч уже попал в «Результаты» (админ завершил матч)
+                if keep and ((m.get('home') or '', m.get('away') or '') in finished_pairs):
+                    keep = False
                 if keep:
                     new_matches.append(m)
             except Exception:
@@ -2677,6 +2702,38 @@ def _bg_sync_once():
             _metrics_set('last_sync', 'schedule', datetime.now(timezone.utc).isoformat())
             _metrics_set('last_sync_status', 'schedule', 'ok')
             _metrics_set('last_sync_duration_ms', 'schedule', int((time.time()-t0)*1000))
+            # После обновления расписания: синхронизировать match_datetime у открытых ставок
+            try:
+                sched_map = {}
+                for t in schedule_payload.get('tours') or []:
+                    for m in (t.get('matches') or []):
+                        key = (m.get('home') or '', m.get('away') or '')
+                        dt = None
+                        try:
+                            if m.get('datetime'):
+                                dt = datetime.fromisoformat(m['datetime'])
+                            elif m.get('date'):
+                                d = datetime.fromisoformat(m['date']).date()
+                                tm = datetime.strptime((m.get('time') or '00:00') or '00:00', '%H:%M').time()
+                                dt = datetime.combine(d, tm)
+                        except Exception:
+                            dt = None
+                        sched_map[key] = dt
+                open_bets = db.query(Bet).filter(Bet.status=='open').all()
+                updates = 0
+                for b in open_bets:
+                    new_dt = sched_map.get((b.home, b.away))
+                    if new_dt is None:
+                        continue
+                    if (b.match_datetime or None) != new_dt:
+                        b.match_datetime = new_dt
+                        b.updated_at = datetime.now(timezone.utc)
+                        updates += 1
+                if updates:
+                    db.commit()
+                    app.logger.info(f"BG sync: updated match_datetime for {updates} open bets")
+            except Exception as _e:
+                app.logger.warning(f"BG bet sync failed: {_e}")
         except Exception as e:
             app.logger.warning(f"BG sync schedule failed: {e}")
             _metrics_set('last_sync_status', 'schedule', 'error')
@@ -3001,6 +3058,46 @@ def api_match_status_get():
     if now >= dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
         return jsonify({'status':'finished', 'soon': False, 'live_started_at': dt.isoformat()})
     return jsonify({'status':'scheduled', 'soon': False, 'live_started_at': ''})
+
+@app.route('/api/match/status/set-live', methods=['POST'])
+def api_match_status_set_live():
+    """Админ: отметить матч как начавшийся (инициализировать счёт 0:0 в БД и в Sheets). Поля: initData, home, away"""
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+        home = (request.form.get('home') or '').strip()
+        away = (request.form.get('away') or '').strip()
+        if not home or not away:
+            return jsonify({'error': 'home/away обязательны'}), 400
+        if SessionLocal is None:
+            return jsonify({'error': 'БД недоступна'}), 500
+        db: Session = get_db()
+        try:
+            row = db.query(MatchScore).filter(MatchScore.home==home, MatchScore.away==away).first()
+            if not row:
+                row = MatchScore(home=home, away=away)
+                db.add(row)
+            # Инициализируем 0:0 только если счёт ещё не выставлен
+            if row.score_home is None and row.score_away is None:
+                row.score_home = 0
+                row.score_away = 0
+                row.updated_at = datetime.now(timezone.utc)
+                db.commit()
+                try:
+                    mirror_match_score_to_schedule(home, away, 0, 0)
+                except Exception:
+                    pass
+            return jsonify({'status': 'ok', 'score_home': row.score_home, 'score_away': row.score_away})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"match/status/set-live error: {e}")
+        return jsonify({'error': 'Не удалось установить live-статус'}), 500
 
 @app.route('/api/match/status/live', methods=['GET'])
 def api_match_status_live():
@@ -4880,6 +4977,12 @@ def api_match_score_set():
             row.score_away = sa
             row.updated_at = datetime.now(timezone.utc)
             db.commit()
+            # Зеркалим счёт в Google Sheets (best-effort), как числовые значения
+            try:
+                if (row.score_home is not None) and (row.score_away is not None):
+                    mirror_match_score_to_schedule(home, away, int(row.score_home), int(row.score_away))
+            except Exception:
+                pass
             return jsonify({'status': 'ok', 'score_home': row.score_home, 'score_away': row.score_away})
         finally:
             db.close()
@@ -5404,6 +5507,41 @@ def api_schedule_refresh():
             db: Session = get_db()
             try:
                 _snapshot_set(db, 'schedule', payload)
+                # Синхронизация времени матчей у открытых ставок, если дата/время изменились
+                try:
+                    # Построим быстрый индекс расписания: (home,away) -> datetime
+                    sched_map = {}
+                    for t in payload.get('tours') or []:
+                        for m in (t.get('matches') or []):
+                            key = (m.get('home') or '', m.get('away') or '')
+                            dt = None
+                            try:
+                                if m.get('datetime'):
+                                    dt = datetime.fromisoformat(m['datetime'])
+                                elif m.get('date'):
+                                    d = datetime.fromisoformat(m['date']).date()
+                                    tm = datetime.strptime((m.get('time') or '00:00') or '00:00', '%H:%M').time()
+                                    dt = datetime.combine(d, tm)
+                            except Exception:
+                                dt = None
+                            sched_map[key] = dt
+                    # Обновим только открытые ставки
+                    open_bets = db.query(Bet).filter(Bet.status=='open').all()
+                    updates = 0
+                    for b in open_bets:
+                        new_dt = sched_map.get((b.home, b.away))
+                        if new_dt is None:
+                            continue
+                        # если поменялось — обновим
+                        if (b.match_datetime or None) != new_dt:
+                            b.match_datetime = new_dt
+                            b.updated_at = datetime.now(timezone.utc)
+                            updates += 1
+                    if updates:
+                        db.commit()
+                        app.logger.info(f"schedule/refresh: updated match_datetime for {updates} open bets")
+                except Exception as _e:
+                    app.logger.warning(f"schedule/refresh bet sync failed: {_e}")
             finally:
                 db.close()
         return jsonify({'status': 'ok', 'updated_at': payload.get('updated_at')})
@@ -5605,11 +5743,12 @@ def api_streams_set():
     Поля: initData, home, away, datetime(iso optional), vk (строка: video_ext или прямая ссылка)
     """
     try:
-        parsed = parse_and_verify_telegram_init_data(request.form.get('initData',''))
+        import re as _re
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
         if not parsed or not parsed.get('user'):
             return jsonify({'error': 'Недействительные данные'}), 401
         user_id = str(parsed['user'].get('id'))
-        admin_id = os.environ.get('ADMIN_USER_ID','')
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
         if not admin_id or user_id != admin_id:
             return jsonify({'error': 'forbidden'}), 403
         home = (request.form.get('home') or '').strip()
@@ -5633,13 +5772,12 @@ def api_streams_set():
             if 'video_ext.php' in s:
                 u = urlparse(s)
                 q = parse_qs(u.query)
-                oid = (q.get('oid',[None])[0])
-                vid = (q.get('id',[None])[0])
+                oid = (q.get('oid', [None])[0])
+                vid = (q.get('id', [None])[0])
                 if oid and vid:
                     vk_id = f"{oid}_{vid}"
             elif '/video' in s:
                 path = urlparse(s).path or ''
-                import re as _re
                 m = _re.search(r"/video(-?\d+_\d+)", path)
                 if m:
                     vk_id = m.group(1)
@@ -5651,13 +5789,23 @@ def api_streams_set():
             vk_url = s
         if not vk_id and not vk_url:
             return jsonify({'error': 'vk ссылка пуста'}), 400
-        if vk_id and not re.match(r'^-?\d+_\d+$', vk_id):
+        if vk_id and not _re.match(r'^-?\d+_\d+$', vk_id):
             return jsonify({'error': 'vkVideoId должен быть формата oid_id'}), 400
         if SessionLocal is None:
             return jsonify({'error': 'БД недоступна'}), 500
         db: Session = get_db()
         try:
-            row = db.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None)).first()
+            row = db.query(MatchStream).filter(
+                MatchStream.home == home,
+                MatchStream.away == away,
+                MatchStream.date == (date_str or None)
+            ).first()
+            if not row and not date_str:
+                # Разрешим перезапись самой свежей записи, даже если она без даты, если совпали команды
+                row = db.query(MatchStream).filter(
+                    MatchStream.home == home,
+                    MatchStream.away == away
+                ).order_by(MatchStream.updated_at.desc()).first()
             now_ts = datetime.now(timezone.utc)
             prev_id = None
             prev_url = None
@@ -5669,7 +5817,8 @@ def api_streams_set():
                     prev_id = row.vk_video_id or None
                     prev_url = row.vk_post_url or None
                 except Exception:
-                    prev_id = None; prev_url = None
+                    prev_id = None
+                    prev_url = None
             row.vk_video_id = vk_id or None
             row.vk_post_url = vk_url or None
             row.confirmed_at = now_ts
@@ -5677,7 +5826,11 @@ def api_streams_set():
             db.commit()
             # Логирование факта сохранения для аудита
             try:
-                app.logger.info(f"streams/set by admin {user_id}: {home} vs {away} ({date_str or '-'}) -> vkVideoId={row.vk_video_id or ''} vkPostUrl={row.vk_post_url or ''} (prev: id={prev_id or ''} url={prev_url or ''})")
+                app.logger.info(
+                    f"streams/set by admin {user_id}: {home} vs {away} ({date_str or '-'}) -> "
+                    f"vkVideoId={row.vk_video_id or ''} vkPostUrl={row.vk_post_url or ''} "
+                    f"(prev: id={prev_id or ''} url={prev_url or ''})"
+                )
             except Exception:
                 pass
             msg = 'Ссылка принята и сохранена'
@@ -5689,7 +5842,7 @@ def api_streams_set():
                 'date': date_str,
                 'vkVideoId': row.vk_video_id or '',
                 'vkPostUrl': row.vk_post_url or '',
-                'prev': { 'vkVideoId': prev_id or '', 'vkPostUrl': prev_url or '' }
+                'prev': {'vkVideoId': prev_id or '', 'vkPostUrl': prev_url or ''}
             })
         finally:
             db.close()
@@ -5731,15 +5884,40 @@ def api_streams_get():
             for t in tours:
                 for m in t.get('matches', []):
                     if (m.get('home') == home and m.get('away') == away):
-                        if date_str and (m.get('datetime') or '').startswith(date_str):
-                            start_ts = int(datetime.fromisoformat(m['datetime']).timestamp()*1000)
-                            raise StopIteration  # break all
-                        elif not date_str:
+                        # С датой в запросе — сопоставляем по datetime или по date, и вычисляем старт
+                        if date_str:
                             try:
-                                start_ts = int(datetime.fromisoformat(m['datetime']).timestamp()*1000)
+                                if m.get('datetime') and str(m['datetime']).startswith(date_str):
+                                    start_ts = int(datetime.fromisoformat(m['datetime']).timestamp() * 1000)
+                                    raise StopIteration
+                                if m.get('date') and str(m['date']).startswith(date_str):
+                                    # Построим dt из date+time
+                                    d = datetime.fromisoformat(str(m['date'])).date()
+                                    try:
+                                        tm = datetime.strptime((m.get('time') or '00:00'), "%H:%M").time()
+                                    except Exception:
+                                        tm = datetime.min.time()
+                                    dt = datetime.combine(d, tm)
+                                    start_ts = int(dt.timestamp() * 1000)
+                                    raise StopIteration
+                            except Exception:
+                                pass
+                        else:
+                            # Без даты в запросе — берём datetime, если есть; иначе date+time
+                            try:
+                                if m.get('datetime'):
+                                    start_ts = int(datetime.fromisoformat(m['datetime']).timestamp() * 1000)
+                                elif m.get('date'):
+                                    d = datetime.fromisoformat(str(m['date'])).date()
+                                    try:
+                                        tm = datetime.strptime((m.get('time') or '00:00'), "%H:%M").time()
+                                    except Exception:
+                                        tm = datetime.min.time()
+                                    start_ts = int(datetime.combine(d, tm).timestamp() * 1000)
+                                raise StopIteration
                             except Exception:
                                 start_ts = None
-                            raise StopIteration
+                                raise StopIteration
         except StopIteration:
             pass
         # Сдвигаем текущее время по настройке SCHEDULE_TZ_SHIFT_*
@@ -5760,6 +5938,9 @@ def api_streams_get():
         db: Session = get_db()
         try:
             row = db.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None)).first()
+            if not row and date_str:
+                # Фоллбек: искать запись без date (старые сохранения) или любую последнюю
+                row = db.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away).order_by(MatchStream.updated_at.desc()).first()
             if not row:
                 return jsonify({'available': False})
             return jsonify({'available': True, 'vkVideoId': row.vk_video_id or '', 'vkPostUrl': row.vk_post_url or ''})

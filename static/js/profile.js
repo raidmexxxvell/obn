@@ -2332,7 +2332,7 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         try {
             fetch(`/api/match/status/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}`)
-                .then(r=>r.json()).then(s => {
+                .then(r=>r.json()).then(async (s) => {
                     if (s?.status === 'live') {
                         const live = document.createElement('span'); live.className = 'live-badge';
                         const dot = document.createElement('span'); dot.className = 'live-dot';
@@ -2341,6 +2341,25 @@ document.addEventListener('DOMContentLoaded', () => {
                         dt.appendChild(live);
                         // Во время лайва показываем стартовый 0 : 0, если ещё нет счёта
                         if (score.textContent.trim() === '— : —') score.textContent = '0 : 0';
+                        // Если админ и счёт ещё не инициализирован в БД — поставим 0:0 и в Sheets
+                        try {
+                            const adminId = document.body.getAttribute('data-admin');
+                            const currentId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id ? String(window.Telegram.WebApp.initDataUnsafe.user.id) : '';
+                            const isAdmin = !!(adminId && currentId && String(adminId) === currentId);
+                            if (isAdmin) {
+                                const r0 = await fetch(`/api/match/score/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}`);
+                                const d0 = await r0.json().catch(()=>({}));
+                                const noScore = (d0?.score_home == null) && (d0?.score_away == null);
+                                if (noScore) {
+                                    const tg = window.Telegram?.WebApp || null;
+                                    const fd0 = new FormData();
+                                    fd0.append('initData', tg?.initData || '');
+                                    fd0.append('home', match.home || '');
+                                    fd0.append('away', match.away || '');
+                                    await fetch('/api/match/status/set-live', { method: 'POST', body: fd0 }).catch(()=>{});
+                                }
+                            }
+                        } catch(_) {}
                         // Запускаем поллинг счёта
                         fetchScore();
                         scorePoll = setInterval(fetchScore, 15000);
@@ -2514,6 +2533,12 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (streamPane) { streamPane.style.display = 'none'; streamPane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция недоступна</div></div>'; }
                         } catch(_) {}
                         await fullRefresh();
+                        // Скрыть кнопку и пометить статус
+                        try {
+                            btn.style.display = 'none';
+                            const statusEl = mdPane.querySelector('.match-details-topbar .status-text');
+                            if (statusEl) statusEl.textContent = 'Матч завершен';
+                        } catch(_) {}
                     } catch(e) {
                         console.error('finish match error', e); try { tg?.showAlert?.(e?.message || 'Ошибка'); } catch(_) {}
                     } finally { btn.disabled=false; btn.textContent = old; }
