@@ -144,13 +144,28 @@
   const hImg = document.createElement('img'); hImg.className='logo'; hImg.alt = m.home || ''; try { hImg.loading='lazy'; hImg.decoding='async'; } catch(_) {} loadTeamLogo(hImg, m.home || '');
       const hName = document.createElement('div'); hName.className='team-name'; hName.setAttribute('data-team-name', m.home || ''); hName.textContent = withTeamCount(m.home || '');
       home.append(hImg, hName);
-      const score = document.createElement('div'); score.className = 'score'; score.textContent = 'VS';
+  const score = document.createElement('div'); score.className = 'score'; score.textContent = 'VS';
       const away = document.createElement('div'); away.className='team away';
   const aImg = document.createElement('img'); aImg.className='logo'; aImg.alt = m.away || ''; try { aImg.loading='lazy'; aImg.decoding='async'; } catch(_) {} loadTeamLogo(aImg, m.away || '');
       const aName = document.createElement('div'); aName.className='team-name'; aName.setAttribute('data-team-name', m.away || ''); aName.textContent = withTeamCount(m.away || '');
       away.append(aImg, aName);
       center.append(home, score, away);
       card.appendChild(center);
+
+      // Если лайв — подгрузим текущий счёт
+      try {
+        if (isLive) {
+          score.textContent = '0 : 0';
+          const fetchScore = async () => {
+            try {
+              const r = await fetch(`/api/match/score/get?home=${encodeURIComponent(m.home||'')}&away=${encodeURIComponent(m.away||'')}`);
+              const d = await r.json();
+              if (typeof d?.score_home === 'number' && typeof d?.score_away === 'number') score.textContent = `${Number(d.score_home)} : ${Number(d.score_away)}`;
+            } catch(_) {}
+          };
+          fetchScore();
+        }
+      } catch(_) {}
 
       // Голосование (П1/X/П2) — показываем только если матч входит в ставочные туры
       try {

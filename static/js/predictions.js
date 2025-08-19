@@ -44,7 +44,7 @@
         if (!tours.length) {
           // если у нас уже есть контент — не затираем его пустым ответом
           if (toursEl.childElementCount > 0 || toursEl.dataset.hasContent === '1') { return; }
-          toursEl.innerHTML = '<div class="schedule-empty">Скоро появятся матчи</div>';
+          toursEl.innerHTML = '<div class="schedule-empty">Матчи скоро появяться</div>';
           return;
         }
         const container = document.createElement('div');
@@ -159,7 +159,7 @@
         });
         toursEl.innerHTML = '';
         if (visibleMatchesTotal === 0) {
-          toursEl.innerHTML = '<div class="schedule-empty">Скоро появятся матчи</div>';
+          toursEl.innerHTML = '<div class="schedule-empty">Матчи скоро появяться</div>';
         } else {
           toursEl.appendChild(container);
           toursEl.dataset.hasContent = '1';

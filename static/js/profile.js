@@ -146,39 +146,6 @@ document.addEventListener('DOMContentLoaded', () => {
         favoriteTeamSelect.addEventListener('change', (e) => { const v = e.target.value || ''; saveFavoriteTeam(v); });
     }
 
-    // Управление заставкой вынесено в static/js/splash.js
-
-    // --- Антиспам защиты ---
-    // Делегированный троттлинг кликов. Если data-throttle нет, задаём дефолт для популярных элементов.
-    const _clickThrottle = new WeakMap();
-    const _defaultThrottleFor = (el) => {
-        if (!el) return 0;
-        if (el.matches('.bet-btn')) return 1200;
-        if (el.matches('.details-btn')) return 800;
-        if (el.matches('.subtab-item')) return 600;
-        if (el.matches('.nav-item')) return 600;
-        if (el.tagName === 'BUTTON') return 500;
-        return 0;
-    };
-    document.addEventListener('click', (e) => {
-        let el = e.target.closest('[data-throttle], .bet-btn, .details-btn, .subtab-item, .nav-item, button');
-        if (!el) return;
-        if (!el.hasAttribute('data-throttle')) {
-            const def = _defaultThrottleFor(el);
-            if (def > 0) el.setAttribute('data-throttle', String(def));
-        }
-        const ms = parseInt(el.getAttribute('data-throttle') || '0', 10) || 0;
-        if (ms <= 0) return;
-        const now = Date.now();
-        const last = _clickThrottle.get(el) || 0;
-        if (now - last < ms) {
-            e.stopPropagation();
-            e.preventDefault();
-            return;
-        }
-        _clickThrottle.set(el, now);
-    }, true);
-
     function initApp() {
         // если tg есть, но в нём нет user — сообщаем об ошибке
         if (tg && !tg.initDataUnsafe?.user) {
@@ -835,9 +802,9 @@ document.addEventListener('DOMContentLoaded', () => {
         let slides = Array.isArray(window.__HOME_ADS__) ? window.__HOME_ADS__.slice() : null;
         if (!slides || slides.length === 0) {
             slides = [
-                { img: '/static/img/achievements/credits-gold.png', title: 'Здесь может быть ваша лига — нажми', action: 'BLB' },
-                { img: '/static/img/achievements/placeholder.png', title: '', action: '' },
-                { img: '/static/img/achievements/placeholder.png', title: '', action: '' }
+                { img: '/static/img/ligareklama.webp', title: 'Здесь может быть ваша лига — нажми', action: 'BLB' },
+                { img: '/static/img/reklama.webp', title: '', action: '' },
+                { img: '/static/img/reklama.webp', title: '', action: '' }
             ];
         }
         // Рендер слайдов
@@ -962,8 +929,31 @@ document.addEventListener('DOMContentLoaded', () => {
                 tryNext();
             };
             const L = (name) => { const t = document.createElement('div'); t.className = 'team'; const i = document.createElement('img'); i.className='logo'; loadLogo(i, name||''); const n = document.createElement('div'); n.className='team-name'; n.textContent = name||''; t.append(i, n); return t; };
-            center.append(L(m.home), (()=>{const s=document.createElement('div'); s.className='score'; s.textContent='VS'; return s;})(), L(m.away));
+            const scoreEl = document.createElement('div'); scoreEl.className='score'; scoreEl.textContent='VS';
+            center.append(L(m.home), scoreEl, L(m.away));
             card.appendChild(center);
+            // Если матч идёт — показываем счёт и обновляем
+            try {
+                const isLive = (() => {
+                    try {
+                        const now = new Date();
+                        if (m.datetime) { const dt = new Date(m.datetime); const end = new Date(dt.getTime()+2*60*60*1000); return now>=dt && now<end; }
+                        if (m.date && m.time) { const dt = new Date(m.date + 'T' + (m.time.length===5? m.time+':00': m.time)); const end = new Date(dt.getTime()+2*60*60*1000); return now>=dt && now<end; }
+                    } catch(_) {}
+                    return false;
+                })();
+                if (isLive) {
+                    scoreEl.textContent = '0 : 0';
+                    const fetchScore = async () => {
+                        try {
+                            const r = await fetch(`/api/match/score/get?home=${encodeURIComponent(m.home||'')}&away=${encodeURIComponent(m.away||'')}`);
+                            const d = await r.json();
+                            if (typeof d?.score_home === 'number' && typeof d?.score_away === 'number') { scoreEl.textContent = `${Number(d.score_home)} : ${Number(d.score_away)}`; }
+                        } catch(_) {}
+                    };
+                    fetchScore();
+                }
+            } catch(_) {}
             // Горизонтальная полоса голосования «П1 • X • П2» (показываем только если на матч есть ставки)
             const wrap = document.createElement('div'); wrap.className = 'vote-inline';
             const title = document.createElement('div'); title.className = 'vote-title'; title.textContent = 'Голосование';
@@ -1977,7 +1967,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 existed.remove();
             }
         } catch(_) {}
-    // Вкладка «Трансляция»: создаём/находим; показываем, если сервер говорит, что доступна (подтверждена админом и по времени)
+        // Вкладка «Трансляция»: создаём/находим; показываем, если сервер говорит, что доступна (подтверждена админом и по времени)
         let streamPane = document.getElementById('md-pane-stream');
         if (!streamPane) {
             streamPane = document.createElement('div');
@@ -1992,6 +1982,9 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const dateStr = (match?.datetime || match?.date || '').toString().slice(0,10);
             const url = `/api/streams/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}&date=${encodeURIComponent(dateStr)}&window=10`;
+            const cacheKey = (() => {
+                try { const h=(match.home||'').toLowerCase().trim(); const a=(match.away||'').toLowerCase().trim(); const d=dateStr; return `stream:${h}__${a}__${d}`; } catch(_) { return `stream:`; }
+            })();
             const parseStart = () => {
                 try {
                     if (match?.datetime) return new Date(match.datetime).getTime();
@@ -2007,12 +2000,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 return NaN;
             };
             const startMs = parseStart();
+            const endMs = isFinite(startMs) ? startMs + 3*60*60*1000 : NaN; // ~3 часа окно матча
+            const readCached = () => { try { const raw = localStorage.getItem(cacheKey); return raw ? JSON.parse(raw) : null; } catch(_) { return null; } };
+            const writeCached = (ans) => { try { localStorage.setItem(cacheKey, JSON.stringify({ ans, ts: Date.now() })); } catch(_) {} };
             const doCheck = () => {
                 // если панель удалена/скрыта — прекращаем
                 if (!document.body.contains(streamPane)) { streamPane.__streamTimer && clearTimeout(streamPane.__streamTimer); streamPane.__streamTimer = null; return; }
                 fetch(url).then(r=>r.json()).then(ans => {
                     const existing = subtabs?.querySelector('[data-mdtab="stream"]');
                     if (ans?.available) {
+                        // кэшируем, чтобы сохранялось до конца матча
+                        writeCached(ans);
                         if (!existing) {
                             const tab = document.createElement('div'); tab.className='subtab-item'; tab.setAttribute('data-mdtab','stream'); tab.textContent='Трансляция';
                             subtabs.appendChild(tab);
@@ -2021,6 +2019,19 @@ document.addEventListener('DOMContentLoaded', () => {
                         // больше не проверяем
                         if (streamPane.__streamTimer) { clearTimeout(streamPane.__streamTimer); streamPane.__streamTimer = null; }
                     } else {
+                        // если есть кэш и матч ещё не закончился — используем кэш, чтобы вкладка не пропадала
+                        const cached = readCached();
+                        const now = Date.now();
+                        if (cached && cached.ans && isFinite(endMs) && now < endMs) {
+                            if (!existing) {
+                                const tab = document.createElement('div'); tab.className='subtab-item'; tab.setAttribute('data-mdtab','stream'); tab.textContent='Трансляция';
+                                subtabs.appendChild(tab);
+                            }
+                            streamPane.__streamInfo = cached.ans;
+                            // прекращаем дальнейшие проверки
+                            if (streamPane.__streamTimer) { clearTimeout(streamPane.__streamTimer); streamPane.__streamTimer = null; }
+                            return;
+                        }
                         // если до старта менее 12 минут или матч начался не более 30 минут назад — пробуем ещё раз через 30-45с
                         if (isFinite(startMs)) {
                             const now = Date.now();
@@ -2237,55 +2248,55 @@ document.addEventListener('DOMContentLoaded', () => {
                         // Запускаем поллинг счёта
                         fetchScore();
                         scorePoll = setInterval(fetchScore, 15000);
-                        // Админ-контролы +/- около счёта
+                        // Админ-контролы +/- около счёта (без подписей «Команда 1/2»)
                         try {
                             const adminId = document.body.getAttribute('data-admin');
                             const currentId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id ? String(window.Telegram.WebApp.initDataUnsafe.user.id) : '';
                             const isAdmin = !!(adminId && currentId && String(adminId) === currentId);
                             if (isAdmin) {
                                 const center = score.parentElement || dt.parentElement;
-                                const ctrl = document.createElement('div');
-                                ctrl.className = 'admin-score-ctrls';
-                                ctrl.style.marginTop = '6px';
-                                ctrl.style.display = 'flex';
-                                ctrl.style.gap = '12px';
-                                ctrl.style.justifyContent = 'center';
-                                const mkBtn = (txt) => { const b = document.createElement('button'); b.className = 'details-btn'; b.textContent = txt; b.style.padding = '2px 8px'; b.style.minWidth = 'unset'; return b; };
-                                const boxH = document.createElement('div'); boxH.style.display='flex'; boxH.style.gap='6px'; boxH.style.alignItems='center';
-                                const hMinus = mkBtn('−'); const hPlus = mkBtn('+');
-                                const hLab = document.createElement('span'); hLab.style.fontSize='12px'; hLab.style.opacity='.9'; hLab.textContent = 'Команда 1';
-                                boxH.append(hMinus, hLab, hPlus);
-                                const boxA = document.createElement('div'); boxA.style.display='flex'; boxA.style.gap='6px'; boxA.style.alignItems='center';
-                                const aMinus = mkBtn('−'); const aPlus = mkBtn('+');
-                                const aLab = document.createElement('span'); aLab.style.fontSize='12px'; aLab.style.opacity='.9'; aLab.textContent = 'Команда 2';
-                                boxA.append(aMinus, aLab, aPlus);
-                                ctrl.append(boxH, boxA);
-                                center.appendChild(ctrl);
-                                const tg = window.Telegram?.WebApp || null;
-                                const parseScore = () => {
-                                    try { const t = score.textContent||''; const m = t.match(/(\d+)\s*:\s*(\d+)/); if (m) return [parseInt(m[1],10)||0, parseInt(m[2],10)||0]; } catch(_) {}
-                                    return [0,0];
-                                };
-                                const postScore = async (sh, sa) => {
-                                    try {
-                                        const fd = new FormData();
-                                        fd.append('initData', tg?.initData || '');
-                                        fd.append('home', match.home || '');
-                                        fd.append('away', match.away || '');
-                                        fd.append('score_home', String(Math.max(0, sh)));
-                                        fd.append('score_away', String(Math.max(0, sa)));
-                                        const r = await fetch('/api/match/score/set', { method: 'POST', body: fd });
-                                        const d = await r.json().catch(()=>({}));
-                                        if (!r.ok || d?.error) throw new Error(d?.error || 'Ошибка сохранения');
-                                        applyScore(d.score_home, d.score_away);
-                                    } catch(e) {
-                                        try { tg?.showAlert?.(e?.message || 'Не удалось сохранить счёт'); } catch(_) {}
-                                    }
-                                };
-                                hMinus.addEventListener('click', () => { const [h,a] = parseScore(); postScore(Math.max(0, h-1), a); });
-                                hPlus.addEventListener('click', () => { const [h,a] = parseScore(); postScore(h+1, a); });
-                                aMinus.addEventListener('click', () => { const [h,a] = parseScore(); postScore(h, Math.max(0, a-1)); });
-                                aPlus.addEventListener('click', () => { const [h,a] = parseScore(); postScore(h, a+1); });
+                                if (!center.querySelector('.admin-score-ctrls')) {
+                                    const mkBtn = (txt) => { const b = document.createElement('button'); b.className = 'details-btn'; b.textContent = txt; b.style.padding = '2px 8px'; b.style.minWidth = 'unset'; return b; };
+                                    const row = document.createElement('div');
+                                    row.className = 'admin-score-ctrls';
+                                    row.style.marginTop = '6px';
+                                    row.style.display = 'flex';
+                                    row.style.gap = '10px';
+                                    row.style.alignItems = 'center';
+                                    row.style.justifyContent = 'center';
+                                    const left = document.createElement('div'); left.style.display='flex'; left.style.gap='6px';
+                                    const right = document.createElement('div'); right.style.display='flex'; right.style.gap='6px';
+                                    const hMinus = mkBtn('−'); const hPlus = mkBtn('+');
+                                    const aMinus = mkBtn('−'); const aPlus = mkBtn('+');
+                                    left.append(hMinus, hPlus); right.append(aMinus, aPlus);
+                                    try { if (dt && dt.parentElement === center) center.insertBefore(row, dt); else center.appendChild(row); } catch(_) {}
+                                    row.append(left, score, right);
+                                    const tg = window.Telegram?.WebApp || null;
+                                    const parseScore = () => {
+                                        try { const t = score.textContent||''; const m = t.match(/(\d+)\s*:\s*(\d+)/); if (m) return [parseInt(m[1],10)||0, parseInt(m[2],10)||0]; } catch(_) {}
+                                        return [0,0];
+                                    };
+                                    const postScore = async (sh, sa) => {
+                                        try {
+                                            const fd = new FormData();
+                                            fd.append('initData', tg?.initData || '');
+                                            fd.append('home', match.home || '');
+                                            fd.append('away', match.away || '');
+                                            fd.append('score_home', String(Math.max(0, sh)));
+                                            fd.append('score_away', String(Math.max(0, sa)));
+                                            const r = await fetch('/api/match/score/set', { method: 'POST', body: fd });
+                                            const d = await r.json().catch(()=>({}));
+                                            if (!r.ok || d?.error) throw new Error(d?.error || 'Ошибка сохранения');
+                                            applyScore(d.score_home, d.score_away);
+                                        } catch(e) {
+                                            try { tg?.showAlert?.(e?.message || 'Не удалось сохранить счёт'); } catch(_) {}
+                                        }
+                                    };
+                                    hMinus.addEventListener('click', () => { const [h,a] = parseScore(); postScore(Math.max(0, h-1), a); });
+                                    hPlus.addEventListener('click', () => { const [h,a] = parseScore(); postScore(h+1, a); });
+                                    aMinus.addEventListener('click', () => { const [h,a] = parseScore(); postScore(h, Math.max(0, a-1)); });
+                                    aPlus.addEventListener('click', () => { const [h,a] = parseScore(); postScore(h, a+1); });
+                                }
                             }
                         } catch(_) {}
                     }
@@ -2346,6 +2357,75 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
             };
         });
+
+        // Добавим в топбар кнопку «Завершить матч» для админа
+        try {
+            const adminId = document.body.getAttribute('data-admin');
+            const currentId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id ? String(window.Telegram.WebApp.initDataUnsafe.user.id) : '';
+            const isAdmin = !!(adminId && currentId && String(adminId) === currentId);
+            const topbar = mdPane.querySelector('.match-details-topbar');
+            if (isAdmin && topbar && !topbar.querySelector('#md-finish-btn')) {
+                const btn = document.createElement('button');
+                btn.id = 'md-finish-btn'; btn.className = 'details-btn'; btn.textContent = 'Завершить матч';
+                btn.style.marginLeft = 'auto';
+                const confirmFinish = () => new Promise((resolve) => {
+                    let ov = document.querySelector('.modal-overlay');
+                    if (!ov) {
+                        ov = document.createElement('div'); ov.className='modal-overlay';
+                        ov.style.position='fixed'; ov.style.inset='0'; ov.style.background='rgba(0,0,0,0.6)'; ov.style.zIndex='9999';
+                        ov.style.display='flex'; ov.style.alignItems='center'; ov.style.justifyContent='center';
+                        const box = document.createElement('div'); box.className='modal-box';
+                        box.style.background='rgba(20,24,34,0.98)'; box.style.border='1px solid rgba(255,255,255,0.12)'; box.style.borderRadius='14px'; box.style.width='min(92vw,420px)'; box.style.padding='14px';
+                        box.innerHTML = '<div style="font-weight:700; font-size:16px; margin-bottom:8px;">Завершить матч?</div>'+
+                            '<div style="opacity:.9; font-size:13px; line-height:1.35; margin-bottom:12px;">Счёт будет записан, ставки рассчитаны. Продолжить?</div>'+
+                            '<div style="display:flex; gap:8px; justify-content:flex-end;"><button class="app-btn neutral" id="mf-cancel">Отмена</button><button class="app-btn danger" id="mf-ok">Завершить</button></div>';
+                        ov.appendChild(box); document.body.appendChild(ov);
+                        box.querySelector('#mf-cancel').onclick = () => { ov.remove(); resolve(false); };
+                        box.querySelector('#mf-ok').onclick = () => { ov.remove(); resolve(true); };
+                    } else { resolve(false); }
+                });
+                const fullRefresh = async () => {
+                    try {
+                        const tg = window.Telegram?.WebApp || null;
+                        const fd = new FormData(); fd.append('initData', tg?.initData || '');
+                        await Promise.allSettled([
+                            fetch('/api/league-table/refresh', { method: 'POST', body: fd }),
+                            fetch('/api/stats-table/refresh', { method: 'POST', body: fd }),
+                            fetch('/api/schedule/refresh', { method: 'POST', body: fd }),
+                            fetch('/api/results/refresh', { method: 'POST', body: fd }),
+                        ]);
+                        try { loadLeagueTable(); } catch(_) {}
+                        try { loadResults(); } catch(_) {}
+                        try { loadSchedule(); } catch(_) {}
+                    } catch(_) {}
+                };
+                btn.addEventListener('click', async () => {
+                    const ok = await confirmFinish(); if (!ok) return;
+                    const tg = window.Telegram?.WebApp || null;
+                    btn.disabled = true; const old = btn.textContent; btn.textContent = 'Завершаю...';
+                    try {
+                        const fd = new FormData(); fd.append('initData', tg?.initData || ''); fd.append('home', match.home||''); fd.append('away', match.away||'');
+                        const r = await fetch('/api/match/settle', { method: 'POST', body: fd }); const d = await r.json().catch(()=>({}));
+                        if (!r.ok || d?.error) throw new Error(d?.error || 'Ошибка завершения');
+                        try { tg?.showAlert?.('Матч завершён'); } catch(_) {}
+                        // Очистим кэш трансляции, чтобы вкладка скрылась после завершения
+                        try {
+                            const dateStr = (match?.datetime || match?.date || '').toString().slice(0,10);
+                            const key = `stream:${(match.home||'').toLowerCase().trim()}__${(match.away||'').toLowerCase().trim()}__${dateStr}`;
+                            localStorage.removeItem(key);
+                            // Уберём вкладку «Трансляция», если она есть
+                            const existing = mdPane.querySelector('.modal-subtabs [data-mdtab="stream"]');
+                            if (existing) existing.remove();
+                            if (streamPane) { streamPane.style.display = 'none'; streamPane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция недоступна</div></div>'; }
+                        } catch(_) {}
+                        await fullRefresh();
+                    } catch(e) {
+                        console.error('finish match error', e); try { tg?.showAlert?.(e?.message || 'Ошибка'); } catch(_) {}
+                    } finally { btn.disabled=false; btn.textContent = old; }
+                });
+                topbar.appendChild(btn);
+            }
+        } catch(_) {}
 
         // кнопка Назад
         const back = document.getElementById('match-back');
@@ -2605,6 +2685,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 const d = await r.json().catch(()=>({}));
                 if (!r.ok || d?.error) throw new Error(d?.error || 'Ошибка расчёта матча');
                 try { tg?.showAlert?.(`Готово: изменено ${d.changed||0}, выиграло ${d.won||0}, проиграло ${d.lost||0}`); } catch(_) {}
+                // Очистим кэш трансляции для матча, чтобы вкладка больше не показывалась
+                try {
+                    const dateStr = (m?.datetime || m?.date || '').toString().slice(0,10);
+                    const key = `stream:${(m.home||'').toLowerCase().trim()}__${(m.away||'').toLowerCase().trim()}__${dateStr}`;
+                    localStorage.removeItem(key);
+                    // Уберём вкладку «Трансляция», если пользователь в деталях матча
+                    const root = document.getElementById('ufo-match-details');
+                    const tab = root?.querySelector('.modal-subtabs [data-mdtab="stream"]');
+                    const pane = document.getElementById('md-pane-stream');
+                    if (tab) tab.remove();
+                    if (pane) { pane.style.display = 'none'; pane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция недоступна</div></div>'; }
+                } catch(_) {}
             } catch(e) {
                 console.error('match settle error', e);
                 try { tg?.showAlert?.(e?.message || 'Ошибка расчёта'); } catch(_) {}
