@@ -2095,152 +2095,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 existed.remove();
             }
         } catch(_) {}
-        // Вкладка «Трансляция»: создаём/находим; показываем, если сервер говорит, что доступна (подтверждена админом и по времени)
-        let streamPane = document.getElementById('md-pane-stream');
-        if (!streamPane) {
-            streamPane = document.createElement('div');
-            streamPane.id = 'md-pane-stream';
-            streamPane.className = 'md-pane';
-            streamPane.style.display = 'none';
-            mdPane.querySelector('.modal-body')?.appendChild(streamPane);
-        }
-    // Очистка плеера при каждом открытии экрана (ленивая вставка при показе)
-    streamPane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
-        // Всегда показываем вкладку «Трансляция» для всех пользователей
+        // Трансляция: логику ведёт Streams.js — вкладка появляется только при наличии ссылки (без привязки ко времени)
+        let streamPane = null;
         try {
-            const existed = subtabs?.querySelector('[data-mdtab="stream"]');
-            if (!existed) {
-                const tab = document.createElement('div'); tab.className='subtab-item'; tab.setAttribute('data-mdtab','stream'); tab.textContent='Трансляция';
-                subtabs.appendChild(tab);
+            if (window.Streams && typeof window.Streams.setupMatchStream === 'function') {
+                streamPane = window.Streams.setupMatchStream(mdPane, subtabs, match);
             }
-        } catch(_) {}
-        // Спроси сервер, можно ли показывать вкладку (подтверждено + за N минут до матча)
-        try {
-            const dateStr = (match?.datetime || match?.date || '').toString().slice(0,10);
-            const url = `/api/streams/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}&date=${encodeURIComponent(dateStr)}&window=60`;
-            const cacheKey = (() => {
-                try { const h=(match.home||'').toLowerCase().trim(); const a=(match.away||'').toLowerCase().trim(); const d=dateStr; return `stream:${h}__${a}__${d}`; } catch(_) { return `stream:`; }
-            })();
-            const parseStart = () => {
-                try {
-                    if (match?.datetime) return new Date(match.datetime).getTime();
-                    if (match?.date) {
-                        const d = new Date(match.date);
-                        if (match.time) {
-                            const [hh, mm] = String(match.time).split(':').map(x=>parseInt(x,10)||0);
-                            d.setHours(hh, mm, 0, 0);
-                        }
-                        return d.getTime();
-                    }
-                } catch(_) {}
-                return NaN;
-            };
-            const startMs = parseStart();
-            const endMs = isFinite(startMs) ? startMs + 3*60*60*1000 : NaN; // ~3 часа окно матча
-            const readCached = () => { try { const raw = localStorage.getItem(cacheKey); return raw ? JSON.parse(raw) : null; } catch(_) { return null; } };
-            const writeCached = (ans) => { try { localStorage.setItem(cacheKey, JSON.stringify({ ans, ts: Date.now() })); } catch(_) {} };
-            const buildStream = (info) => {
-                if (!info) return false;
-                if (streamPane.__inited) return true;
-                try {
-                    if (info && (info.vkVideoId || info.vkPostUrl)) {
-                        const host = document.createElement('div'); host.className = 'stream-wrap';
-                        const ratio = document.createElement('div'); ratio.className = 'stream-aspect';
-                        let src = '';
-                        if (info.vkVideoId) {
-                            // Строим всегда vk.com/video_ext.php из пары oid_id
-                            const [oid, vid] = String(info.vkVideoId).split('_');
-                            src = `https://vk.com/video_ext.php?oid=${encodeURIComponent(oid||'')}&id=${encodeURIComponent(vid||'')}&hd=2&autoplay=${info.autoplay?1:0}`;
-                        } else if (info.vkPostUrl) {
-                            // Попробуем добыть oid_id из ссылки вида /video-182587651_456242176
-                            try {
-                                const m = String(info.vkPostUrl).match(/\/video(-?\d+_\d+)/);
-                                if (m && m[1]) {
-                                    const [oid, vid] = m[1].split('_');
-                                    src = `https://vk.com/video_ext.php?oid=${encodeURIComponent(oid||'')}&id=${encodeURIComponent(vid||'')}&hd=2&autoplay=${info.autoplay?1:0}`;
-                                } else {
-                                    src = info.vkPostUrl;
-                                }
-                            } catch(_) { src = info.vkPostUrl; }
-                        }
-                        const ifr = document.createElement('iframe');
-                        ifr.src = src;
-                        ifr.setAttribute('allowfullscreen','true');
-                        ifr.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture; screen-wake-lock;';
-                        ifr.referrerPolicy = 'strict-origin-when-cross-origin';
-                        ratio.appendChild(ifr); host.appendChild(ratio); streamPane.innerHTML=''; streamPane.appendChild(host);
-                        streamPane.__inited = true;
-                        try { initStreamComments(streamPane, match); } catch(_) {}
-                        return true;
-                    }
-                } catch(_) {}
-                return false;
-            };
-
-            const doCheck = () => {
-                // если панель удалена/скрыта — прекращаем
-                if (!document.body.contains(streamPane)) { streamPane.__streamTimer && clearTimeout(streamPane.__streamTimer); streamPane.__streamTimer = null; return; }
-                fetch(url).then(r=>r.json()).then(ans => {
-                    const existing = subtabs?.querySelector('[data-mdtab="stream"]');
-                    if (ans?.available) {
-                        // кэшируем, чтобы сохранялось до конца матча
-                        writeCached(ans);
-                        // вкладка уже существует всегда
-                        streamPane.__streamInfo = ans;
-                        // Если вкладка уже активна — построим сразу
-                        const isActive = subtabs?.querySelector('[data-mdtab="stream"]')?.classList.contains('active');
-                        if (isActive && !streamPane.__inited) {
-                            // Небольшая задержка для корректной инициализации макета перед вставкой iframe
-                            setTimeout(() => buildStream(ans), 50);
-                        }
-                        // больше не проверяем
-                        if (streamPane.__streamTimer) { clearTimeout(streamPane.__streamTimer); streamPane.__streamTimer = null; }
-                    } else {
-                        // Попробуем локальный реестр (если подключен streams.js) как резервный источник
-                        try {
-                            if (window.__STREAMS__ && typeof window.__STREAMS__.findStream === 'function') {
-                                const alt = window.__STREAMS__.findStream(match);
-                                if (alt) {
-                                    streamPane.__streamInfo = alt;
-                                    const isActiveAlt = subtabs?.querySelector('[data-mdtab="stream"]')?.classList.contains('active');
-                                    if (isActiveAlt && !streamPane.__inited) setTimeout(() => buildStream(alt), 50);
-                                    if (streamPane.__streamTimer) { clearTimeout(streamPane.__streamTimer); streamPane.__streamTimer = null; }
-                                    return;
-                                }
-                            }
-                        } catch(_) {}
-                        // если есть кэш и матч ещё не закончился — используем кэш, чтобы вкладка не пропадала
-                        const cached = readCached();
-                        const now = Date.now();
-                        if (cached && cached.ans && isFinite(endMs) && now < endMs) {
-                            // вкладка уже существует всегда
-                            streamPane.__streamInfo = cached.ans;
-                            const isActive2 = subtabs?.querySelector('[data-mdtab="stream"]')?.classList.contains('active');
-                            if (isActive2 && !streamPane.__inited) {
-                                setTimeout(() => buildStream(cached.ans), 50);
-                            }
-                            // прекращаем дальнейшие проверки
-                            if (streamPane.__streamTimer) { clearTimeout(streamPane.__streamTimer); streamPane.__streamTimer = null; }
-                            return;
-                        }
-                        // если до старта менее 12 минут или матч начался не более 30 минут назад — пробуем ещё раз через 30-45с
-                        if (isFinite(startMs)) {
-                            const now = Date.now();
-                            const delta = startMs - now; // >0 до старта, <0 после
-                            if (delta <= 12*60*1000 && delta >= -30*60*1000) {
-                                const delay = 30000 + Math.floor(Math.random()*15000);
-                                streamPane.__streamTimer && clearTimeout(streamPane.__streamTimer);
-                                streamPane.__streamTimer = setTimeout(doCheck, delay);
-                            }
-                        }
-                        // вкладку не скрываем, показываем скелет
-                    }
-                }).catch(()=>{});
-            };
-            // стартовая проверка
-            doCheck();
-            // Дадим доступ к повторной проверке из обработчиков вкладок
-            streamPane.__ensureInfo = doCheck;
         } catch(_) {}
 
     // События будут отображаться внутри вкладок составов
@@ -2264,7 +2124,7 @@ document.addEventListener('DOMContentLoaded', () => {
         homePane.style.display = '';
         awayPane.style.display = 'none';
     specialsPane.style.display = 'none';
-    streamPane.style.display = 'none';
+    if (streamPane) streamPane.style.display = 'none';
     statsPane.style.display = 'none';
     if (typeof eventsPane !== 'undefined') eventsPane.style.display = 'none';
 
@@ -2602,52 +2462,62 @@ document.addEventListener('DOMContentLoaded', () => {
                 mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach((x)=>x.classList.remove('active'));
                 btn.classList.add('active');
                 const key = btn.getAttribute('data-mdtab');
-    if (key === 'home') { homePane.style.display = ''; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; streamPane.style.display = 'none'; statsPane.style.display = 'none'; }
-    else if (key === 'away') { homePane.style.display = 'none'; awayPane.style.display = ''; specialsPane.style.display = 'none'; streamPane.style.display = 'none'; statsPane.style.display = 'none'; }
+    if (key === 'home') { homePane.style.display = ''; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; if (streamPane) streamPane.style.display = 'none'; statsPane.style.display = 'none'; }
+    else if (key === 'away') { homePane.style.display = 'none'; awayPane.style.display = ''; specialsPane.style.display = 'none'; if (streamPane) streamPane.style.display = 'none'; statsPane.style.display = 'none'; }
                 else if (key === 'specials') {
                     homePane.style.display = 'none'; awayPane.style.display = 'none'; specialsPane.style.display = '';
                     // отрисуем спецпанель внутри specialsPane
                     renderSpecialsPane(specialsPane, match);
-                    streamPane.style.display = 'none'; statsPane.style.display = 'none';
+                    if (streamPane) streamPane.style.display = 'none'; statsPane.style.display = 'none';
                 } else if (key === 'stream') {
-                    homePane.style.display = 'none'; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; streamPane.style.display = ''; statsPane.style.display = 'none';
-                    // Лениво вставляем VK iframe только при первом показе
-                    if (!streamPane.__inited) {
-                        try {
-                            const st = streamPane.__streamInfo || null;
-                            if (!st) {
-                                // Попросим актуализировать инфо и подождём немного
-                                try { typeof streamPane.__ensureInfo === 'function' && streamPane.__ensureInfo(); } catch(_) {}
-                                const sk = streamPane.querySelector('.stream-skeleton'); if (sk) sk.textContent = 'Загрузка трансляции...';
-                                let tries = 0;
-                                const wait = () => {
-                                    tries++;
-                                    const cur = streamPane.__streamInfo || null;
-                                    if (cur && !streamPane.__inited) {
-                                        buildStream(cur);
-                                        return;
-                                    }
-                                    if (tries < 20) setTimeout(wait, 250); // до ~5 секунд ожидания
-                                };
-                                wait();
-                            } else {
-                                if (!buildStream(st)) {
-                                    const sk = streamPane.querySelector('.stream-skeleton'); if (sk) sk.textContent = 'Трансляция недоступна';
-                                }
-                            }
-                        } catch(_) {}
+                    homePane.style.display = 'none'; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; statsPane.style.display = 'none';
+                    // Гарантируем наличие панели и запускаем ленивую инициализацию через Streams.js
+                    streamPane = document.getElementById('md-pane-stream');
+                    if (!streamPane && window.Streams && typeof window.Streams.setupMatchStream === 'function') {
+                        streamPane = window.Streams.setupMatchStream(mdPane, subtabs, match);
+                    }
+                    if (streamPane) {
+                        streamPane.style.display = '';
+                        try { if (window.Streams && typeof window.Streams.onStreamTabActivated === 'function') window.Streams.onStreamTabActivated(streamPane, match); } catch(_) {}
                     } else {
-                        // Если уже инициализирован — убедимся, что поллинг комментариев активен
-                        if (typeof streamPane.__startCommentsPoll === 'function') {
-                            try { streamPane.__startCommentsPoll(); } catch(_) {}
-                        }
+                        // Нет ссылки/панели — возвращаемся на вкладку команды
+                        btn.classList.remove('active');
+                        const homeTab = mdPane.querySelector('.modal-subtabs .subtab-item[data-mdtab="home"]');
+                        if (homeTab) { homeTab.classList.add('active'); homePane.style.display=''; awayPane.style.display='none'; specialsPane.style.display='none'; statsPane.style.display='none'; }
                     }
                 } else if (key === 'stats') {
-                    homePane.style.display = 'none'; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; streamPane.style.display = 'none'; statsPane.style.display = '';
+                    homePane.style.display = 'none'; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; if (streamPane) streamPane.style.display = 'none'; statsPane.style.display = '';
                     renderMatchStats(statsPane, match);
                     }
             };
         });
+        // Делегирование для динамически добавляемой вкладки «Трансляция»
+        try {
+            if (subtabs && !subtabs.__streamDelegated) {
+                subtabs.__streamDelegated = true;
+                subtabs.addEventListener('click', (e) => {
+                    const btn = e.target.closest('.subtab-item[data-mdtab="stream"]');
+                    if (!btn) return;
+                    e.preventDefault();
+                    // Имитация логики обработки клика по вкладке «stream»
+                    mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach((x)=>x.classList.remove('active'));
+                    btn.classList.add('active');
+                    homePane.style.display = 'none'; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; statsPane.style.display = 'none';
+                    let sp = document.getElementById('md-pane-stream');
+                    if (!sp && window.Streams && typeof window.Streams.setupMatchStream === 'function') {
+                        sp = window.Streams.setupMatchStream(mdPane, subtabs, match);
+                    }
+                    if (sp) {
+                        sp.style.display = '';
+                        try { if (window.Streams && typeof window.Streams.onStreamTabActivated === 'function') window.Streams.onStreamTabActivated(sp, match); } catch(_) {}
+                    } else {
+                        // Нет ссылки — возвращаемся на «home»
+                        const homeTab = mdPane.querySelector('.modal-subtabs .subtab-item[data-mdtab="home"]');
+                        if (homeTab) { homeTab.classList.add('active'); homePane.style.display=''; }
+                    }
+                });
+            }
+        } catch(_) {}
 
         // Добавим в топбар кнопку «Завершить матч» для админа
         try {
@@ -2781,7 +2651,7 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         // --- Вспом: Комментарии под трансляцией ---
-        function initStreamComments(hostPane, m) {
+    function initStreamComments(hostPane, m) {
             // Корневой контейнер
             const box = document.createElement('div'); box.className = 'comments-box';
             box.innerHTML = `
@@ -2875,7 +2745,8 @@ document.addEventListener('DOMContentLoaded', () => {
             hostPane.__startCommentsPoll = start;
             hostPane.__stopCommentsPoll = stop;
             start();
-        }
+    }
+    try { window.initStreamComments = initStreamComments; } catch(_) {}
     }
     try { window.openMatchScreen = openMatchScreen; } catch(_) {}
 
