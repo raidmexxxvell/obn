@@ -7,7 +7,7 @@
 (function(){
   const DBG = true; // включено подробное логирование потоков
   // Ограничение: показывать трансляции только для «текущего тура» (первый в /api/schedule)
-  const LIMIT_TO_CURRENT_TOUR = true;
+  const LIMIT_TO_CURRENT_TOUR = false;
   // Хранилище соответствий: ключ → объект трансляции (локальный fallback)
   const registry = {
     // 'дождь__звезда__2025-08-16': { vkVideoId: '123456789_987654321', autoplay: 0 },
@@ -283,3 +283,4 @@
 
   window.Streams = { setupMatchStream, onStreamTabActivated, resetOnLeave };
 })();
+
