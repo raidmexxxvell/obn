@@ -48,106 +48,6 @@
     return '';
   }
 
-  function isAdmin(){
-    try {
-      const adminId = document.body.getAttribute('data-admin');
-      const currentId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id ? String(window.Telegram.WebApp.initDataUnsafe.user.id) : '';
-      return !!(adminId && currentId && String(adminId) === currentId);
-    } catch(_) { return false; }
-  }
-
-  function buildAdminControls(pane, match, currentInfo){
-    if (!isAdmin()) return null;
-    const wrap = document.createElement('div');
-    wrap.className = 'stream-admin';
-    wrap.style.display = 'grid';
-    wrap.style.gridTemplateColumns = '1fr auto auto';
-    wrap.style.gap = '8px';
-    wrap.style.margin = '8px 0 10px';
-
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.placeholder = 'Вставьте ссылку VK Live или iframe';
-    input.style.width = '100%';
-    try {
-      if (currentInfo) {
-        input.value = currentInfo.vkVideoId ? `https://vk.com/video${currentInfo.vkVideoId}` : (currentInfo.vkPostUrl || '');
-      }
-    } catch(_) {}
-
-    const btnSave = document.createElement('button');
-    btnSave.textContent = 'Подтвердить';
-    btnSave.className = 'details-btn';
-
-    const btnReset = document.createElement('button');
-    btnReset.textContent = 'Сбросить';
-    btnReset.className = 'details-btn';
-    btnReset.style.background = 'rgba(255,80,80,0.15)';
-    btnReset.style.borderColor = 'rgba(255,80,80,0.35)';
-
-    const note = document.createElement('div');
-    note.className = 'stream-admin-note';
-    note.style.gridColumn = '1 / -1';
-    note.style.fontSize = '12px';
-    note.style.color = 'var(--gray)';
-
-    const getDateIso = () => (match?.datetime || match?.date || '').toString().slice(0,10);
-
-    btnSave.addEventListener('click', async () => {
-      try {
-        const val = (input.value || '').trim();
-        if (!val) { note.textContent = 'Введите ссылку'; note.style.color = '#ff9090'; return; }
-        btnSave.disabled = true; const o = btnSave.textContent; btnSave.textContent = '...';
-        const fd = new FormData();
-        fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
-        fd.append('home', match.home || '');
-        fd.append('away', match.away || '');
-        // backend принимает datetime; используем полную строку если есть
-        const dtRaw = (match?.datetime || (getDateIso() ? (getDateIso() + 'T00:00:00') : ''));
-        fd.append('datetime', dtRaw);
-        fd.append('vk', val);
-        const r = await fetch('/api/streams/set', { method: 'POST', body: fd });
-        const d = await r.json().catch(()=>({}));
-        if (!r.ok) throw new Error(d?.error || 'Не удалось сохранить');
-        note.textContent = 'Ссылка сохранена'; note.style.color = '#9ee7a4';
-        // Обновляем информацию и перестраиваем iframe
-        const info = { vkVideoId: d.vkVideoId || '', vkPostUrl: d.vkPostUrl || '', autoplay: 0 };
-        pane.__streamInfo = info; pane.__inited = false;
-        buildStreamInto(pane, info, match);
-      } catch (e) {
-        note.textContent = e?.message || 'Ошибка сохранения'; note.style.color = '#ff9090';
-      } finally {
-        btnSave.disabled = false; btnSave.textContent = 'Подтвердить';
-      }
-    });
-
-    btnReset.addEventListener('click', async () => {
-      try {
-        const ok = confirm('Сбросить ссылку трансляции для этого матча?');
-        if (!ok) return;
-        btnReset.disabled = true; const o = btnReset.textContent; btnReset.textContent = '...';
-        const fd = new FormData();
-        fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
-        fd.append('home', match.home || '');
-        fd.append('away', match.away || '');
-        fd.append('date', getDateIso());
-        const r = await fetch('/api/streams/reset', { method: 'POST', body: fd });
-        const d = await r.json().catch(()=>({}));
-        if (!r.ok) throw new Error(d?.error || 'Ошибка сброса');
-        note.textContent = 'Ссылка сброшена'; note.style.color = '#9ee7a4';
-        // Сбрасываем плеер
-        pane.__streamInfo = null; pane.__inited = false;
-        pane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция недоступна</div></div>';
-      } catch (e) {
-        note.textContent = e?.message || 'Ошибка'; note.style.color = '#ff9090';
-      } finally {
-        btnReset.disabled = false; btnReset.textContent = 'Сбросить';
-      }
-    });
-
-    wrap.append(input, btnSave, btnReset, note);
-    return wrap;
-  }
 
   function ensurePane(mdPane, match){
     let pane = document.getElementById('md-pane-stream');
@@ -193,8 +93,6 @@
     ifr.referrerPolicy = 'strict-origin-when-cross-origin';
     ratio.appendChild(ifr); host.appendChild(ratio);
   pane.innerHTML='';
-  const admin = buildAdminControls(pane, match, info);
-  if (admin) pane.appendChild(admin);
   pane.appendChild(host);
     pane.__inited = true;
     try { typeof window.initStreamComments === 'function' && window.initStreamComments(pane, match); } catch(_) {}

@@ -160,6 +160,7 @@
         const when = document.createElement('div'); when.className='store-price'; when.textContent = m.datetime || m.date || '';
         const input = document.createElement('input'); input.type='text'; input.placeholder = 'Ссылка VK Live';
         const btn = document.createElement('button'); btn.className='details-btn confirm'; btn.textContent='Подтвердить';
+        const btnReset = document.createElement('button'); btnReset.className='details-btn'; btnReset.textContent='Сбросить'; btnReset.style.marginLeft = '8px';
         const hint = document.createElement('div'); hint.className = 'save-hint';
         // Предзаполним, если уже была сохранённая ссылка
         try {
@@ -209,8 +210,27 @@
             } catch(_) {}
           } catch(_) { btn.disabled=false; btn.textContent='Подтвердить'; }
         });
-        const row = document.createElement('div'); row.className='stream-row'; row.append(input, btn);
+        const row = document.createElement('div'); row.className='stream-row'; row.append(input, btn, btnReset);
         card.append(name, when, row, hint); list.appendChild(card);
+
+        btnReset.addEventListener('click', async () => {
+          try {
+            const ok = confirm('Сбросить ссылку трансляции для этого матча?');
+            if (!ok) return;
+            btnReset.disabled = true; const o = btnReset.textContent; btnReset.textContent = '...';
+            const fd = new FormData();
+            fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
+            fd.append('home', m.home || ''); fd.append('away', m.away || '');
+            const dateKey = (m.datetime||m.date||'').slice(0,10);
+            fd.append('date', dateKey);
+            const rr = await fetch('/api/streams/reset', { method: 'POST', body: fd });
+            const resp = await rr.json().catch(()=>({}));
+            if (!rr.ok) throw new Error(resp?.error || 'reset');
+            hint.textContent = 'Ссылка сброшена'; hint.classList.remove('error'); hint.classList.add('success');
+            input.value = '';
+          } catch(_){ /* ignore */ }
+          finally { btnReset.disabled = false; btnReset.textContent = 'Сбросить'; }
+        });
       });
       if (!data.matches || data.matches.length === 0) {
         msg.textContent = `В ближайшие ${winMin} мин. матчей нет`;

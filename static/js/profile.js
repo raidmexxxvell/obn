@@ -1339,6 +1339,67 @@ document.addEventListener('DOMContentLoaded', () => {
         const host = document.getElementById('lb-prizes');
         const updated = document.getElementById('lb-prizes-updated');
         if (!host) return;
+        // Локальный кэш публичных профилей (5 минут)
+        const PUB_CACHE_TTL = 5 * 60 * 1000;
+        const nowMs = () => Date.now();
+        const pubCacheGet = (uid) => {
+            try {
+                const raw = localStorage.getItem('public:profile:' + uid);
+                if (!raw) return null;
+                const obj = JSON.parse(raw);
+                if (!obj || !obj.data || !obj.ts) return null;
+                if (nowMs() - obj.ts > PUB_CACHE_TTL) return null;
+                return obj.data;
+            } catch(_) { return null; }
+        };
+        const pubCacheSet = (uid, data) => {
+            try { localStorage.setItem('public:profile:' + uid, JSON.stringify({ ts: nowMs(), data })); } catch(_) {}
+        };
+        const tryFetchPublic = async (ids) => {
+            try {
+                const r = await fetch('/api/users/public-batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_ids: ids }) });
+                if (!r.ok) throw new Error('no');
+                const d = await r.json();
+                const items = d?.items || [];
+                const map = {};
+                items.forEach(it => { if (it?.user_id != null) map[String(it.user_id)] = it; });
+                // Кэшируем
+                Object.values(map).forEach(it => pubCacheSet(String(it.user_id), it));
+                return map;
+            } catch(_) { return {}; }
+        };
+        const ensureOverlay = () => {
+            let ov = document.getElementById('profile-preview-overlay');
+            if (!ov) {
+                ov = document.createElement('div'); ov.id='profile-preview-overlay';
+                ov.style.position='fixed'; ov.style.inset='0'; ov.style.background='rgba(0,0,0,0.45)'; ov.style.zIndex='2400'; ov.style.display='none';
+                const box = document.createElement('div'); box.className='pp-box'; box.style.position='absolute'; box.style.left='50%'; box.style.top='50%'; box.style.transform='translate(-50%,-50%)'; box.style.background='rgba(15,20,35,0.98)'; box.style.border='1px solid rgba(255,255,255,0.08)'; box.style.borderRadius='12px'; box.style.padding='14px'; box.style.width='min(92%, 380px)'; box.style.boxShadow='0 20px 48px rgba(0,0,0,0.45)';
+                const close = document.createElement('button'); close.textContent='✕'; close.style.position='absolute'; close.style.right='8px'; close.style.top='8px'; close.style.background='transparent'; close.style.border='0'; close.style.color='#fff'; close.style.fontSize='16px'; close.style.cursor='pointer';
+                close.addEventListener('click', () => { ov.style.display='none'; });
+                const cnt = document.createElement('div'); cnt.className='pp-content'; cnt.style.display='grid'; cnt.style.gap='10px';
+                box.append(close, cnt); ov.appendChild(box); document.body.appendChild(ov);
+                ov.addEventListener('click', (e) => { if (e.target === ov) ov.style.display='none'; });
+            }
+            return ov;
+        };
+        const renderProfileCard = (data, avatarUrl) => {
+            const ov = ensureOverlay();
+            const cnt = ov.querySelector('.pp-content');
+            cnt.innerHTML='';
+            const row = document.createElement('div'); row.style.display='flex'; row.style.gap='12px'; row.style.alignItems='center';
+            const img = document.createElement('img'); img.src = avatarUrl || '/static/img/achievements/placeholder.png'; img.alt=''; img.style.width='64px'; img.style.height='64px'; img.style.borderRadius='50%'; img.style.objectFit='cover'; img.style.border='1px solid rgba(255,255,255,0.15)';
+            const info = document.createElement('div');
+            const name = document.createElement('div'); name.style.fontWeight='800'; name.style.fontSize='16px'; name.textContent = data.display_name || 'Игрок';
+            const meta = document.createElement('div'); meta.style.fontSize='12px'; meta.style.color='var(--gray)';
+            const parts = [];
+            if (data.level != null) parts.push(`Уровень ${data.level}`);
+            if (data.xp != null) parts.push(`${data.xp} XP`);
+            if (data.consecutive_days != null) parts.push(`Серия ${data.consecutive_days}`);
+            meta.textContent = parts.join(' • ');
+            info.append(name, meta); row.append(img, info);
+            cnt.appendChild(row);
+            ov.style.display='';
+        };
         etagFetch('/api/leaderboard/prizes', 'lb:prizes')
             .then(store => {
                 const data = store?.data?.data || {};
@@ -1374,6 +1435,18 @@ document.addEventListener('DOMContentLoaded', () => {
                         img.src = photo;
                         avatar.appendChild(img);
                         const name = document.createElement('div'); name.className = 'podium-name'; name.textContent = it ? it.display_name : '—';
+                        // Клик по профилю: попробовать получить публичные данные, иначе показать минимум
+                        pl.style.cursor = 'pointer';
+                        pl.addEventListener('click', async () => {
+                            const uid = it?.user_id != null ? String(it.user_id) : null;
+                            if (!uid) { renderProfileCard({ display_name: it?.display_name || 'Игрок' }, photo); return; }
+                            const cached = pubCacheGet(uid);
+                            if (cached) { renderProfileCard(cached, photo); return; }
+                            const map = await tryFetchPublic([Number(uid)]);
+                            const dataPub = map[uid] || { display_name: it?.display_name || 'Игрок', level: it?.level, xp: it?.xp, consecutive_days: it?.consecutive_days };
+                            // если backend не вернул photo_url — используем уже полученный avatars
+                            renderProfileCard(dataPub, dataPub.photo_url || photo);
+                        });
                         pl.append(avatar, name);
                         podium.appendChild(pl);
                     });
