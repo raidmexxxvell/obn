@@ -4440,14 +4440,23 @@ def api_schedule():
                 snap = _snapshot_get(db, 'schedule')
                 if snap and snap.get('payload'):
                     payload = snap['payload']
-                    _core = {'tours': payload.get('tours')}
-                    _etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
-                    inm = request.headers.get('If-None-Match')
-                    if inm and inm == _etag:
-                        resp = app.response_class(status=304)
-                        resp.headers['ETag'] = _etag
-                        resp.headers['Cache-Control'] = 'public, max-age=900, stale-while-revalidate=600'
-                        return resp
+                    # Если снапшот пустой (нет туров) — форсируем перестройку из Sheets
+                    tours_in_snap = (payload.get('tours') or []) if isinstance(payload, dict) else []
+                    if not tours_in_snap:
+                        try:
+                            payload = _build_schedule_payload_from_sheet()
+                            _snapshot_set(db, 'schedule', payload)
+                        except Exception:
+                            pass
+                    else:
+                        _core = {'tours': payload.get('tours')}
+                        _etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+                        inm = request.headers.get('If-None-Match')
+                        if inm and inm == _etag:
+                            resp = app.response_class(status=304)
+                            resp.headers['ETag'] = _etag
+                            resp.headers['Cache-Control'] = 'public, max-age=900, stale-while-revalidate=600'
+                            return resp
                     # «Матч недели»: сначала пытаемся взять ручной выбор админа из снапшота 'feature-match'
                     try:
                         manual = None
@@ -4499,8 +4508,11 @@ def api_schedule():
                                 payload['match_of_week'] = best
                     except Exception:
                         pass
-                    resp = jsonify({**payload, 'version': _etag})
-                    resp.headers['ETag'] = _etag
+                    # Пересчитаем ETag для (возможно) обновлённого payload
+                    _core2 = {'tours': payload.get('tours')}
+                    _etag2 = hashlib.md5(json.dumps(_core2, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+                    resp = jsonify({**payload, 'version': _etag2})
+                    resp.headers['ETag'] = _etag2
                     resp.headers['Cache-Control'] = 'public, max-age=900, stale-while-revalidate=600'
                     return resp
             finally:
