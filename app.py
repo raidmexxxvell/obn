@@ -2517,8 +2517,8 @@ def _build_schedule_payload_from_sheet():
         _tz_min = _tz_h * 60
     now_local = datetime.now() + timedelta(minutes=_tz_min)
     today = now_local.date()
-    # Снимок завершенности: пары и последний номер тура с прошедшими матчами
-    finished_pairs = set()
+    # Снимок завершенности: (home, away, tour) и последний номер тура с прошедшими матчами
+    finished_triples = set()
     last_finished_tour = 0
     if SessionLocal is not None:
         dbx = get_db()
@@ -2527,8 +2527,8 @@ def _build_schedule_payload_from_sheet():
             payload_res = snap_res and snap_res.get('payload') or {}
             for r in (payload_res.get('results') or []):
                 try:
-                    finished_pairs.add(((r.get('home') or ''), (r.get('away') or '')))
                     tr = r.get('tour')
+                    finished_triples.add(((r.get('home') or ''), (r.get('away') or ''), int(tr) if isinstance(tr, int) else tr))
                     if isinstance(tr, int):
                         if tr > last_finished_tour:
                             last_finished_tour = tr
@@ -2577,9 +2577,15 @@ def _build_schedule_payload_from_sheet():
                     trn = t.get('tour')
                     if isinstance(trn, int) and last_finished_tour and trn > last_finished_tour:
                         keep = True
-                # скрыть, если матч уже попал в «Результаты» (админ завершил матч)
-                if keep and ((m.get('home') or '', m.get('away') or '') in finished_pairs):
-                    keep = False
+                # скрыть, если матч уже попал в «Результаты» в этом же туре (совпадают home/away/tour)
+                if keep:
+                    try:
+                        trn = t.get('tour')
+                        key = ((m.get('home') or ''), (m.get('away') or ''), int(trn) if isinstance(trn, int) else trn)
+                        if key in finished_triples:
+                            keep = False
+                    except Exception:
+                        pass
                 if keep:
                     new_matches.append(m)
             except Exception:
@@ -4442,7 +4448,12 @@ def api_schedule():
                     payload = snap['payload']
                     # Если снапшот пустой (нет туров) — форсируем перестройку из Sheets
                     tours_in_snap = (payload.get('tours') or []) if isinstance(payload, dict) else []
-                    if not tours_in_snap:
+                    total_matches = 0
+                    try:
+                        total_matches = sum(len(t.get('matches') or []) for t in tours_in_snap)
+                    except Exception:
+                        total_matches = 0
+                    if (not tours_in_snap) or total_matches == 0:
                         try:
                             payload = _build_schedule_payload_from_sheet()
                             _snapshot_set(db, 'schedule', payload)
