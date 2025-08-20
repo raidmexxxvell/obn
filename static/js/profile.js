@@ -960,6 +960,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // Блок «Топ матч недели» под рекламой на Главной
     async function renderTopMatchOfWeek() {
         try {
+            // Показываем на Главной только для активной лиги (по ТЗ)
+            if ((window.__ACTIVE_LEAGUE__ || 'UFO') !== 'UFO') {
+                const host = document.getElementById('home-pane');
+                if (host) host.innerHTML = '';
+                return;
+            }
             const res = await fetch(`/api/schedule?_=${Date.now()}`);
             const data = await res.json();
             const m = data?.match_of_week;
@@ -1674,6 +1680,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     try { loadStatsTable(); } catch(_) {}
                     try { loadSchedule(); } catch(_) {}
                     try { loadResults(); } catch(_) {}
+                    try { renderTopMatchOfWeek(); } catch(_) {}
                 }, 1000);
                 window.removeEventListener('league:transition-covered', onCovered);
             };
@@ -1704,6 +1711,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const showBLB = () => { initBLBSubtabs(); window.removeEventListener('league:transition-covered', showBLB); };
         window.addEventListener('league:transition-covered', showBLB);
         if (!animate) { window.removeEventListener('league:transition-covered', showBLB); showBLB(); }
+    // Обновим «Матч недели» на Главной в соответствии с активной лигой
+    try { renderTopMatchOfWeek(); } catch(_) {}
     if (animate) {
         // Показать подсказку после завершения анимации (один раз для пользователя)
         const onEnd = () => { try { showLeagueHint(); } catch(_) {} };
@@ -1728,8 +1737,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 img.src = '/static/img/placeholderlogo.png';
                 title.textContent = 'Здесь может быть ваша лига';
                 layer.style.display = 'flex';
-                // Используем золотисто-черную палитру BLB
-                layer.style.background = 'linear-gradient(135deg, #0b0b0b, #000000)';
+                // Используем золотисто-черную палитру BLБ: мягкий градиент к золотистому
+                layer.style.background = 'linear-gradient(135deg, #0b0b0b 0%, #1a160c 40%, #8d6e2f 100%)';
                 // Фаза 1: заливка снизу вверх (1s)
                 layer.classList.add('lt-fill-bottom');
                 // Сразу после старта заливки считаем экран покрытым
@@ -1888,7 +1897,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Подсказка: стрелка к вкладке «Лига» с текстом (один раз). Сначала стрелка, через 2с — надпись.
+    // Подсказка: стрелка к вкладке «Лига» с текстом (один раз). Стрелка и текст двигаются синхронно.
     function showLeagueHint() {
         try {
             // Только один раз для пользователя
@@ -1919,9 +1928,10 @@ document.addEventListener('DOMContentLoaded', () => {
             arrow.style.animation = 'hint-bounce 1s ease-in-out infinite';
             // Текст (появится позже)
             const label = document.createElement('div');
-            label.textContent = 'Двойной нажатие для выбора лиги';
+            label.textContent = 'Двойное нажатие — выбор лиги';
             label.style.position = 'absolute';
             label.style.left = '50%';
+            // Совместим анимацию с стрелкой: вертикально синхронный bounce
             label.style.transform = 'translateX(-50%)';
             label.style.bottom = '30px';
             label.style.fontSize = '11px';
@@ -1929,17 +1939,32 @@ document.addEventListener('DOMContentLoaded', () => {
             label.style.color = '#fff';
             label.style.whiteSpace = 'nowrap';
             label.style.textShadow = '0 1px 2px rgba(0,0,0,.6)';
+            // Появление и синхронная анимация
             label.style.opacity = '0';
             label.style.transition = 'opacity .25s ease';
+            label.style.animation = 'hint-bounce 1s ease-in-out infinite';
             tip.appendChild(arrow);
             tip.appendChild(label);
             document.body.appendChild(tip);
             // Позиционирование по центру иконки лиги
-            const centerX = r.left + r.width / 2;
+            let centerX = r.left + r.width / 2;
             tip.style.left = `${Math.round(centerX)}px`;
+            // Центрируем контейнер и затем ограничиваем с учётом реальной ширины
+            tip.style.transform = 'translateX(-50%)';
+            const margin = 16;
+            // После рендера измерим и поправим позицию
+            requestAnimationFrame(() => {
+                try {
+                    const bw = tip.getBoundingClientRect().width || 0;
+                    const half = bw / 2;
+                    const clampedCenter = Math.max(margin + half, Math.min(window.innerWidth - margin - half, centerX));
+                    tip.style.left = `${Math.round(clampedCenter)}px`;
+                } catch(_) {}
+            });
             tip.style.bottom = `${Math.round((window.innerHeight - rn.top) + 6)}px`;
-            // Показать текст через 2 секунды после завершения анимации перехода (мы вызываем функцию после окончания)
-            setTimeout(() => { label.style.opacity = '1'; }, 2000);
+            // Показать текст сразу после завершения перехода (функция вызывается по событию 
+            // league:transition-end с once, но оставим лёгкую задержку для плавности)
+            setTimeout(() => { label.style.opacity = '1'; }, 200);
             // Убрать подсказку по клику по нижнему меню или через таймаут, и больше не показывать
             const cleanup = () => {
                 try { localStorage.setItem('hint:league-shown', '1'); } catch(_) {}
@@ -1948,11 +1973,12 @@ document.addEventListener('DOMContentLoaded', () => {
             };
             const onDocClick = (e) => { if (e.target.closest('nav.nav')) cleanup(); };
             document.addEventListener('click', onDocClick, true);
-            setTimeout(cleanup, 7000);
+            setTimeout(cleanup, 6000);
             // Встроенная keyframes-анимация
             if (!document.getElementById('hint-bounce-style')) {
                 const st = document.createElement('style');
                 st.id = 'hint-bounce-style';
+                // Дублируем translateX, чтобы синхронность сохранялась для обоих элементов
                 st.textContent = `@keyframes hint-bounce{0%,100%{transform:translateX(-50%) translateY(0)}50%{transform:translateX(-50%) translateY(-6px)}}`;
                 document.head.appendChild(st);
             }
@@ -2022,6 +2048,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // вкладки (добавим «Спецсобытия» для админа и «Трансляция», если есть в конфиге)
         const subtabs = mdPane.querySelector('.modal-subtabs');
         mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach((el) => el.classList.remove('active'));
+        // Переименуем вкладки на имена команд
+        try {
+            const tabHome = subtabs?.querySelector('[data-mdtab="home"]');
+            const tabAway = subtabs?.querySelector('[data-mdtab="away"]');
+            if (tabHome) tabHome.textContent = (match.home || 'Команда 1');
+            if (tabAway) tabAway.textContent = (match.away || 'Команда 2');
+        } catch(_) {}
         // создаём/находим панель спецсобытий
         let specialsPane = document.getElementById('md-pane-specials');
         if (!specialsPane) {
@@ -2372,6 +2405,71 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             table.appendChild(tbody);
             pane.appendChild(table);
+            // Кнопка «Обновить составы» — только под таблицей домашней команды
+            if (side === 'home') {
+                const btnWrap = document.createElement('div');
+                btnWrap.style.display = 'flex';
+                btnWrap.style.justifyContent = 'center';
+                btnWrap.style.marginTop = '8px';
+                const btn = document.createElement('button');
+                btn.className = 'details-btn';
+                btn.textContent = 'Обновить составы';
+                btn.style.fontSize = '12px';
+                btn.style.padding = '6px 10px';
+                btn.style.borderRadius = '8px';
+                // Лимит: не чаще 1 раза в 10 минут на пользователя/матч
+                const mkKey = () => {
+                    try {
+                        const dRaw = (match?.datetime || match?.date || '').toString();
+                        const d = dRaw ? dRaw.slice(0,10) : '';
+                        return `roster:refresh:${(match.home||'').toLowerCase().trim()}__${(match.away||'').toLowerCase().trim()}__${d}`;
+                    } catch(_) { return 'roster:refresh'; }
+                };
+                const key = mkKey();
+                const COOLDOWN = 10 * 60 * 1000; // 10 мин
+                const updateState = () => {
+                    try {
+                        const last = Number(localStorage.getItem(key) || '0') || 0;
+                        const left = Math.max(0, (last + COOLDOWN) - Date.now());
+                        if (left > 0) {
+                            btn.disabled = true;
+                            const mins = Math.ceil(left / 60000);
+                            btn.textContent = `Доступно через ${mins} мин`;
+                        } else {
+                            btn.disabled = false;
+                            btn.textContent = 'Обновить составы';
+                        }
+                    } catch(_) {}
+                };
+                updateState();
+                btn.addEventListener('click', async () => {
+                    // Повторная проверка лимита прямо перед запросом
+                    try {
+                        const last = Number(localStorage.getItem(key) || '0') || 0;
+                        if (Date.now() - last < COOLDOWN) { updateState(); return; }
+                    } catch(_) {}
+                    btn.disabled = true; const orig = btn.textContent; btn.textContent = 'Обновляю...';
+                    try {
+                        // Перезагрузим детали матча и перерисуем составы
+                        const params = new URLSearchParams({ home: match.home || '', away: match.away || '' });
+                        const r = await fetch(`/api/match-details?${params.toString()}`, { headers: { 'Cache-Control': 'no-store' } });
+                        const fresh = await r.json();
+                        const homeList = Array.isArray(fresh?.rosters?.home) ? fresh.rosters.home : [];
+                        const awayList = Array.isArray(fresh?.rosters?.away) ? fresh.rosters.away : [];
+                        const ev = fresh?.events || { home: [], away: [] };
+                        // Перерисуем обе таблицы
+                        renderRosterTable(homePane, homeList, 'home', ev);
+                        renderRosterTable(awayPane, awayList, 'away', ev);
+                        try { localStorage.setItem(key, String(Date.now())); } catch(_) {}
+                    } catch (e) {
+                        // В случае ошибки просто вернём исходный статус
+                    }
+                    btn.textContent = orig;
+                    updateState();
+                });
+                btnWrap.appendChild(btn);
+                pane.appendChild(btnWrap);
+            }
         };
         try {
             const homeList = Array.isArray(details?.rosters?.home) ? details.rosters.home : [];

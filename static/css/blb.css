@@ -8,7 +8,8 @@ body.theme-blb {
   --primary: #eebb11; /* золотой */
   --secondary: #8d6e2f;
   --gray: #a3a3a3;
-  background: linear-gradient(135deg, var(--dark), var(--darker));
+  /* Более «богатый» фон под БЛБ: лёгкий переход к золотистому */
+  background: linear-gradient(135deg, #0b0b0b 0%, #1a160c 40%, #8d6e2f 100%);
   color: var(--light);
 }
 
