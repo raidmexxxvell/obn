@@ -234,13 +234,10 @@
       const d = await r.json();
       tbody.innerHTML = '';
       const rows = [
-        ['Всего пользователей', d.total_users||0],
-        ['Онлайн (5 мин)', d.online_5m||0],
-        ['Онлайн (15 мин)', d.online_15m||0],
         ['Активные (1 день)', d.active_1d||0],
         ['Активные (7 дней)', d.active_7d||0],
         ['Активные (30 дней)', d.active_30d||0],
-        ['Новые за 30 дней', d.new_30d||0]
+        ['Всего пользователей', d.total_users||0]
       ];
       rows.forEach(([k,v]) => {
         const tr = document.createElement('tr');
@@ -249,7 +246,7 @@
         tr.append(tdK, tdV); tbody.appendChild(tr);
       });
       if (updated) { try { updated.textContent = `Обновлено: ${new Date().toLocaleString()}`; } catch(_) {} }
-      if (lblUsers) lblUsers.textContent = `Всего: ${d.total_users||0} • Онлайн: ${d.online_5m||0}/${d.online_15m||0} • Активные: ${d.active_1d||0}/${d.active_7d||0}/${d.active_30d||0} • Новые: ${d.new_30d||0}`;
+  if (lblUsers) lblUsers.textContent = `Активные: ${d.active_1d||0}/${d.active_7d||0}/${d.active_30d||0} • Всего: ${d.total_users||0}`;
     } catch(_) {
       // ignore
     } finally {

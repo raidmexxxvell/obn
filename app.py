@@ -2586,10 +2586,20 @@ def _build_schedule_payload_from_sheet():
                 new_matches.append(m)
         t['matches'] = new_matches
     def tour_sort_key(t):
+        # Приоритизируем ближайшие по номеру после последнего завершённого тура,
+        # чтобы показывать, например, 4/5/6 даже если у 7/8/9 есть даты, а у 4/5/6 нет.
+        trn = t.get('tour') or 10**9
         try:
-            return (datetime.fromisoformat(t.get('start_at') or '2100-01-01T00:00:00'), t.get('tour') or 10**9)
+            dist = (trn - last_finished_tour) if (isinstance(trn, int) and last_finished_tour) else 10**9
         except Exception:
-            return (datetime(2100,1,1), t.get('tour') or 10**9)
+            dist = 10**9
+        try:
+            sa = t.get('start_at') or ''
+            sa_dt = datetime.fromisoformat(sa) if sa else datetime(2100,1,1)
+        except Exception:
+            sa_dt = datetime(2100,1,1)
+        # Сортируем по расстоянию в турах, затем по дате старта (если есть), затем по номеру тура
+        return (dist if dist > 0 else 10**9, sa_dt, trn)
     upcoming.sort(key=tour_sort_key)
     upcoming = upcoming[:3]
 

@@ -369,55 +369,55 @@ document.addEventListener('DOMContentLoaded', () => {
                     case 'streak':
                         {
                             const all = Array.isArray(a.all_targets) ? a.all_targets : [7,30,120];
-                            const base = `Ежедневные чекины подряд. Цель: ${tgt} дней.`;
+                            const base = `Ежедневные чекины подряд.`;
                             return `${base} Цели: ${all.join(' / ')}.`;
                         }
                     case 'credits':
                         {
                             const all = Array.isArray(a.all_targets) ? a.all_targets : null;
-                            const base = `Накопите кредиты до порога: ${(tgt||0).toLocaleString()} кр.`;
+                            const base = `Накопите кредиты.`;
                             return all && all.length>1 ? `${base} Цели: ${all.join(' / ')}.` : base;
                         }
                     case 'level':
                         {
                             const all = Array.isArray(a.all_targets) ? a.all_targets : null;
-                            const base = `Достигните уровень: ${tgt}. Получайте опыт за активность.`;
+                            const base = `Достигайте уровни. Получайте опыт за активность.`;
                             return all && all.length>1 ? `${base} Цели: ${all.join(' / ')}.` : base;
                         }
                     case 'invited':
                         {
                             const all = Array.isArray(a.all_targets) ? a.all_targets : null;
-                            const base = `Пригласите друзей по реферальной ссылке: ${tgt} человек.`;
+                            const base = `Приглашайте друзей по реферальной ссылке.`;
                             return all && all.length>1 ? `${base} Цели: ${all.join(' / ')}.` : base;
                         }
                     case 'betcount':
                         {
                             const all = Array.isArray(a.all_targets) ? a.all_targets : null;
-                            const base = `Сделайте ${tgt} ставок.`;
+                            const base = `Сделайте ставки.`;
                             return all && all.length>1 ? `${base} Цели: ${all.join(' / ')}.` : base;
                         }
                     case 'betwins':
                         {
                             const all = Array.isArray(a.all_targets) ? a.all_targets : null;
-                            const base = `Выиграйте ${tgt} ставок.`;
+                            const base = `Выигрывайте ставки.`;
                             return all && all.length>1 ? `${base} Цели: ${all.join(' / ')}.` : base;
                         }
                     case 'bigodds':
                         {
                             const all = Array.isArray(a.all_targets) ? a.all_targets : null;
-                            const base = `Выиграйте ставку с коэффициентом не ниже ${Number(tgt).toFixed(1)}.`;
+                            const base = `Выигрывайте ставки с высоким коэффициентом.`;
                             return all && all.length>1 ? `${base} Цели: ${all.join(' / ')}.` : base;
                         }
                     case 'markets':
                         {
                             const all = Array.isArray(a.all_targets) ? a.all_targets : null;
-                            const base = `Ставьте на разные рынки (1X2, тоталы, спецсобытия и т.д.). Цель: ${tgt} типа рынков.`;
+                            const base = `Ставьте на разные рынки (1X2, тоталы, спецсобытия и т.д.).`;
                             return all && all.length>1 ? `${base} Цели: ${all.join(' / ')}.` : base;
                         }
                     case 'weeks':
                         {
                             const all = Array.isArray(a.all_targets) ? a.all_targets : null;
-                            const base = `Делайте ставки в разные недели. Цель: ${tgt} недель.`;
+                            const base = `Делайте ставки в разные недели.`;
                             return all && all.length>1 ? `${base} Цели: ${all.join(' / ')}.` : base;
                         }
                     default:
