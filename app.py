@@ -4450,12 +4450,67 @@ def telegram_webhook_stub(maybe_token: str):
     # If someone posts to /<bot_token> path (common webhook pattern), just 200 OK noop to stop 404 spam
     if ':' in maybe_token and len(maybe_token) >= 40:
         return jsonify({'status': 'noop'}), 200
+    # For any other POST falling here, return JSON 404 instead of raising TypeError
+    return jsonify({'error': 'not found'}), 404
 
 # Простой ping endpoint для keepalive
 @app.route('/ping')
 def ping():
     return jsonify({'pong': True, 'ts': datetime.now(timezone.utc).isoformat()}), 200
     return jsonify({'error': 'not found'}), 404
+
+# -------- Public profiles (batch) for prizes overlay --------
+@app.route('/api/users/public-batch', methods=['POST'])
+def api_users_public_batch():
+    """Возвращает публичные поля профиля пачкой.
+    Вход (JSON): { user_ids: [int, ...] }
+    Выход: { items: [{ user_id, display_name, level, xp, consecutive_days, photo_url }] }
+    """
+    try:
+        # Лёгкий rate-limit на IP/UA, чтобы не спамили
+        limited = _rate_limit('pub_batch', limit=10, window_sec=30, allow_pseudo=True)
+        if limited is not None:
+            return limited
+        if not request.is_json:
+            return jsonify({'items': []})
+        body = request.get_json(silent=True) or {}
+        raw_ids = body.get('user_ids') or []
+        if not isinstance(raw_ids, list):
+            return jsonify({'items': []})
+        # Нормализуем список ID и ограничим размер
+        ids = []
+        for x in raw_ids[:100]:
+            try:
+                ids.append(int(x))
+            except Exception:
+                continue
+        ids = list({i for i in ids if i > 0})[:100]
+        if not ids or SessionLocal is None:
+            return jsonify({'items': []})
+        db: Session = get_db()
+        try:
+            users = db.query(User).filter(User.user_id.in_(ids)).all()
+            # фото — отдельной пачкой
+            photos = {}
+            for r in db.query(UserPhoto).filter(UserPhoto.user_id.in_(ids)).all():
+                if r.photo_url:
+                    photos[int(r.user_id)] = r.photo_url
+            out = []
+            for u in users:
+                out.append({
+                    'user_id': int(u.user_id),
+                    'display_name': u.display_name or 'Игрок',
+                    'level': int(u.level or 1),
+                    'xp': int(u.xp or 0),
+                    'consecutive_days': int(u.consecutive_days or 0),
+                    'photo_url': photos.get(int(u.user_id), '')
+                })
+            return jsonify({'items': out})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"public-batch error: {e}")
+        return jsonify({'items': []}), 200
 
 @app.route('/api/league-table', methods=['GET'])
 def api_league_table():
@@ -6173,6 +6228,10 @@ def api_streams_get():
         away = (request.args.get('away') or '').strip()
         date_str = (request.args.get('date') or '').strip()
         try:
+            app.logger.info(f"streams/get req: home='{home}' away='{away}' date='{date_str}'")
+        except Exception:
+            pass
+        try:
             win = int(request.args.get('window') or '60')
         except Exception:
             win = 60
@@ -6187,6 +6246,10 @@ def api_streams_get():
                 if not row0 and date_str:
                     row0 = db0.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away).order_by(MatchStream.updated_at.desc()).first()
                 if row0 and ((row0.vk_video_id and row0.vk_video_id.strip()) or (row0.vk_post_url and row0.vk_post_url.strip())):
+                    try:
+                        app.logger.info("streams/get hit: immediate saved link")
+                    except Exception:
+                        pass
                     return jsonify({'available': True, 'vkVideoId': row0.vk_video_id or '', 'vkPostUrl': row0.vk_post_url or ''})
                 # Туровой фолбэк: если для текущей пары нет прямой записи, но есть ссылка в этом же туре — отдадим её
                 # Для этого чуть ниже определим тур; здесь просто продолжим
@@ -6295,6 +6358,10 @@ def api_streams_get():
                 row = db.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away).order_by(MatchStream.updated_at.desc()).first()
             if not row:
                 return jsonify({'available': False})
+            try:
+                app.logger.info("streams/get hit: within window link")
+            except Exception:
+                pass
             return jsonify({'available': True, 'vkVideoId': row.vk_video_id or '', 'vkPostUrl': row.vk_post_url or ''})
         finally:
             db.close()

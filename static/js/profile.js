@@ -2063,6 +2063,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ---------- MATCH DETAILS SCREEN (in-app, not modal) ----------
     function openMatchScreen(match, details) {
+    try { window.__CURRENT_MATCH_KEY__ = `${(match?.home||'').toLowerCase().trim()}__${(match?.away||'').toLowerCase().trim()}__${((match?.datetime||match?.date||'').toString().slice(0,10))}`; console.debug('[profile] openMatchScreen', { key: window.__CURRENT_MATCH_KEY__, match }); } catch(_) {}
     const schedulePane = document.getElementById('ufo-schedule');
         const mdPane = document.getElementById('ufo-match-details');
         if (!schedulePane || !mdPane) return;
@@ -2190,9 +2191,10 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch(_) {}
         // Трансляция: логику ведёт Streams.js — вкладка появляется только при наличии ссылки (без привязки ко времени)
         let streamPane = null;
-        try {
+    try {
             if (window.Streams && typeof window.Streams.setupMatchStream === 'function') {
-                streamPane = window.Streams.setupMatchStream(mdPane, subtabs, match);
+        streamPane = window.Streams.setupMatchStream(mdPane, subtabs, match);
+        try { console.debug('[profile] setupMatchStream called', { hasPane: !!streamPane }); } catch(_) {}
             }
         } catch(_) {}
 
@@ -2562,16 +2564,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     // отрисуем спецпанель внутри specialsPane
                     renderSpecialsPane(specialsPane, match);
                     if (streamPane) streamPane.style.display = 'none'; statsPane.style.display = 'none';
-                } else if (key === 'stream') {
+        } else if (key === 'stream') {
                     homePane.style.display = 'none'; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; statsPane.style.display = 'none';
                     // Гарантируем наличие панели и запускаем ленивую инициализацию через Streams.js
                     streamPane = document.getElementById('md-pane-stream');
                     if (!streamPane && window.Streams && typeof window.Streams.setupMatchStream === 'function') {
-                        streamPane = window.Streams.setupMatchStream(mdPane, subtabs, match);
+            streamPane = window.Streams.setupMatchStream(mdPane, subtabs, match);
                     }
                     if (streamPane) {
                         streamPane.style.display = '';
-                        try { if (window.Streams && typeof window.Streams.onStreamTabActivated === 'function') window.Streams.onStreamTabActivated(streamPane, match); } catch(_) {}
+            try { console.debug('[profile] stream tab activated'); } catch(_) {}
+            try { if (window.Streams && typeof window.Streams.onStreamTabActivated === 'function') window.Streams.onStreamTabActivated(streamPane, match); } catch(_) {}
                     } else {
                         // Нет ссылки/панели — возвращаемся на вкладку команды
                         btn.classList.remove('active');
@@ -2602,6 +2605,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     if (sp) {
                         sp.style.display = '';
+                        try { console.debug('[profile] stream tab delegated click -> activate'); } catch(_) {}
                         try { if (window.Streams && typeof window.Streams.onStreamTabActivated === 'function') window.Streams.onStreamTabActivated(sp, match); } catch(_) {}
                     } else {
                         // Нет ссылки — возвращаемся на «home»

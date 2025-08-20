@@ -5,6 +5,7 @@
 // Если дата не критична, можно оставить пустой третий сегмент: `${home}__${away}__`.
 
 (function(){
+  const DBG = true; // включено подробное логирование потоков
   // Хранилище соответствий: ключ → объект трансляции (локальный fallback)
   const registry = {
     // 'дождь__звезда__2025-08-16': { vkVideoId: '123456789_987654321', autoplay: 0 },
@@ -22,6 +23,7 @@
   }
   function findStream(match){
   const keyExact = makeKey(match);
+  if (DBG) console.debug('[streams] findStream', { keyExact });
   return registry[keyExact] || null;
   }
 
@@ -50,6 +52,7 @@
 
 
   function ensurePane(mdPane, match){
+    if (DBG) console.debug('[streams] ensurePane: enter', { mdKey: mdPane?.getAttribute?.('data-match-key')||null, key: makeKey(match) });
     let pane = document.getElementById('md-pane-stream');
     if (!pane) {
       pane = document.createElement('div');
@@ -60,10 +63,12 @@
       // Вставляем в контейнер модалки рядом с другими pane, чтобы не выпадало ниже составов
       const body = mdPane.querySelector('.modal-body');
       if (body) body.appendChild(pane);
+      if (DBG) console.debug('[streams] ensurePane: created');
     }
   // Обнуляем инициализацию при смене матча
     const key = makeKey(match);
     if (pane.getAttribute('data-match-key') !== key) {
+      if (DBG) console.debug('[streams] ensurePane: key change -> reset pane', { from: pane.getAttribute('data-match-key'), to: key });
       pane.__inited = false;
       pane.__streamInfo = null;
       pane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
@@ -77,6 +82,7 @@
     if (!tab) {
       tab = document.createElement('div'); tab.className='subtab-item'; tab.setAttribute('data-mdtab','stream'); tab.textContent='Трансляция';
       subtabs.appendChild(tab);
+  if (DBG) console.debug('[streams] ensureTab: created');
     }
     if (match) tab.setAttribute('data-match-key', makeKey(match));
     return tab;
@@ -84,6 +90,7 @@
 
   function buildStreamInto(pane, info, match){
     if (!info || pane.__inited) return !!pane.__inited;
+  if (DBG) console.debug('[streams] buildStreamInto', { key: pane.getAttribute('data-match-key'), info: { hasVideoId: !!info.vkVideoId, hasPostUrl: !!info.vkPostUrl } });
   const host = document.createElement('div'); host.className = 'stream-wrap';
     const ratio = document.createElement('div'); ratio.className = 'stream-aspect';
     const ifr = document.createElement('iframe');
@@ -101,22 +108,33 @@
 
   async function fetchServerStream(match){
     try{
-      const dateStr = (match?.datetime || match?.date || '').toString().slice(0,10);
+      let dateStr = (match?.datetime || match?.date || '').toString().slice(0,10);
+      if (!dateStr) {
+        try {
+          const cmk = window.__CURRENT_MATCH_KEY__ || '';
+          const parts = cmk.split('__');
+          if (parts.length >= 3 && parts[2]) dateStr = parts[2];
+        } catch(_) {}
+      }
+  if (DBG) console.debug('[streams] fetchServerStream: request', { home: match?.home, away: match?.away, dateStr });
   const url = `/api/streams/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}&date=${encodeURIComponent(dateStr)}`;
       const r = await fetch(url, { cache: 'no-store' });
       const ans = await r.json();
+      if (DBG) console.debug('[streams] fetchServerStream: response', ans);
       if (ans && ans.available && (ans.vkVideoId || ans.vkPostUrl)) return ans;
     }catch(_){/* noop */}
     return null;
   }
 
   function setupMatchStream(mdPane, subtabs, match){
+    if (DBG) console.debug('[streams] setupMatchStream: enter', { key: makeKey(match), match });
     // Fallback сначала из локального реестра, затем запрос на сервер
     let streamInfo = findStream(match);
     if (streamInfo) {
       const pane = ensurePane(mdPane, match);
       ensureTab(subtabs, match);
       pane.__streamInfo = streamInfo;
+      if (DBG) console.debug('[streams] setupMatchStream: local registry hit -> tab added');
       return pane;
     }
     // Асинхронно проверим у сервера и, если есть, добавим вкладку
@@ -126,6 +144,7 @@
       // Матч всё ещё тот же? (могли уйти на другой экран)
       const currentKey = mdPane.getAttribute('data-match-key') || expectedKey;
       if (currentKey !== expectedKey) return;
+      if (DBG) console.debug('[streams] setupMatchStream: server provided link');
       const pane = ensurePane(mdPane, match);
       const tab = ensureTab(subtabs, match);
       pane.__streamInfo = ans;
@@ -133,6 +152,7 @@
       try {
         const isActive = tab?.classList?.contains('active') || pane?.style?.display === '';
         if (isActive && !pane.__inited) {
+          if (DBG) console.debug('[streams] setupMatchStream: active -> build now');
           buildStreamInto(pane, ans, match);
         }
       } catch(_) {}
@@ -142,9 +162,11 @@
 
   function onStreamTabActivated(pane, match){
     if (!pane) return;
+    if (DBG) console.debug('[streams] onStreamTabActivated: click', { paneKey: pane.getAttribute('data-match-key'), matchKey: makeKey(match) });
     // Безопасность: проверяем, что pane относится к текущему матчу
     const key = makeKey(match);
     if (pane.getAttribute('data-match-key') !== key) {
+      if (DBG) console.debug('[streams] onStreamTabActivated: mismatch -> reset');
       pane.__inited = false;
       pane.__streamInfo = null;
       pane.setAttribute('data-match-key', key);
@@ -152,14 +174,16 @@
     if (!pane.__inited) {
       const info = pane.__streamInfo || findStream(match);
       if (info) {
+        if (DBG) console.debug('[streams] onStreamTabActivated: build from cached info');
         setTimeout(()=>buildStreamInto(pane, info, match), 50);
       } else {
         // Попробуем ещё раз спросить сервер и построить
         const expectedKey = key;
         fetchServerStream(match).then((ans)=>{
           // Проверяем, что мы всё ещё на этом матче
-          if (!ans) { const sk=pane.querySelector('.stream-skeleton'); if (sk) sk.textContent='Трансляция недоступна'; return; }
+          if (!ans) { if (DBG) console.debug('[streams] onStreamTabActivated: no link on server'); const sk=pane.querySelector('.stream-skeleton'); if (sk) sk.textContent='Трансляция недоступна'; return; }
           if ((mdPaneFrom(pane)?.getAttribute('data-match-key') || expectedKey) !== expectedKey) return;
+          if (DBG) console.debug('[streams] onStreamTabActivated: server returned link -> build');
           pane.__streamInfo = ans; buildStreamInto(pane, ans, match);
         }).catch(()=>{});
       }
@@ -179,6 +203,7 @@
     try {
       const pane = document.getElementById('md-pane-stream');
       if (!pane) return;
+  if (DBG) console.debug('[streams] resetOnLeave');
       // Остановить возможный поллинг комментариев
       try { typeof pane.__stopCommentsPoll === 'function' && pane.__stopCommentsPoll(); } catch(_) {}
       // Поставить видео на паузу безопасно, затем очистить DOM
