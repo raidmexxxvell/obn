@@ -789,6 +789,7 @@ class MatchStream(Base):
     home = Column(Text, nullable=False)
     away = Column(Text, nullable=False)
     date = Column(String(10), nullable=True)  # YYYY-MM-DD
+    tour = Column(Text, nullable=True)  # Новый столбец для тура (строка для гибкости)
     vk_video_id = Column(Text, nullable=True)
     vk_post_url = Column(Text, nullable=True)
     confirmed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
@@ -6030,7 +6031,7 @@ def api_streams_list():
             rows = db.query(MatchStream).all()
             items = []
             for r in rows:
-                items.append({'home': r.home, 'away': r.away, 'date': r.date or '', 'vkVideoId': r.vk_video_id or '', 'vkPostUrl': r.vk_post_url or ''})
+                items.append({'home': r.home, 'away': r.away, 'date': r.date or '', 'tour': r.tour or '', 'vkVideoId': r.vk_video_id or '', 'vkPostUrl': r.vk_post_url or ''})
             return jsonify({'items': items})
         finally:
             db.close()
@@ -6133,6 +6134,7 @@ def api_streams_set():
         away = (request.form.get('away') or '').strip()
         dt_raw = (request.form.get('datetime') or '').strip()
         vk_raw = (request.form.get('vk') or '').strip()
+        tour = (request.form.get('tour') or '').strip()
         if not home or not away:
             return jsonify({'error': 'home/away обязательны'}), 400
         # Определим дату для ключа
@@ -6190,7 +6192,8 @@ def api_streams_set():
             row = db.query(MatchStream).filter(
                 MatchStream.home == home,
                 MatchStream.away == away,
-                MatchStream.date == (date_str or None)
+                MatchStream.date == (date_str or None),
+                MatchStream.tour == (tour or None)
             ).first()
             if not row and not date_str:
                 # Разрешим перезапись самой свежей записи, даже если она без даты, если совпали команды
@@ -6202,7 +6205,7 @@ def api_streams_set():
             prev_id = None
             prev_url = None
             if not row:
-                row = MatchStream(home=home, away=away, date=(date_str or None))
+                row = MatchStream(home=home, away=away, date=(date_str or None), tour=(tour or None))
                 db.add(row)
             else:
                 try:
@@ -6211,6 +6214,7 @@ def api_streams_set():
                 except Exception:
                     prev_id = None
                     prev_url = None
+            row.tour = tour or None
             row.vk_video_id = vk_id or None
             row.vk_post_url = vk_url or None
             row.confirmed_at = now_ts
@@ -6219,7 +6223,7 @@ def api_streams_set():
             # Логирование факта сохранения для аудита
             try:
                 app.logger.info(
-                    f"streams/set by admin {user_id}: {home} vs {away} ({date_str or '-'}) -> "
+                    f"streams/set by admin {user_id}: {home} vs {away} ({date_str or '-'}) [tour={tour}] -> "
                     f"vkVideoId={row.vk_video_id or ''} vkPostUrl={row.vk_post_url or ''} "
                     f"(prev: id={prev_id or ''} url={prev_url or ''})"
                 )
@@ -6232,6 +6236,7 @@ def api_streams_set():
                 'home': home,
                 'away': away,
                 'date': date_str,
+                'tour': tour,
                 'vkVideoId': row.vk_video_id or '',
                 'vkPostUrl': row.vk_post_url or '',
                 'prev': {'vkVideoId': prev_id or '', 'vkPostUrl': prev_url or ''}
@@ -6250,9 +6255,10 @@ def api_streams_get():
     try:
         if SessionLocal is None:
             return jsonify({'available': False})
-        home = (request.args.get('home') or '').strip()
-        away = (request.args.get('away') or '').strip()
-        date_str = (request.args.get('date') or '').strip()
+    home = (request.args.get('home') or '').strip()
+    away = (request.args.get('away') or '').strip()
+    date_str = (request.args.get('date') or '').strip()
+    tour = (request.args.get('tour') or '').strip()
         try:
             app.logger.info(f"streams/get req: home='{home}' away='{away}' date='{date_str}'")
         except Exception:
@@ -6268,7 +6274,11 @@ def api_streams_get():
         try:
             db0: Session = get_db()
             try:
-                row0 = db0.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None)).first()
+                row0 = None
+                if tour:
+                    row0 = db0.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None), MatchStream.tour==tour).first()
+                if not row0:
+                    row0 = db0.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None)).first()
                 if not row0 and date_str:
                     row0 = db0.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away).order_by(MatchStream.updated_at.desc()).first()
                 if row0 and ((row0.vk_video_id and row0.vk_video_id.strip()) or (row0.vk_post_url and row0.vk_post_url.strip())):
@@ -6406,16 +6416,21 @@ def api_streams_reset():
         admin_id = os.environ.get('ADMIN_USER_ID','')
         if not admin_id or user_id != admin_id:
             return jsonify({'error': 'forbidden'}), 403
-        home = (request.form.get('home') or '').strip()
-        away = (request.form.get('away') or '').strip()
-        date_str = (request.form.get('date') or '').strip()
+    home = (request.form.get('home') or '').strip()
+    away = (request.form.get('away') or '').strip()
+    date_str = (request.form.get('date') or '').strip()
+    tour = (request.form.get('tour') or '').strip()
         if not home or not away:
             return jsonify({'error': 'home/away обязательны'}), 400
         if SessionLocal is None:
             return jsonify({'error': 'БД недоступна'}), 500
         db: Session = get_db()
         try:
-            row = db.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None)).first()
+            row = None
+            if tour:
+                row = db.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None), MatchStream.tour==tour).first()
+            if not row:
+                row = db.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None)).first()
             if not row and date_str:
                 # поддержка старых записей без даты
                 row = db.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away).order_by(MatchStream.updated_at.desc()).first()

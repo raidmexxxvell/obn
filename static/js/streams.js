@@ -21,12 +21,15 @@
       const raw = match?.date ? String(match.date) : (match?.datetime ? String(match.datetime) : '');
       d = raw ? raw.slice(0,10) : '';
     }catch(_){ d=''; }
-    return `${h}__${a}__${d}`;
+    let t = '';
+    t = (match?.tour !== undefined && match?.tour !== null) ? String(match.tour).trim() : '';
+    // Если нет тура, сохраняем обратную совместимость (старый ключ)
+    return t ? `${h}__${a}__${d}__${t}` : `${h}__${a}__${d}`;
   }
   function findStream(match){
   const keyExact = makeKey(match);
   if (DBG) console.debug('[streams] findStream', { keyExact });
-  return registry[keyExact] || null;
+    return registry[keyExact] || registry[makeKey({...match, tour: undefined})] || null;
   }
 
   // Проверяем, относится ли матч к «текущему туру» по локальному кэшу расписания
@@ -155,7 +158,10 @@
         } catch(_) {}
       }
   if (DBG) console.debug('[streams] fetchServerStream: request', { home: match?.home, away: match?.away, dateStr });
-  const url = `/api/streams/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}&date=${encodeURIComponent(dateStr)}`;
+        let url = `/api/streams/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}&date=${encodeURIComponent(dateStr)}`;
+        if (match.tour !== undefined && match.tour !== null) {
+          url += `&tour=${encodeURIComponent(match.tour)}`;
+        }
       const r = await fetch(url, { cache: 'no-store' });
       const ans = await r.json();
       if (DBG) console.debug('[streams] fetchServerStream: response', ans);
@@ -283,4 +289,3 @@
 
   window.Streams = { setupMatchStream, onStreamTabActivated, resetOnLeave };
 })();
-

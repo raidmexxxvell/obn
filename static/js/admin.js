@@ -152,7 +152,8 @@
         const rr = await fetch('/api/streams/list');
         const dd = await rr.json();
         (dd.items||[]).forEach(it => {
-          const key = `${(it.home||'').toLowerCase()}__${(it.away||'').toLowerCase()}__${(it.date||'')}`;
+          const tour = (it.tour !== undefined && it.tour !== null) ? String(it.tour).trim() : '';
+          const key = tour ? `${(it.home||'').toLowerCase()}__${(it.away||'').toLowerCase()}__${(it.date||'')}__${tour}` : `${(it.home||'').toLowerCase()}__${(it.away||'').toLowerCase()}__${(it.date||'')}`;
           saved[key] = { vkVideoId: it.vkVideoId||'', vkPostUrl: it.vkPostUrl||'' };
         });
       } catch(_) {}
@@ -167,7 +168,8 @@
         // Предзаполним, если уже была сохранённая ссылка
         try {
           const dateKey = (m.datetime||m.date||'').slice(0,10);
-          const key = `${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}__${dateKey}`;
+          const tour = (m.tour !== undefined && m.tour !== null) ? String(m.tour).trim() : '';
+          const key = tour ? `${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}__${dateKey}__${tour}` : `${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}__${dateKey}`;
           const prev = saved[key];
           if (prev) {
             const val = prev.vkVideoId ? `https://vk.com/video${prev.vkVideoId}` : (prev.vkPostUrl||'');
@@ -185,7 +187,8 @@
             // Если уже было сохранено и значение меняется — спросим подтверждение
             try {
               const dateKey = (m.datetime||m.date||'').slice(0,10);
-              const key = `${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}__${dateKey}`;
+              const tour = (m.tour !== undefined && m.tour !== null) ? String(m.tour).trim() : '';
+              const key = tour ? `${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}__${dateKey}__${tour}` : `${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}__${dateKey}`;
               const prev = saved[key];
               const prevHuman = prev ? (prev.vkVideoId ? `https://vk.com/video${prev.vkVideoId}` : (prev.vkPostUrl||'')) : '';
               if (prevHuman && prevHuman !== val) {
@@ -198,6 +201,7 @@
             fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
             fd.append('home', m.home || ''); fd.append('away', m.away || '');
             fd.append('datetime', m.datetime || ''); fd.append('vk', val);
+            if (m.tour !== undefined && m.tour !== null) fd.append('tour', m.tour);
             const rr = await fetch('/api/streams/set', { method:'POST', body: fd });
             const resp = await rr.json().catch(()=>({}));
             if (!rr.ok) { throw new Error(resp?.error || 'save'); }
@@ -207,7 +211,8 @@
             // Обновим локальный saved
             try {
               const dateKey = (m.datetime||m.date||'').slice(0,10);
-              const key = `${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}__${dateKey}`;
+              const tour = (m.tour !== undefined && m.tour !== null) ? String(m.tour).trim() : '';
+              const key = tour ? `${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}__${dateKey}__${tour}` : `${(m.home||'').toLowerCase()}__${(m.away||'').toLowerCase()}__${dateKey}`;
               saved[key] = { vkVideoId: resp?.vkVideoId || '', vkPostUrl: resp?.vkPostUrl || '' };
             } catch(_) {}
           } catch(_) { btn.disabled=false; btn.textContent='Подтвердить'; }
@@ -225,6 +230,7 @@
             fd.append('home', m.home || ''); fd.append('away', m.away || '');
             const dateKey = (m.datetime||m.date||'').slice(0,10);
             fd.append('date', dateKey);
+            if (m.tour !== undefined && m.tour !== null) fd.append('tour', m.tour);
             const rr = await fetch('/api/streams/reset', { method: 'POST', body: fd });
             const resp = await rr.json().catch(()=>({}));
             if (!rr.ok) throw new Error(resp?.error || 'reset');
