@@ -1720,6 +1720,23 @@ def _compute_match_odds(home: str, away: str, date_key: str|None = None) -> dict
     if s > 0:
         pH, pD, pA = pH/s, pD/s, pA/s
 
+    # Дополнительно сгладим pH/pA к среднему при паритете, чтобы кэфы были ближе к равным
+    try:
+        # мера близости: 1.0 при pH≈pA, 0.0 при сильном перекосе
+        close = 1.0 - min(1.0, abs(pH - pA) / 0.35)
+        if close > 0:
+            # коэффициент сглаживания до 30% при почти полном паритете
+            smooth_k = 0.30 * max(0.0, min(1.0, close))
+            avg_hp = 0.5 * (pH + pA)
+            pH = pH + smooth_k * (avg_hp - pH)
+            pA = pA + smooth_k * (avg_hp - pA)
+            # нормализация с сохранением pD как есть на этом шаге
+            s2 = pH + pD + pA
+            if s2 > 0:
+                pH, pD, pA = pH/s2, pD/s2, pA/s2
+    except Exception:
+        pass
+
     # Усиливаем pD (ничью), если команды равные: оцениваем паритет по близости pH и pA
     try:
         parity = 1.0 - min(1.0, abs(pH - pA) / 0.30)  # 1.0 при pH≈pA; 0.0 при сильном перекосе
@@ -5341,7 +5358,7 @@ def api_match_details():
             - нижний регистр, замена ё->е
             - приведение латинских «похожих» букв к кириллице, если строка кириллическая (боремся с Звeзда и т.п.)
             - удаление не буквенно-цифровых
-            - удаление префикса 'фк' / 'fc'
+            - удаление префикса 'фк' / 'fc' / 'fk'
             """
             s = (s or '').lower().strip()
             s = s.replace('\u00A0', ' ').replace('ё', 'е')
@@ -5371,7 +5388,7 @@ def api_match_details():
             s0 = s.replace(' ', '')
             if s0.startswith('фк'):
                 s = s0[2:]
-            elif s0.startswith('fc'):
+            elif s0.startswith('fc') or s0.startswith('fk'):
                 s = s0[2:]
             else:
                 s = s0
@@ -5404,8 +5421,21 @@ def api_match_details():
             return resp
 
         ws = get_rosters_sheet()
-        _metrics_inc('sheet_reads', 1)
-        headers = ws.row_values(1) or []
+        # Сначала попробуем получить фиксированный диапазон, чтобы сохранить реальные индексы колонок (A=1..ZZ)
+        headers = []
+        try:
+            _metrics_inc('sheet_reads', 1)
+            arr = ws.get('A1:ZZ1') or [[]]
+            headers = (arr[0] if arr and len(arr) > 0 else []) or []
+        except Exception:
+            headers = []
+        # Фолбэк — row_values(1), если предыдущий способ не сработал
+        if not headers:
+            try:
+                _metrics_inc('sheet_reads', 1)
+                headers = ws.row_values(1) or []
+            except Exception:
+                headers = []
         # карта нормализованных заголовков -> индекс (1-based)
         idx_map = {}
         for i, h in enumerate(headers, start=1):
