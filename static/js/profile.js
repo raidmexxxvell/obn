@@ -2047,6 +2047,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // вкладки (добавим «Спецсобытия» для админа и «Трансляция», если есть в конфиге)
         const subtabs = mdPane.querySelector('.modal-subtabs');
+        // Присвоим текущему экрану уникальный ключ матча и уберём старую вкладку/панель «Трансляция», если осталась от прошлого матча
+        try {
+            const mkKey = (obj) => {
+                const h = (obj?.home || '').toLowerCase().trim();
+                const a = (obj?.away || '').toLowerCase().trim();
+                const raw = obj?.date ? String(obj.date) : (obj?.datetime ? String(obj.datetime) : '');
+                const d = raw ? raw.slice(0, 10) : '';
+                return `${h}__${a}__${d}`;
+            };
+            const currentKey = mkKey(match);
+            mdPane.setAttribute('data-match-key', currentKey);
+            // Жёстко удаляем устаревшие элементы трансляции
+            const oldTab = subtabs?.querySelector('[data-mdtab="stream"]');
+            if (oldTab) oldTab.remove();
+            const oldPane = document.getElementById('md-pane-stream');
+            if (oldPane) oldPane.remove();
+        } catch(_) {}
         mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach((el) => el.classList.remove('active'));
         // Переименуем вкладки на имена команд
         try {
@@ -2105,7 +2122,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // События будут отображаться внутри вкладок составов
         // Вкладка «Статистика»
-        let statsPane = document.getElementById('md-pane-stats');
+    let statsPane = document.getElementById('md-pane-stats');
         if (!statsPane) {
             statsPane = document.createElement('div');
             statsPane.id = 'md-pane-stats';

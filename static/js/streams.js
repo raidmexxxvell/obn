@@ -49,7 +49,7 @@
     return '';
   }
 
-  function ensurePane(mdPane){
+  function ensurePane(mdPane, match){
     let pane = document.getElementById('md-pane-stream');
     if (!pane) {
       pane = document.createElement('div');
@@ -57,17 +57,28 @@
       pane.className = 'md-pane';
       pane.style.display = 'none';
       pane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
-      mdPane.querySelector('.modal-body')?.appendChild(pane);
+      // Вставляем в контейнер модалки рядом с другими pane, чтобы не выпадало ниже составов
+      const body = mdPane.querySelector('.modal-body');
+      if (body) body.appendChild(pane);
+    }
+    // Обнуляем инициализацию при смене матча
+    const key = makeKey(match);
+    if (pane.getAttribute('data-match-key') !== key) {
+      pane.__inited = false;
+      pane.__streamInfo = null;
+      pane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
+      pane.setAttribute('data-match-key', key);
     }
     return pane;
   }
 
-  function ensureTab(subtabs){
+  function ensureTab(subtabs, match){
     let tab = subtabs?.querySelector('[data-mdtab="stream"]');
     if (!tab) {
       tab = document.createElement('div'); tab.className='subtab-item'; tab.setAttribute('data-mdtab','stream'); tab.textContent='Трансляция';
       subtabs.appendChild(tab);
     }
+    if (match) tab.setAttribute('data-match-key', makeKey(match));
     return tab;
   }
 
@@ -102,36 +113,56 @@
     // Fallback сначала из локального реестра, затем запрос на сервер
     let streamInfo = findStream(match);
     if (streamInfo) {
-      const pane = ensurePane(mdPane);
-      ensureTab(subtabs);
+      const pane = ensurePane(mdPane, match);
+      ensureTab(subtabs, match);
       pane.__streamInfo = streamInfo;
       return pane;
     }
     // Асинхронно проверим у сервера и, если есть, добавим вкладку
+    const expectedKey = makeKey(match);
     fetchServerStream(match).then((ans)=>{
-      if (ans) {
-        const pane = ensurePane(mdPane);
-        ensureTab(subtabs);
-        pane.__streamInfo = ans;
-      }
+      if (!ans) return;
+      // Матч всё ещё тот же? (могли уйти на другой экран)
+      const currentKey = mdPane.getAttribute('data-match-key') || expectedKey;
+      if (currentKey !== expectedKey) return;
+      const pane = ensurePane(mdPane, match);
+      ensureTab(subtabs, match);
+      pane.__streamInfo = ans;
     }).catch(()=>{});
     return null; // пока не знаем — не показываем вкладку
   }
 
   function onStreamTabActivated(pane, match){
     if (!pane) return;
+    // Безопасность: проверяем, что pane относится к текущему матчу
+    const key = makeKey(match);
+    if (pane.getAttribute('data-match-key') !== key) {
+      pane.__inited = false;
+      pane.__streamInfo = null;
+      pane.setAttribute('data-match-key', key);
+    }
     if (!pane.__inited) {
       const info = pane.__streamInfo || findStream(match);
       if (info) {
         setTimeout(()=>buildStreamInto(pane, info, match), 50);
       } else {
         // Попробуем ещё раз спросить сервер и построить
-        fetchServerStream(match).then((ans)=>{ if (ans) { pane.__streamInfo = ans; buildStreamInto(pane, ans, match); } else { const sk=pane.querySelector('.stream-skeleton'); if (sk) sk.textContent='Трансляция недоступна'; } }).catch(()=>{});
+        const expectedKey = key;
+        fetchServerStream(match).then((ans)=>{
+          // Проверяем, что мы всё ещё на этом матче
+          if (!ans) { const sk=pane.querySelector('.stream-skeleton'); if (sk) sk.textContent='Трансляция недоступна'; return; }
+          if ((mdPaneFrom(pane)?.getAttribute('data-match-key') || expectedKey) !== expectedKey) return;
+          pane.__streamInfo = ans; buildStreamInto(pane, ans, match);
+        }).catch(()=>{});
       }
     } else {
       // Уже инициализировано — запустим поллинг комментариев, если есть
       try { typeof pane.__startCommentsPoll === 'function' && pane.__startCommentsPoll(); } catch(_) {}
     }
+  }
+
+  function mdPaneFrom(pane){
+    try { return pane?.closest('#ufo-match-details'); } catch(_) { return null; }
   }
 
   window.__STREAMS__ = { findStream, registry };

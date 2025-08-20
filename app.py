@@ -1813,6 +1813,36 @@ def _compute_match_odds(home: str, away: str, date_key: str|None = None) -> dict
                 pH, pD, pA = [ (p_new if i==fav_idx else max(0.01, v*scale)) for i,v in enumerate([pH,pD,pA]) ]
     except Exception:
         pass
+
+    # Для "равных" команд заставляем П1 и П2 быть одинаковыми и около 2.0–2.5
+    try:
+        # высокая степень паритета: различие менее ~0.08 абсолютных пунктов
+        parity2 = 1.0 - min(1.0, abs(pH - pA) / 0.08)
+        if parity2 > 0.8:
+            try:
+                min_odd = float(os.environ.get('BET_PARITY_MIN_ODD', '2.00'))
+            except Exception:
+                min_odd = 2.00
+            try:
+                max_odd = float(os.environ.get('BET_PARITY_MAX_ODD', '2.50'))
+            except Exception:
+                max_odd = 2.50
+            try:
+                mid_odd = float(os.environ.get('BET_PARITY_MID_ODD', '2.20'))
+            except Exception:
+                mid_odd = 2.20
+            target_odd = max(min_odd, min(max_odd, ( (1.0/(max(1e-9, pH*overround)) + 1.0/(max(1e-9, pA*overround)) )/2.0 )))
+            # Подтягиваем в район середины 2.2 (в пределах [min_odd; max_odd])
+            target_odd = max(min_odd, min(max_odd, (target_odd*0.5 + mid_odd*0.5)))
+            p_t = max(0.05, min(0.49, 1.0 / (target_odd * overround)))
+            # Равным командам отдаем одинаковые вероятности побед, ничью подстраиваем под остаток
+            pH = pA = p_t
+            pD = max(0.02, 1.0 - 2.0 * p_t)
+            s4 = pH + pD + pA
+            if s4 > 0 and abs(s4 - 1.0) > 1e-6:
+                pH, pD, pA = pH/s4, pD/s4, pA/s4
+    except Exception:
+        pass
     def to_odds(p):
         try:
             return round(max(1.10, 1.0 / (p * overround)), 2)
