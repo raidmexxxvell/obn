@@ -5924,6 +5924,32 @@ def api_results_refresh():
         app.logger.error(f"Ошибка принудительного обновления результатов: {e}")
         return jsonify({'error': 'Не удалось обновить результаты'}), 500
 
+@app.route('/api/betting/tours/refresh', methods=['POST'])
+def api_betting_tours_refresh():
+    """Принудительно обновляет снапшот туров для ставок (только админ).
+    Нужен для корректного обновления раздела прогнозов и подбора "матча недели"
+    после изменения времени матчей в Google Sheets.
+    """
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+        payload = _build_betting_tours_payload()
+        if SessionLocal is not None:
+            db: Session = get_db()
+            try:
+                _snapshot_set(db, 'betting-tours', payload)
+            finally:
+                db.close()
+        return jsonify({'status': 'ok', 'updated_at': payload.get('updated_at')})
+    except Exception as e:
+        app.logger.error(f"Ошибка принудительного обновления betting-tours: {e}")
+        return jsonify({'error': 'Не удалось обновить туры для ставок'}), 500
+
 @app.route('/api/streams/confirm', methods=['POST'])
 def api_streams_confirm():
     """Админ подтверждает трансляцию для матча.

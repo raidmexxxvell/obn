@@ -32,7 +32,9 @@
         fetch('/api/league-table/refresh', { method: 'POST', body: fd }),
         fetch('/api/stats-table/refresh', { method: 'POST', body: fd }),
         fetch('/api/schedule/refresh', { method: 'POST', body: fd }),
-        fetch('/api/results/refresh', { method: 'POST', body: fd })
+  fetch('/api/results/refresh', { method: 'POST', body: fd }),
+  // Также обновим туры для ставок, чтобы подтянулись прогнозы и «матч недели»
+  fetch('/api/betting/tours/refresh', { method: 'POST', body: fd })
       ]).finally(() => { btnAll.disabled = false; btnAll.textContent = orig; });
     });
   if (btnUsers && lblUsers) btnUsers.addEventListener('click', renderAdminStats);

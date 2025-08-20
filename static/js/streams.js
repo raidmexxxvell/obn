@@ -54,18 +54,27 @@
   function ensurePane(mdPane, match){
     if (DBG) console.debug('[streams] ensurePane: enter', { mdKey: mdPane?.getAttribute?.('data-match-key')||null, key: makeKey(match) });
     let pane = document.getElementById('md-pane-stream');
+    const body = mdPane.querySelector('.modal-body');
+
     if (!pane) {
       pane = document.createElement('div');
       pane.id = 'md-pane-stream';
       pane.className = 'md-pane';
       pane.style.display = 'none';
       pane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
-      // Вставляем в контейнер модалки рядом с другими pane, чтобы не выпадало ниже составов
-      const body = mdPane.querySelector('.modal-body');
       if (body) body.appendChild(pane);
       if (DBG) console.debug('[streams] ensurePane: created');
+    } else {
+      // Если панель уже существует, убедимся, что она находится в текущем mdPane
+      try {
+        if (body && pane.parentNode !== body) {
+          body.appendChild(pane);
+          if (DBG) console.debug('[streams] ensurePane: moved existing pane into current mdPane');
+        }
+      } catch(_) {}
     }
-  // Обнуляем инициализацию при смене матча
+
+    // Обнуляем инициализацию при смене матча
     const key = makeKey(match);
     if (pane.getAttribute('data-match-key') !== key) {
       if (DBG) console.debug('[streams] ensurePane: key change -> reset pane', { from: pane.getAttribute('data-match-key'), to: key });
@@ -73,6 +82,7 @@
       pane.__streamInfo = null;
       pane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
       pane.setAttribute('data-match-key', key);
+      pane.style.display = '';
     }
     return pane;
   }
@@ -94,7 +104,8 @@
   const host = document.createElement('div'); host.className = 'stream-wrap';
     const ratio = document.createElement('div'); ratio.className = 'stream-aspect';
     const ifr = document.createElement('iframe');
-    ifr.src = buildIframeSrc(info);
+    // используем vUrl для перебивки кэша версии приложения (если применимо)
+    ifr.src = vUrl(buildIframeSrc(info));
     ifr.setAttribute('allowfullscreen','true');
     ifr.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture; screen-wake-lock;';
     ifr.referrerPolicy = 'strict-origin-when-cross-origin';
@@ -139,11 +150,16 @@
     }
     // Асинхронно проверим у сервера и, если есть, добавим вкладку
     const expectedKey = makeKey(match);
+    // Маркируем запрос последовательностью, чтобы игнорировать устаревшие ответы
+    mdPane.__streamSetupSeq = (mdPane.__streamSetupSeq || 0) + 1;
+    const reqId = mdPane.__streamSetupSeq;
+    mdPane.__streamSetupKey = expectedKey;
     fetchServerStream(match).then((ans)=>{
       if (!ans) return;
       // Матч всё ещё тот же? (могли уйти на другой экран)
       const currentKey = mdPane.getAttribute('data-match-key') || expectedKey;
-      if (currentKey !== expectedKey) return;
+      if (currentKey !== expectedKey) { if (DBG) console.debug('[streams] setupMatchStream: stale resp by mdKey', { expectedKey, currentKey }); return; }
+      if (mdPane.__streamSetupSeq !== reqId || mdPane.__streamSetupKey !== expectedKey) { if (DBG) console.debug('[streams] setupMatchStream: stale resp by reqId'); return; }
       if (DBG) console.debug('[streams] setupMatchStream: server provided link');
       const pane = ensurePane(mdPane, match);
       const tab = ensureTab(subtabs, match);
@@ -179,10 +195,15 @@
       } else {
         // Попробуем ещё раз спросить сервер и построить
         const expectedKey = key;
+        // Пер-запрос маркируем токеном, чтобы игнорировать устаревшие ответы
+        pane.__streamTabSeq = (pane.__streamTabSeq || 0) + 1;
+        const reqId = pane.__streamTabSeq;
         fetchServerStream(match).then((ans)=>{
           // Проверяем, что мы всё ещё на этом матче
           if (!ans) { if (DBG) console.debug('[streams] onStreamTabActivated: no link on server'); const sk=pane.querySelector('.stream-skeleton'); if (sk) sk.textContent='Трансляция недоступна'; return; }
-          if ((mdPaneFrom(pane)?.getAttribute('data-match-key') || expectedKey) !== expectedKey) return;
+          const mdKey = (mdPaneFrom(pane)?.getAttribute('data-match-key') || expectedKey);
+          if (mdKey !== expectedKey) { if (DBG) console.debug('[streams] onStreamTabActivated: stale resp by mdKey', { expectedKey, mdKey }); return; }
+          if (pane.__streamTabSeq !== reqId) { if (DBG) console.debug('[streams] onStreamTabActivated: stale resp by reqId'); return; }
           if (DBG) console.debug('[streams] onStreamTabActivated: server returned link -> build');
           pane.__streamInfo = ans; buildStreamInto(pane, ans, match);
         }).catch(()=>{});
@@ -206,11 +227,22 @@
   if (DBG) console.debug('[streams] resetOnLeave');
       // Остановить возможный поллинг комментариев
       try { typeof pane.__stopCommentsPoll === 'function' && pane.__stopCommentsPoll(); } catch(_) {}
-      // Поставить видео на паузу безопасно, затем очистить DOM
-      try { const ifr = pane.querySelector('iframe'); if (ifr) { const src = ifr.src; ifr.src = src; } } catch(_) {}
+      // Поставить видео на паузу / полностью сбросить src iframe
+      try { const ifr = pane.querySelector('iframe'); if (ifr) { try { ifr.src = ''; } catch(_) { /* noop */ } } } catch(_) {}
+  // Инвалидируем любые ожидающие ответы
+  try { mdPane.__streamSetupSeq = (mdPane.__streamSetupSeq || 0) + 1; } catch(_) {}
+  try { pane.__streamTabSeq = (pane.__streamTabSeq || 0) + 1; } catch(_) {}
       pane.__inited = false;
       pane.__streamInfo = null;
       pane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
+
+      // Убираем ключ и отсоединяем панель от старого модала, чтобы при следующем открытии
+      // ensurePane корректно поместит её в новый mdPane
+      try {
+        pane.removeAttribute('data-match-key');
+        if (pane.parentNode) pane.parentNode.removeChild(pane);
+        if (DBG) console.debug('[streams] resetOnLeave: detached pane from old mdPane');
+      } catch(_) {}
     } catch(_) {}
   }
 
