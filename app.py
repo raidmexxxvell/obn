@@ -5439,6 +5439,21 @@ def api_match_details():
                         col_idx = i
                         break
             if col_idx is None:
+                # не нашли — попробуем нестрогое сравнение (fuzzy) по похожести
+                try:
+                    import difflib
+                    best_ratio = 0.0
+                    best_idx = None
+                    for k, i in idx_map.items():
+                        r = difflib.SequenceMatcher(None, key, k).ratio()
+                        if r > best_ratio:
+                            best_ratio = r
+                            best_idx = i
+                    if best_idx is not None and best_ratio >= 0.8:
+                        col_idx = best_idx
+                except Exception:
+                    pass
+            if col_idx is None:
                 return {'team': team_name, 'players': []}
             _metrics_inc('sheet_reads', 1)
             col_vals = ws.col_values(col_idx)
@@ -5483,6 +5498,12 @@ def api_match_details():
             'events': events
         }
         etag = hashlib.md5(_json.dumps(payload_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+        # Если обе команды пустые, залогируем доступные ключи для отладки
+        if not home_data['players'] and not away_data['players']:
+            try:
+                app.logger.info("Rosters not found for %s vs %s; keys: %s", home, away, ','.join(sorted(set(idx_map.keys()))))
+            except Exception:
+                pass
         # Сохраняем в кеш
         MATCH_DETAILS_CACHE[cache_key] = { 'ts': now_ts, 'etag': etag, 'payload': payload_core }
         resp = jsonify({ **payload_core, 'version': etag })
