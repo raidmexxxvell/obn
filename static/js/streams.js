@@ -104,8 +104,18 @@
 
     // Обнуляем инициализацию при смене матча
     const key = makeKey(match);
-    if (pane.getAttribute('data-match-key') !== key) {
-      if (DBG) console.debug('[streams] ensurePane: key change -> reset pane', { from: pane.getAttribute('data-match-key'), to: key });
+    const currentKey = pane.getAttribute('data-match-key');
+    if (currentKey !== key) {
+      if (DBG) console.debug('[streams] ensurePane: key change -> reset pane', { from: currentKey, to: key });
+      // Принудительно очищаем iframe для нового матча
+      try { 
+        const ifr = pane.querySelector('iframe'); 
+        if (ifr) { 
+          ifr.src = 'about:blank'; 
+          // Небольшая задержка для полной очистки
+          setTimeout(() => ifr.remove(), 100);
+        } 
+      } catch(_) {}
       pane.__inited = false;
       pane.__streamInfo = null;
       pane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
@@ -131,15 +141,37 @@
   function buildStreamInto(pane, info, match){
     if (!info || pane.__inited) return !!pane.__inited;
   if (DBG) console.debug('[streams] buildStreamInto', { key: pane.getAttribute('data-match-key'), info: { hasVideoId: !!info.vkVideoId, hasPostUrl: !!info.vkPostUrl } });
-  const host = document.createElement('div'); host.className = 'stream-wrap';
-    const ratio = document.createElement('div'); ratio.className = 'stream-aspect';
+  
+    // Создаем уникальные элементы для каждого построения
+    const host = document.createElement('div'); 
+    host.className = 'stream-wrap';
+    const ratio = document.createElement('div'); 
+    ratio.className = 'stream-aspect';
     const ifr = document.createElement('iframe');
+    
+    // Добавляем timestamp для избежания кеширования
+    const timestamp = Date.now();
+    let src = buildIframeSrc(info);
+    if (src) {
+      src += (src.includes('?') ? '&' : '?') + '_t=' + timestamp;
+    }
+    
     // используем vUrl для перебивки кэша версии приложения (если применимо)
-    ifr.src = vUrl(buildIframeSrc(info));
+    ifr.src = vUrl(src);
     ifr.setAttribute('allowfullscreen','true');
     ifr.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture; screen-wake-lock;';
     ifr.referrerPolicy = 'strict-origin-when-cross-origin';
-    ratio.appendChild(ifr); host.appendChild(ratio);
+    
+    // Добавляем обработчик загрузки iframe для отладки
+    ifr.onload = () => {
+      if (DBG) console.debug('[streams] iframe loaded successfully', { src: ifr.src });
+    };
+    ifr.onerror = () => {
+      if (DBG) console.debug('[streams] iframe load error', { src: ifr.src });
+    };
+    
+    ratio.appendChild(ifr); 
+    host.appendChild(ratio);
   pane.innerHTML='';
   pane.appendChild(host);
     pane.__inited = true;
@@ -269,7 +301,7 @@
       // Остановить возможный поллинг комментариев
       try { typeof pane.__stopCommentsPoll === 'function' && pane.__stopCommentsPoll(); } catch(_) {}
       // Поставить видео на паузу / полностью сбросить src iframe
-      try { const ifr = pane.querySelector('iframe'); if (ifr) { try { ifr.src = ''; } catch(_) { /* noop */ } } } catch(_) {}
+      try { const ifr = pane.querySelector('iframe'); if (ifr) { try { ifr.src = 'about:blank'; } catch(_) { /* noop */ } } } catch(_) {}
   // Инвалидируем любые ожидающие ответы
   try { mdPane.__streamSetupSeq = (mdPane.__streamSetupSeq || 0) + 1; } catch(_) {}
   try { pane.__streamTabSeq = (pane.__streamTabSeq || 0) + 1; } catch(_) {}
@@ -277,12 +309,11 @@
       pane.__streamInfo = null;
       pane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
 
-      // Убираем ключ и отсоединяем панель от старого модала, чтобы при следующем открытии
-      // ensurePane корректно поместит её в новый mdPane
+      // Убираем ключ, но НЕ удаляем панель из DOM - оставляем её для повторного использования
       try {
         pane.removeAttribute('data-match-key');
-        if (pane.parentNode) pane.parentNode.removeChild(pane);
-        if (DBG) console.debug('[streams] resetOnLeave: detached pane from old mdPane');
+        pane.style.display = 'none';
+        if (DBG) console.debug('[streams] resetOnLeave: reset pane state but kept in DOM');
       } catch(_) {}
     } catch(_) {}
   }
