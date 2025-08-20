@@ -6148,6 +6148,20 @@ def api_streams_get():
             win = 60
         # минимальное окно 10 минут
         win = max(10, min(240, win))
+
+        # 1) Приоритет: если для матча уже сохранена трансляция — сразу отдаем её, без привязки ко времени (по запросу пользователя)
+        try:
+            db0: Session = get_db()
+            try:
+                row0 = db0.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None)).first()
+                if not row0 and date_str:
+                    row0 = db0.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away).order_by(MatchStream.updated_at.desc()).first()
+                if row0 and ((row0.vk_video_id and row0.vk_video_id.strip()) or (row0.vk_post_url and row0.vk_post_url.strip())):
+                    return jsonify({'available': True, 'vkVideoId': row0.vk_video_id or '', 'vkPostUrl': row0.vk_post_url or ''})
+            finally:
+                db0.close()
+        except Exception:
+            pass
         # найдём матч и время старта
         start_ts = None
         try:
@@ -6233,6 +6247,7 @@ def api_streams_get():
             tz_min = tz_h * 60
         now = int((time.time() + tz_min*60) * 1000)
         if not start_ts or (start_ts - now) > win*60*1000:
+            # Если старт неизвестен или слишком рано — по умолчанию недоступно (но выше уже пробовали вернуть сохранённую трансляцию)
             return jsonify({'available': False})
         # найдём подтверждение
         db: Session = get_db()

@@ -2152,7 +2152,16 @@ document.addEventListener('DOMContentLoaded', () => {
                             const [oid, vid] = String(info.vkVideoId).split('_');
                             src = `https://vk.com/video_ext.php?oid=${encodeURIComponent(oid||'')}&id=${encodeURIComponent(vid||'')}&hd=2&autoplay=${info.autoplay?1:0}`;
                         } else if (info.vkPostUrl) {
-                            src = info.vkPostUrl;
+                            // Попробуем добыть oid_id из ссылки вида /video-182587651_456242176
+                            try {
+                                const m = String(info.vkPostUrl).match(/\/video(-?\d+_\d+)/);
+                                if (m && m[1]) {
+                                    const [oid, vid] = m[1].split('_');
+                                    src = `https://vk.com/video_ext.php?oid=${encodeURIComponent(oid||'')}&id=${encodeURIComponent(vid||'')}&hd=2&autoplay=${info.autoplay?1:0}`;
+                                } else {
+                                    src = info.vkPostUrl;
+                                }
+                            } catch(_) { src = info.vkPostUrl; }
                         }
                         const ifr = document.createElement('iframe');
                         ifr.src = src;
