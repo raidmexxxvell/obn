@@ -1111,7 +1111,8 @@ document.addEventListener('DOMContentLoaded', () => {
                                             .then(async r => { if (r.status === 304 && cached) return cached; const data = await r.json(); const version = data.version || r.headers.get('ETag') || null; const toStore = { data, version, ts: Date.now() }; try { localStorage.setItem(cacheKey, JSON.stringify(toStore)); } catch(_) {} return toStore; });
                                         const go = (store) => { try { window.openMatchScreen?.({ home: m.home, away: m.away, date: m.date, time: m.time }, store?.data || store); } catch(_) {} };
                                         const FRESH_TTL = 10 * 60 * 1000;
-                                        if (cached && (Date.now() - (cached.ts||0) < FRESH_TTL)) { go(cached); }
+                                        const isEmptyRosters = (()=>{ try { const d=cached?.data; const h=Array.isArray(d?.rosters?.home)?d.rosters.home:[]; const a=Array.isArray(d?.rosters?.away)?d.rosters.away:[]; return h.length===0 && a.length===0; } catch(_) { return false; }})();
+                                        if (cached && !isEmptyRosters && (Date.now() - (cached.ts||0) < FRESH_TTL)) { go(cached); }
                                         else if (cached && cached.version) { fetchWithETag(cached.version).then(go).catch(() => { go(cached); }); }
                                         else if (cached) { go(cached); }
                                         else { fetchWithETag(null).then(go).catch(()=>{}); }
