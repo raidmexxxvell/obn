@@ -61,7 +61,7 @@
       const body = mdPane.querySelector('.modal-body');
       if (body) body.appendChild(pane);
     }
-    // Обнуляем инициализацию при смене матча
+  // Обнуляем инициализацию при смене матча
     const key = makeKey(match);
     if (pane.getAttribute('data-match-key') !== key) {
       pane.__inited = false;
@@ -174,5 +174,20 @@
   }
 
   window.__STREAMS__ = { findStream, registry };
-  window.Streams = { setupMatchStream, onStreamTabActivated };
+  // Сброс состояния при выходе с экрана матча (переход по нижним вкладкам/кнопка Назад)
+  function resetOnLeave(mdPane){
+    try {
+      const pane = document.getElementById('md-pane-stream');
+      if (!pane) return;
+      // Остановить возможный поллинг комментариев
+      try { typeof pane.__stopCommentsPoll === 'function' && pane.__stopCommentsPoll(); } catch(_) {}
+      // Поставить видео на паузу безопасно, затем очистить DOM
+      try { const ifr = pane.querySelector('iframe'); if (ifr) { const src = ifr.src; ifr.src = src; } } catch(_) {}
+      pane.__inited = false;
+      pane.__streamInfo = null;
+      pane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
+    } catch(_) {}
+  }
+
+  window.Streams = { setupMatchStream, onStreamTabActivated, resetOnLeave };
 })();

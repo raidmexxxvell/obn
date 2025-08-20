@@ -629,6 +629,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     const mdPane = document.getElementById('ufo-match-details');
                     const sched = document.getElementById('ufo-schedule');
                     if (mdPane && mdPane.style.display !== 'none') {
+                        // Сбросить состояние трансляции при покидании экрана матча
+                        try { if (window.Streams && typeof window.Streams.resetOnLeave === 'function') window.Streams.resetOnLeave(mdPane); } catch(_) {}
                         mdPane.style.display = 'none';
                         if (sched) sched.style.display = '';
                         const st = document.getElementById('ufo-subtabs'); if (st) st.style.display = '';
@@ -1368,7 +1370,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return map;
             } catch(_) { return {}; }
         };
-        const ensureOverlay = () => {
+    const ensureOverlay = () => {
             let ov = document.getElementById('profile-preview-overlay');
             if (!ov) {
                 ov = document.createElement('div'); ov.id='profile-preview-overlay';
@@ -1376,7 +1378,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const box = document.createElement('div'); box.className='pp-box'; box.style.position='absolute'; box.style.left='50%'; box.style.top='50%'; box.style.transform='translate(-50%,-50%)'; box.style.background='rgba(15,20,35,0.98)'; box.style.border='1px solid rgba(255,255,255,0.08)'; box.style.borderRadius='12px'; box.style.padding='14px'; box.style.width='min(92%, 380px)'; box.style.boxShadow='0 20px 48px rgba(0,0,0,0.45)';
                 const close = document.createElement('button'); close.textContent='✕'; close.style.position='absolute'; close.style.right='8px'; close.style.top='8px'; close.style.background='transparent'; close.style.border='0'; close.style.color='#fff'; close.style.fontSize='16px'; close.style.cursor='pointer';
                 close.addEventListener('click', () => { ov.style.display='none'; });
-                const cnt = document.createElement('div'); cnt.className='pp-content'; cnt.style.display='grid'; cnt.style.gap='10px';
+        const cnt = document.createElement('div'); cnt.className='pp-content'; cnt.style.display='grid'; cnt.style.gap='10px';
                 box.append(close, cnt); ov.appendChild(box); document.body.appendChild(ov);
                 ov.addEventListener('click', (e) => { if (e.target === ov) ov.style.display='none'; });
             }
@@ -1385,9 +1387,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const renderProfileCard = (data, avatarUrl) => {
             const ov = ensureOverlay();
             const cnt = ov.querySelector('.pp-content');
-            cnt.innerHTML='';
-            const row = document.createElement('div'); row.style.display='flex'; row.style.gap='12px'; row.style.alignItems='center';
-            const img = document.createElement('img'); img.src = avatarUrl || '/static/img/achievements/placeholder.png'; img.alt=''; img.style.width='64px'; img.style.height='64px'; img.style.borderRadius='50%'; img.style.objectFit='cover'; img.style.border='1px solid rgba(255,255,255,0.15)';
+        cnt.innerHTML='';
+        const row = document.createElement('div'); row.style.display='flex'; row.style.gap='12px'; row.style.alignItems='center';
+        const img = document.createElement('img'); img.src = avatarUrl || '/static/img/achievements/placeholder.png'; img.alt=''; img.style.width='64px'; img.style.height='64px'; img.style.borderRadius='50%'; img.style.objectFit='cover'; img.style.border='1px solid rgba(255,255,255,0.15)';
             const info = document.createElement('div');
             const name = document.createElement('div'); name.style.fontWeight='800'; name.style.fontSize='16px'; name.textContent = data.display_name || 'Игрок';
             const meta = document.createElement('div'); meta.style.fontSize='12px'; meta.style.color='var(--gray)';
@@ -1396,8 +1398,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (data.xp != null) parts.push(`${data.xp} XP`);
             if (data.consecutive_days != null) parts.push(`Серия ${data.consecutive_days}`);
             meta.textContent = parts.join(' • ');
-            info.append(name, meta); row.append(img, info);
-            cnt.appendChild(row);
+            info.append(name, meta);
+            row.append(img, info);
+        cnt.appendChild(row);
             ov.style.display='';
         };
         etagFetch('/api/leaderboard/prizes', 'lb:prizes')
@@ -2725,12 +2728,7 @@ document.addEventListener('DOMContentLoaded', () => {
             try { if (mdPane.__finishBtnTimer) { clearInterval(mdPane.__finishBtnTimer); mdPane.__finishBtnTimer = null; } } catch(_) {}
             try { if (scorePoll) { clearInterval(scorePoll); scorePoll = null; } } catch(_) {}
             // останов поллинга комментариев, если был
-            try { if (typeof streamPane.__stopCommentsPoll === 'function') streamPane.__stopCommentsPoll(); } catch(_) {}
-            // Поставить видео на паузу (VK iframe не управляем напрямую, делаем reset src)
-            try {
-                const ifr = streamPane.querySelector('iframe');
-                if (ifr) { const src = ifr.src; ifr.src = src; }
-            } catch(_) {}
+            try { if (window.Streams && typeof window.Streams.resetOnLeave === 'function') window.Streams.resetOnLeave(mdPane); } catch(_) {}
             // вернуть расписание
             mdPane.style.display = 'none';
             schedulePane.style.display = '';
