@@ -789,7 +789,6 @@ class MatchStream(Base):
     home = Column(Text, nullable=False)
     away = Column(Text, nullable=False)
     date = Column(String(10), nullable=True)  # YYYY-MM-DD
-    tour = Column(Text, nullable=True)  # Новый столбец для тура (строка для гибкости)
     vk_video_id = Column(Text, nullable=True)
     vk_post_url = Column(Text, nullable=True)
     confirmed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
@@ -6031,7 +6030,7 @@ def api_streams_list():
             rows = db.query(MatchStream).all()
             items = []
             for r in rows:
-                items.append({'home': r.home, 'away': r.away, 'date': r.date or '', 'tour': r.tour or '', 'vkVideoId': r.vk_video_id or '', 'vkPostUrl': r.vk_post_url or ''})
+                items.append({'home': r.home, 'away': r.away, 'date': r.date or '', 'vkVideoId': r.vk_video_id or '', 'vkPostUrl': r.vk_post_url or ''})
             return jsonify({'items': items})
         finally:
             db.close()
@@ -6134,7 +6133,6 @@ def api_streams_set():
         away = (request.form.get('away') or '').strip()
         dt_raw = (request.form.get('datetime') or '').strip()
         vk_raw = (request.form.get('vk') or '').strip()
-        tour = (request.form.get('tour') or '').strip()
         if not home or not away:
             return jsonify({'error': 'home/away обязательны'}), 400
         # Определим дату для ключа
@@ -6192,8 +6190,7 @@ def api_streams_set():
             row = db.query(MatchStream).filter(
                 MatchStream.home == home,
                 MatchStream.away == away,
-                MatchStream.date == (date_str or None),
-                MatchStream.tour == (tour or None)
+                MatchStream.date == (date_str or None)
             ).first()
             if not row and not date_str:
                 # Разрешим перезапись самой свежей записи, даже если она без даты, если совпали команды
@@ -6205,7 +6202,7 @@ def api_streams_set():
             prev_id = None
             prev_url = None
             if not row:
-                row = MatchStream(home=home, away=away, date=(date_str or None), tour=(tour or None))
+                row = MatchStream(home=home, away=away, date=(date_str or None))
                 db.add(row)
             else:
                 try:
@@ -6214,7 +6211,6 @@ def api_streams_set():
                 except Exception:
                     prev_id = None
                     prev_url = None
-            row.tour = tour or None
             row.vk_video_id = vk_id or None
             row.vk_post_url = vk_url or None
             row.confirmed_at = now_ts
@@ -6223,7 +6219,7 @@ def api_streams_set():
             # Логирование факта сохранения для аудита
             try:
                 app.logger.info(
-                    f"streams/set by admin {user_id}: {home} vs {away} ({date_str or '-'}) [tour={tour}] -> "
+                    f"streams/set by admin {user_id}: {home} vs {away} ({date_str or '-'}) -> "
                     f"vkVideoId={row.vk_video_id or ''} vkPostUrl={row.vk_post_url or ''} "
                     f"(prev: id={prev_id or ''} url={prev_url or ''})"
                 )
@@ -6236,7 +6232,6 @@ def api_streams_set():
                 'home': home,
                 'away': away,
                 'date': date_str,
-                'tour': tour,
                 'vkVideoId': row.vk_video_id or '',
                 'vkPostUrl': row.vk_post_url or '',
                 'prev': {'vkVideoId': prev_id or '', 'vkPostUrl': prev_url or ''}
@@ -6255,116 +6250,116 @@ def api_streams_get():
     try:
         if SessionLocal is None:
             return jsonify({'available': False})
-    except Exception:
-        return jsonify({'available': False})
-    home = (request.args.get('home') or '').strip()
-    away = (request.args.get('away') or '').strip()
-    date_str = (request.args.get('date') or '').strip()
-    tour = (request.args.get('tour') or '').strip()
-    try:
-        app.logger.info(f"streams/get req: home='{home}' away='{away}' date='{date_str}'")
-    except Exception:
-        pass
-    try:
-        win = int(request.args.get('window') or '60')
-    except Exception:
-        win = 60
-    # минимальное окно 10 минут
-    win = max(10, min(240, win))
+        home = (request.args.get('home') or '').strip()
+        away = (request.args.get('away') or '').strip()
+        date_str = (request.args.get('date') or '').strip()
+        try:
+            app.logger.info(f"streams/get req: home='{home}' away='{away}' date='{date_str}'")
+        except Exception:
+            pass
+        try:
+            win = int(request.args.get('window') or '60')
+        except Exception:
+            win = 60
+        # минимальное окно 10 минут
+        win = max(10, min(240, win))
 
-    # 1) Приоритет: если для матча уже сохранена трансляция — сразу отдаем её, без привязки ко времени (по запросу пользователя)
-    db0: Session = get_db()
-    try:
-        row0 = None
-        if tour:
-            row0 = db0.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None), MatchStream.tour==tour).first()
-        if not row0:
-            row0 = db0.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None)).first()
-        if not row0 and date_str:
-            row0 = db0.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away).order_by(MatchStream.updated_at.desc()).first()
-        if row0 and ((row0.vk_video_id and row0.vk_video_id.strip()) or (row0.vk_post_url and row0.vk_post_url.strip())):
+        # 1) Приоритет: если для матча уже сохранена трансляция — сразу отдаем её, без привязки ко времени (по запросу пользователя)
+        try:
+            db0: Session = get_db()
             try:
-                app.logger.info("streams/get hit: immediate saved link")
-            except Exception:
-                pass
-            return jsonify({'available': True, 'vkVideoId': row0.vk_video_id or '', 'vkPostUrl': row0.vk_post_url or ''})
-        # Туровой фолбэк: если для текущей пары нет прямой записи, но есть ссылка в этом же туре — отдадим её
-        # Для этого чуть ниже определим тур; здесь просто продолжим
-    finally:
-        db0.close()
-    
-    # найдём матч и время старта, а также сам тур для турового фолбэка
-    try:
+                row0 = db0.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None)).first()
+                if not row0 and date_str:
+                    row0 = db0.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away).order_by(MatchStream.updated_at.desc()).first()
+                if row0 and ((row0.vk_video_id and row0.vk_video_id.strip()) or (row0.vk_post_url and row0.vk_post_url.strip())):
+                    try:
+                        app.logger.info("streams/get hit: immediate saved link")
+                    except Exception:
+                        pass
+                    return jsonify({'available': True, 'vkVideoId': row0.vk_video_id or '', 'vkPostUrl': row0.vk_post_url or ''})
+                # Туровой фолбэк: если для текущей пары нет прямой записи, но есть ссылка в этом же туре — отдадим её
+                # Для этого чуть ниже определим тур; здесь просто продолжим
+            finally:
+                db0.close()
+        except Exception:
+            pass
+        # найдём матч и время старта, а также сам тур для турового фолбэка
         start_ts = None
         matched_tour = None
-        tours = []
-        if SessionLocal is not None:
-            dbx = get_db()
+        try:
+            tours = []
+            if SessionLocal is not None:
+                dbx = get_db()
+                try:
+                    snap = _snapshot_get(dbx, 'schedule')
+                    payload = snap and snap.get('payload')
+                    tours = payload and payload.get('tours') or []
+                finally:
+                    dbx.close()
+            if not tours:
+                tours = _load_all_tours_from_sheet()
+            for t in tours:
+                for m in t.get('matches', []):
+                    if (m.get('home') == home and m.get('away') == away):
+                        # С датой в запросе — сопоставляем по datetime или по date, и вычисляем старт
+                        if date_str:
+                            try:
+                                if m.get('datetime') and str(m['datetime']).startswith(date_str):
+                                    start_ts = int(datetime.fromisoformat(m['datetime']).timestamp() * 1000)
+                                    matched_tour = t
+                                    raise StopIteration
+                                if m.get('date') and str(m['date']).startswith(date_str):
+                                    # Построим dt из date+time
+                                    d = datetime.fromisoformat(str(m['date'])).date()
+                                    try:
+                                        tm = datetime.strptime((m.get('time') or '00:00'), "%H:%M").time()
+                                    except Exception:
+                                        tm = datetime.min.time()
+                                    dt = datetime.combine(d, tm)
+                                    start_ts = int(dt.timestamp() * 1000)
+                                    matched_tour = t
+                                    raise StopIteration
+                            except Exception:
+                                pass
+                        else:
+                            # Без даты в запросе — берём datetime, если есть; иначе date+time
+                            try:
+                                if m.get('datetime'):
+                                    start_ts = int(datetime.fromisoformat(m['datetime']).timestamp() * 1000)
+                                    matched_tour = t
+                                elif m.get('date'):
+                                    d = datetime.fromisoformat(str(m['date'])).date()
+                                    try:
+                                        tm = datetime.strptime((m.get('time') or '00:00'), "%H:%M").time()
+                                    except Exception:
+                                        tm = datetime.min.time()
+                                    start_ts = int(datetime.combine(d, tm).timestamp() * 1000)
+                                    matched_tour = t
+                                raise StopIteration
+                            except Exception:
+                                start_ts = None
+                                raise StopIteration
+        except StopIteration:
+            pass
+        # Если по указанной дате не нашли старт — попробуем вычислить его без учёта даты
+        if start_ts is None and date_str:
             try:
-                snap = _snapshot_get(dbx, 'schedule')
-                payload = snap and snap.get('payload')
-                tours = payload and payload.get('tours') or []
-            finally:
-                dbx.close()
-        if not tours:
-            tours = _load_all_tours_from_sheet()
-        for t in tours:
-            for m in t.get('matches', []):
-                if (m.get('home') == home and m.get('away') == away):
-                    # С датой в запросе — сопоставляем по datetime или по date, и вычисляем старт
-                    if date_str:
-                        try:
-                            if m.get('datetime') and str(m['datetime']).startswith(date_str):
-                                start_ts = int(datetime.fromisoformat(m['datetime']).timestamp() * 1000)
-                                matched_tour = t
-                                raise StopIteration
-                            if m.get('date') and str(m['date']).startswith(date_str):
-                                # Построим dt из date+time
-                                d = datetime.fromisoformat(str(m['date'])).date()
-                                try:
-                                    tm = datetime.strptime((m.get('time') or '00:00'), "%H:%M").time()
-                                except Exception:
-                                    tm = datetime.min.time()
-                                dt = datetime.combine(d, tm)
-                                start_ts = int(dt.timestamp() * 1000)
-                                matched_tour = t
-                                raise StopIteration
-                        except Exception:
-                            pass
-                    else:
-                        # Без даты в запросе — берём datetime, если есть; иначе date+time
-                        try:
+                for t in tours or []:
+                    for m in (t.get('matches') or []):
+                        if (m.get('home') == home and m.get('away') == away):
                             if m.get('datetime'):
                                 start_ts = int(datetime.fromisoformat(m['datetime']).timestamp() * 1000)
-                                matched_tour = t
-                            elif m.get('date'):
+                                raise StopIteration
+                            if m.get('date'):
                                 d = datetime.fromisoformat(str(m['date'])).date()
                                 try:
                                     tm = datetime.strptime((m.get('time') or '00:00'), "%H:%M").time()
                                 except Exception:
                                     tm = datetime.min.time()
                                 start_ts = int(datetime.combine(d, tm).timestamp() * 1000)
-                                matched_tour = t
-                            raise StopIteration
-                        except Exception:
-                            start_ts = None
-                            raise StopIteration
-        # Если по указанной дате не нашли старт — попробуем вычислить его без учёта даты
-        if start_ts is None and date_str:
-            for t in tours or []:
-                for m in (t.get('matches') or []):
-                    if (m.get('home') == home and m.get('away') == away):
-                        if m.get('datetime'):
-                            start_ts = int(datetime.fromisoformat(m['datetime']).timestamp() * 1000)
-                            break
-                        if m.get('date'):
-                            d = datetime.fromisoformat(str(m['date'])).date()
-                            try:
-                                tm = datetime.strptime((m.get('time') or '00:00'), "%H:%M").time()
-                            except Exception:
-                                tm = datetime.min.time()
-                            start_ts = int(datetime.combine(d, tm).timestamp() * 1000)
-                            break
+                                raise StopIteration
+            except StopIteration:
+                pass
         # Сдвигаем текущее время по настройке SCHEDULE_TZ_SHIFT_*
         try:
             tz_min = int(os.environ.get('SCHEDULE_TZ_SHIFT_MIN') or '0')
@@ -6414,18 +6409,13 @@ def api_streams_reset():
         home = (request.form.get('home') or '').strip()
         away = (request.form.get('away') or '').strip()
         date_str = (request.form.get('date') or '').strip()
-        tour = (request.form.get('tour') or '').strip()
         if not home or not away:
             return jsonify({'error': 'home/away обязательны'}), 400
         if SessionLocal is None:
             return jsonify({'error': 'БД недоступна'}), 500
         db: Session = get_db()
         try:
-            row = None
-            if tour:
-                row = db.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None), MatchStream.tour==tour).first()
-            if not row:
-                row = db.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None)).first()
+            row = db.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None)).first()
             if not row and date_str:
                 # поддержка старых записей без даты
                 row = db.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away).order_by(MatchStream.updated_at.desc()).first()

@@ -6,8 +6,6 @@
 
 (function(){
   const DBG = true; // включено подробное логирование потоков
-  // Ограничение: показывать трансляции только для «текущего тура» (первый в /api/schedule)
-  const LIMIT_TO_CURRENT_TOUR = false;
   // Хранилище соответствий: ключ → объект трансляции (локальный fallback)
   const registry = {
     // 'дождь__звезда__2025-08-16': { vkVideoId: '123456789_987654321', autoplay: 0 },
@@ -21,38 +19,12 @@
       const raw = match?.date ? String(match.date) : (match?.datetime ? String(match.datetime) : '');
       d = raw ? raw.slice(0,10) : '';
     }catch(_){ d=''; }
-    let t = '';
-    t = (match?.tour !== undefined && match?.tour !== null) ? String(match.tour).trim() : '';
-    // Если нет тура, сохраняем обратную совместимость (старый ключ)
-    return t ? `${h}__${a}__${d}__${t}` : `${h}__${a}__${d}`;
+    return `${h}__${a}__${d}`;
   }
   function findStream(match){
   const keyExact = makeKey(match);
   if (DBG) console.debug('[streams] findStream', { keyExact });
-    return registry[keyExact] || registry[makeKey({...match, tour: undefined})] || null;
-  }
-
-  // Проверяем, относится ли матч к «текущему туру» по локальному кэшу расписания
-  function isInCurrentTour(match){
-    if (!LIMIT_TO_CURRENT_TOUR) return true;
-    try {
-      const raw = localStorage.getItem('schedule:tours');
-      if (!raw) return true; // если расписание ещё не загружено — не блокируем
-      const store = JSON.parse(raw);
-      const ds = store?.data && (store.data.tours ? store.data : store.data.data) || store;
-      const tours = Array.isArray(ds?.tours) ? ds.tours : [];
-      if (!tours.length) return true;
-      const current = tours[0];
-      const keys = new Set();
-      (current.matches || []).forEach(m => {
-        const k = makeKey({ home: m.home, away: m.away, date: (m.date || m.datetime || '').toString().slice(0,10) });
-        keys.add(k);
-      });
-      const myKey = makeKey(match);
-      const ok = keys.has(myKey);
-      if (DBG) console.debug('[streams] isInCurrentTour', { myKey, ok });
-      return ok;
-    } catch(_) { return true; }
+  return registry[keyExact] || null;
   }
 
   function vUrl(u){
@@ -104,25 +76,13 @@
 
     // Обнуляем инициализацию при смене матча
     const key = makeKey(match);
-    const currentKey = pane.getAttribute('data-match-key');
-    if (currentKey !== key) {
-      if (DBG) console.debug('[streams] ensurePane: key change -> reset pane', { from: currentKey, to: key });
-      // Принудительно очищаем iframe для нового матча
-      try { 
-        const ifr = pane.querySelector('iframe'); 
-        if (ifr) { 
-          ifr.src = 'about:blank'; 
-          // Небольшая задержка для полной очистки
-          setTimeout(() => ifr.remove(), 100);
-        } 
-      } catch(_) {}
+    if (pane.getAttribute('data-match-key') !== key) {
+      if (DBG) console.debug('[streams] ensurePane: key change -> reset pane', { from: pane.getAttribute('data-match-key'), to: key });
       pane.__inited = false;
       pane.__streamInfo = null;
       pane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
       pane.setAttribute('data-match-key', key);
-  // По умолчанию панель должна быть скрыта и показываться только при активации вкладки «Трансляция»
-  // Ранее здесь выставлялось display: '' что приводило к появлению плеера под составами.
-  pane.style.display = 'none';
+      pane.style.display = '';
     }
     return pane;
   }
@@ -141,37 +101,15 @@
   function buildStreamInto(pane, info, match){
     if (!info || pane.__inited) return !!pane.__inited;
   if (DBG) console.debug('[streams] buildStreamInto', { key: pane.getAttribute('data-match-key'), info: { hasVideoId: !!info.vkVideoId, hasPostUrl: !!info.vkPostUrl } });
-  
-    // Создаем уникальные элементы для каждого построения
-    const host = document.createElement('div'); 
-    host.className = 'stream-wrap';
-    const ratio = document.createElement('div'); 
-    ratio.className = 'stream-aspect';
+  const host = document.createElement('div'); host.className = 'stream-wrap';
+    const ratio = document.createElement('div'); ratio.className = 'stream-aspect';
     const ifr = document.createElement('iframe');
-    
-    // Добавляем timestamp для избежания кеширования
-    const timestamp = Date.now();
-    let src = buildIframeSrc(info);
-    if (src) {
-      src += (src.includes('?') ? '&' : '?') + '_t=' + timestamp;
-    }
-    
     // используем vUrl для перебивки кэша версии приложения (если применимо)
-    ifr.src = vUrl(src);
+    ifr.src = vUrl(buildIframeSrc(info));
     ifr.setAttribute('allowfullscreen','true');
     ifr.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture; screen-wake-lock;';
     ifr.referrerPolicy = 'strict-origin-when-cross-origin';
-    
-    // Добавляем обработчик загрузки iframe для отладки
-    ifr.onload = () => {
-      if (DBG) console.debug('[streams] iframe loaded successfully', { src: ifr.src });
-    };
-    ifr.onerror = () => {
-      if (DBG) console.debug('[streams] iframe load error', { src: ifr.src });
-    };
-    
-    ratio.appendChild(ifr); 
-    host.appendChild(ratio);
+    ratio.appendChild(ifr); host.appendChild(ratio);
   pane.innerHTML='';
   pane.appendChild(host);
     pane.__inited = true;
@@ -190,10 +128,7 @@
         } catch(_) {}
       }
   if (DBG) console.debug('[streams] fetchServerStream: request', { home: match?.home, away: match?.away, dateStr });
-        let url = `/api/streams/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}&date=${encodeURIComponent(dateStr)}`;
-        if (match.tour !== undefined && match.tour !== null) {
-          url += `&tour=${encodeURIComponent(match.tour)}`;
-        }
+  const url = `/api/streams/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}&date=${encodeURIComponent(dateStr)}`;
       const r = await fetch(url, { cache: 'no-store' });
       const ans = await r.json();
       if (DBG) console.debug('[streams] fetchServerStream: response', ans);
@@ -204,8 +139,6 @@
 
   function setupMatchStream(mdPane, subtabs, match){
     if (DBG) console.debug('[streams] setupMatchStream: enter', { key: makeKey(match), match });
-  // Ограничиваем показ трансляций текущим туром (если включено и есть данные расписания)
-  if (!isInCurrentTour(match)) { if (DBG) console.debug('[streams] setupMatchStream: not in current tour -> skip'); return null; }
     // Fallback сначала из локального реестра, затем запрос на сервер
     let streamInfo = findStream(match);
     if (streamInfo) {
@@ -248,12 +181,6 @@
     if (DBG) console.debug('[streams] onStreamTabActivated: click', { paneKey: pane.getAttribute('data-match-key'), matchKey: makeKey(match) });
     // Безопасность: проверяем, что pane относится к текущему матчу
     const key = makeKey(match);
-    if (!isInCurrentTour(match)) {
-      // Поясним пользователю и не строим iframe
-      const sk = pane.querySelector('.stream-skeleton');
-      if (sk) sk.textContent = 'Трансляция доступна только для текущего тура';
-      return;
-    }
     if (pane.getAttribute('data-match-key') !== key) {
       if (DBG) console.debug('[streams] onStreamTabActivated: mismatch -> reset');
       pane.__inited = false;
@@ -301,7 +228,7 @@
       // Остановить возможный поллинг комментариев
       try { typeof pane.__stopCommentsPoll === 'function' && pane.__stopCommentsPoll(); } catch(_) {}
       // Поставить видео на паузу / полностью сбросить src iframe
-      try { const ifr = pane.querySelector('iframe'); if (ifr) { try { ifr.src = 'about:blank'; } catch(_) { /* noop */ } } } catch(_) {}
+      try { const ifr = pane.querySelector('iframe'); if (ifr) { try { ifr.src = ''; } catch(_) { /* noop */ } } } catch(_) {}
   // Инвалидируем любые ожидающие ответы
   try { mdPane.__streamSetupSeq = (mdPane.__streamSetupSeq || 0) + 1; } catch(_) {}
   try { pane.__streamTabSeq = (pane.__streamTabSeq || 0) + 1; } catch(_) {}
@@ -309,11 +236,12 @@
       pane.__streamInfo = null;
       pane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
 
-      // Убираем ключ, но НЕ удаляем панель из DOM - оставляем её для повторного использования
+      // Убираем ключ и отсоединяем панель от старого модала, чтобы при следующем открытии
+      // ensurePane корректно поместит её в новый mdPane
       try {
         pane.removeAttribute('data-match-key');
-        pane.style.display = 'none';
-        if (DBG) console.debug('[streams] resetOnLeave: reset pane state but kept in DOM');
+        if (pane.parentNode) pane.parentNode.removeChild(pane);
+        if (DBG) console.debug('[streams] resetOnLeave: detached pane from old mdPane');
       } catch(_) {}
     } catch(_) {}
   }
