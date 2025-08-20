@@ -271,18 +271,9 @@ body {
     object-fit: cover;
 }
 
-.profile-info {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.profile-info h2 {
-    font-size: 24px;
-    margin-bottom: 0;
-    margin-right: 4px;
-}
-
+.profile-info { display: flex; flex-direction: column; gap: 6px; }
+.profile-info .name-row { display: flex; align-items: center; gap: 6px; }
+.profile-info h2 { font-size: 22px; margin: 0; }
 .edit-name {
     cursor: pointer;
     opacity: 0.7;
@@ -307,8 +298,13 @@ body {
     color: var(--light);
     border: 1px solid rgba(255,255,255,0.12);
     border-radius: 10px;
-    padding: 6px 10px;
-    font-size: 13px;
+    padding: 8px 30px 8px 10px;
+    font-size: 14px;
+    background-image: linear-gradient(45deg, transparent 50%, rgba(255,255,255,0.8) 50%),
+                      linear-gradient(135deg, rgba(255,255,255,0.8) 50%, transparent 50%);
+    background-position: right 12px top 50%, right 6px top 50%;
+    background-size: 8px 8px, 8px 8px;
+    background-repeat: no-repeat;
 }
 #favorite-team:focus { outline: none; border-color: rgba(255,255,255,0.28); box-shadow: 0 0 0 2px rgba(255,255,255,0.12) inset; }
 /* Цвет для открытого списка в поддерживаемых браузерах */

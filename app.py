@@ -5339,12 +5339,35 @@ def api_match_details():
         def norm(s: str) -> str:
             """Нормализует название команды:
             - нижний регистр, замена ё->е
+            - приведение латинских «похожих» букв к кириллице, если строка кириллическая (боремся с Звeзда и т.п.)
             - удаление не буквенно-цифровых
             - удаление префикса 'фк' / 'fc'
             """
             s = (s or '').lower().strip()
             s = s.replace('\u00A0', ' ').replace('ё', 'е')
-            # уберём 'фк'/'fc' в начале (с учётом возможного пробела)
+            # Если строка содержит кириллицу, заменим похожие латинские символы на кириллицу
+            try:
+                has_cyr = any('а' <= ch <= 'я' or ch in ('ё') for ch in s)
+            except Exception:
+                has_cyr = False
+            if has_cyr:
+                # наиболее частые пары латиница -> кириллица
+                trans_map = str.maketrans({
+                    'a': 'а',  # a -> а
+                    'e': 'е',  # e -> е
+                    'o': 'о',  # o -> о
+                    'c': 'с',  # c -> с
+                    'p': 'р',  # p -> р
+                    'x': 'х',  # x -> х
+                    'y': 'у',  # y -> у
+                    'k': 'к',  # k -> к
+                    'b': 'в',  # b -> в
+                    'm': 'м',  # m -> м
+                    't': 'т',  # t -> т
+                    'h': 'н',  # h -> н
+                })
+                s = s.translate(trans_map)
+            # уберём пробелы и префикс 'фк'/'fc' в начале
             s0 = s.replace(' ', '')
             if s0.startswith('фк'):
                 s = s0[2:]
@@ -5394,6 +5417,13 @@ def api_match_details():
             bk = base_key(key)
             if bk and bk not in idx_map:
                 idx_map[bk] = i
+            # убираем любые круглые скобки и содержимое как дополнительный алиас: "дождь (ю-1)" -> "дождь"
+            try:
+                simple = key.split('(')[0].strip()
+                if simple and simple not in idx_map:
+                    idx_map[simple] = i
+            except Exception:
+                pass
 
         def extract(team_name: str):
             key = norm(team_name)
@@ -5418,6 +5448,13 @@ def api_match_details():
 
         home_data = extract(home)
         away_data = extract(away)
+        # Если обе пустые, попробуем ещё раз с перестановкой (редкий кейс кросс-алиасов)
+        if not home_data['players'] and not away_data['players']:
+            alt_home = extract(away)
+            alt_away = extract(home)
+            # Если после перестановки появились игроки, используем их
+            if alt_home['players'] or alt_away['players']:
+                home_data, away_data = alt_home, alt_away
 
         # Версионируем содержимое через хеш, чтобы поддержать ETag/кэш
         import hashlib, json as _json
