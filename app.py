@@ -2978,7 +2978,25 @@ def _build_betting_tours_payload():
                     try:
                         row = db.query(MatchFlags).filter(MatchFlags.home==m.get('home',''), MatchFlags.away==m.get('away','')).first()
                         if row and row.status in ('live','finished'):
-                            lock = True
+                            # Учитываем статус только относительно даты/времени именно этого матча,
+                            # чтобы не закрывать будущие реванши из-за прошлого статуса тех же команд.
+                            match_dt = None
+                            try:
+                                if m.get('datetime'):
+                                    match_dt = datetime.fromisoformat(m['datetime'])
+                                elif m.get('date'):
+                                    dd = datetime.fromisoformat(m['date']).date()
+                                    tm = datetime.strptime((m.get('time') or '00:00') or '00:00', '%H:%M').time()
+                                    match_dt = datetime.combine(dd, tm)
+                            except Exception:
+                                match_dt = None
+                            if match_dt is not None:
+                                if row.status == 'live':
+                                    if match_dt - timedelta(minutes=10) <= now_local < match_dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
+                                        lock = True
+                                elif row.status == 'finished':
+                                    if now_local >= match_dt + timedelta(minutes=BET_MATCH_DURATION_MINUTES):
+                                        lock = True
                     finally:
                         db.close()
                 m['lock'] = bool(lock)
@@ -5319,10 +5337,30 @@ def api_match_details():
             return jsonify({'error': 'home и away обязательны'}), 400
 
         def norm(s: str) -> str:
+            """Нормализует название команды:
+            - нижний регистр, замена ё->е
+            - удаление не буквенно-цифровых
+            - удаление префикса 'фк' / 'fc'
+            """
             s = (s or '').lower().strip()
             s = s.replace('\u00A0', ' ').replace('ё', 'е')
-            s = s.replace('фк', '', 1).strip() if s.startswith('фк') else s  # убираем префикс ФК
+            # уберём 'фк'/'fc' в начале (с учётом возможного пробела)
+            s0 = s.replace(' ', '')
+            if s0.startswith('фк'):
+                s = s0[2:]
+            elif s0.startswith('fc'):
+                s = s0[2:]
+            else:
+                s = s0
             return ''.join(ch for ch in s if ch.isalnum())
+
+        def base_key(k: str) -> str:
+            """Базовая форма: без хвостовых цифр (Ювелиры2 -> Ювелиры)."""
+            k = k or ''
+            i = len(k)
+            while i > 0 and k[i-1].isdigit():
+                i -= 1
+            return k[:i]
 
         # Ключ кеша по нормализованным названиям
         home_key = norm(home)
@@ -5349,18 +5387,25 @@ def api_match_details():
         idx_map = {}
         for i, h in enumerate(headers, start=1):
             key = norm(h)
-            if key:
-                idx_map[key] = i
+            if not key:
+                continue
+            idx_map[key] = i
+            # алиас по базовой форме (без хвостовых цифр), чтобы "ювелиры (2)" сопоставлялись с "ювелиры"
+            bk = base_key(key)
+            if bk and bk not in idx_map:
+                idx_map[bk] = i
 
         def extract(team_name: str):
             key = norm(team_name)
             col_idx = idx_map.get(key)
-            # если не нашли — попробуем без лишних слов (например, второе слово и т.п.)
             if col_idx is None:
-                # простая эвристика: оставим только буквенно-цифровые, без пробелов уже сделано
-                # попробуем найти подстрочной похожестью среди ключей
+                # попробуем базовую форму без цифр в хвосте (например, Ювелиры2 -> Ювелиры)
+                bk = base_key(key)
+                col_idx = idx_map.get(bk)
+            if col_idx is None:
+                # подстрочное совпадение среди известных ключей (и их базовых форм)
                 for k, i in idx_map.items():
-                    if key in k or k in key:
+                    if key and (key in k or k in key):
                         col_idx = i
                         break
             if col_idx is None:
