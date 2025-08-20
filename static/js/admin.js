@@ -10,7 +10,7 @@
     const lblSync = document.getElementById('admin-sync-summary');
     try {
       const tabs = document.querySelectorAll('#admin-subtabs .subtab-item');
-      const panes = { service: document.getElementById('admin-pane-service'), orders: document.getElementById('admin-pane-orders'), streams: document.getElementById('admin-pane-streams') };
+      const panes = { service: document.getElementById('admin-pane-service'), stats: document.getElementById('admin-pane-stats'), orders: document.getElementById('admin-pane-orders'), streams: document.getElementById('admin-pane-streams') };
       tabs.forEach(btn => {
         btn.setAttribute('data-throttle', '600');
         btn.addEventListener('click', () => {
@@ -21,6 +21,7 @@
           if (panes[key]) panes[key].style.display = '';
           if (key === 'orders') renderAdminOrders();
           if (key === 'streams') initAdminStreams();
+          if (key === 'stats') renderAdminStats();
         });
       });
     } catch(_) {}
@@ -34,16 +35,7 @@
         fetch('/api/results/refresh', { method: 'POST', body: fd })
       ]).finally(() => { btnAll.disabled = false; btnAll.textContent = orig; });
     });
-    if (btnUsers && lblUsers) btnUsers.addEventListener('click', () => {
-      const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
-      btnUsers.disabled = true; const o = btnUsers.textContent; btnUsers.textContent = '...';
-      fetch('/api/admin/users-stats', { method: 'POST', body: fd })
-        .then(r => r.json()).then(d => {
-          const s = `Всего: ${d.total_users||0} • Онлайн: ${d.online_5m||0} (5м) / ${d.online_15m||0} (15м) • Активные: ${d.active_1d||0} (1д) / ${d.active_7d||0} (7д) / ${d.active_30d||0} (30д) • Новые за 30д: ${d.new_30d||0}`;
-          lblUsers.textContent = s;
-        })
-        .finally(()=>{ btnUsers.disabled=false; btnUsers.textContent=o; });
-    });
+  if (btnUsers && lblUsers) btnUsers.addEventListener('click', renderAdminStats);
     if (btnSync && lblSync) btnSync.addEventListener('click', () => {
       btnSync.disabled = true; const o = btnSync.textContent; btnSync.textContent='...';
       fetch('/health/sync').then(r=>r.json()).then(m => {
@@ -228,5 +220,41 @@
       refreshBtn.onclick = initAdminStreams; winInput.onchange = initAdminStreams; winInput.onkeyup = (e)=>{ if(e.key==='Enter'){ initAdminStreams(); } };
     } catch (e) { console.error('admin streams load', e); msg.textContent = 'Ошибка загрузки'; }
   }
-  window.Admin = { ensureAdminInit, renderAdminOrders, initAdminStreams };
+  async function renderAdminStats() {
+    const table = document.getElementById('admin-stats-table');
+    const updated = document.getElementById('admin-stats-updated');
+    const btn = document.getElementById('admin-stats-refresh');
+    const lblUsers = document.getElementById('admin-users-stats');
+    if (!table) return;
+    const tbody = table.querySelector('tbody');
+    try {
+      if (btn) { btn.disabled = true; btn.textContent = '...'; }
+      const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
+      const r = await fetch('/api/admin/users-stats', { method: 'POST', body: fd });
+      const d = await r.json();
+      tbody.innerHTML = '';
+      const rows = [
+        ['Всего пользователей', d.total_users||0],
+        ['Онлайн (5 мин)', d.online_5m||0],
+        ['Онлайн (15 мин)', d.online_15m||0],
+        ['Активные (1 день)', d.active_1d||0],
+        ['Активные (7 дней)', d.active_7d||0],
+        ['Активные (30 дней)', d.active_30d||0],
+        ['Новые за 30 дней', d.new_30d||0]
+      ];
+      rows.forEach(([k,v]) => {
+        const tr = document.createElement('tr');
+        const tdK = document.createElement('td'); tdK.textContent = k;
+        const tdV = document.createElement('td'); tdV.textContent = String(v);
+        tr.append(tdK, tdV); tbody.appendChild(tr);
+      });
+      if (updated) { try { updated.textContent = `Обновлено: ${new Date().toLocaleString()}`; } catch(_) {} }
+      if (lblUsers) lblUsers.textContent = `Всего: ${d.total_users||0} • Онлайн: ${d.online_5m||0}/${d.online_15m||0} • Активные: ${d.active_1d||0}/${d.active_7d||0}/${d.active_30d||0} • Новые: ${d.new_30d||0}`;
+    } catch(_) {
+      // ignore
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Обновить'; }
+    }
+  }
+  window.Admin = { ensureAdminInit, renderAdminOrders, initAdminStreams, renderAdminStats };
 })();

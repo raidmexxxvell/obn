@@ -363,6 +363,7 @@
         <div class="predictions-wrap">
             <div class="subtabs" id="admin-subtabs">
                 <div class="subtab-item active" data-atab="service">Сервис</div>
+                <div class="subtab-item" data-atab="stats">Статистика</div>
                 <div class="subtab-item" data-atab="orders">Заказы</div>
                 <div class="subtab-item" data-atab="streams">Трансляции</div>
             </div>
@@ -374,11 +375,6 @@
                         <button class="details-btn" id="admin-refresh-all">Обновить</button>
                     </div>
                     <div class="store-item">
-                        <div class="store-name">Статистика онлайн</div>
-                        <div class="store-price" id="admin-users-stats">—</div>
-                        <button class="details-btn" id="admin-users-refresh">Обновить</button>
-                    </div>
-                    <div class="store-item">
                         <div class="store-name">Обновить все данные (сброс кэша клиентов)</div>
                         <div class="store-price">Инкремент версии ассетов и принудительная перезагрузка у пользователей</div>
                         <button class="details-btn" id="admin-bump-version">Применить</button>
@@ -388,6 +384,25 @@
                         <div class="store-price" id="admin-sync-summary">—</div>
                         <button class="details-btn" id="admin-sync-refresh">Показать</button>
                     </div>
+                </div>
+            </div>
+            <div id="admin-pane-stats" class="pred-pane" style="display:none;">
+                <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap;">
+                    <button class="details-btn" id="admin-stats-refresh">Обновить</button>
+                    <div class="table-updated" id="admin-stats-updated"></div>
+                </div>
+                <div class="league-table-wrap">
+                    <table class="league-table" id="admin-stats-table">
+                        <thead>
+                            <tr>
+                                <th>Метрика</th>
+                                <th>Значение</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- строки будут заполнены из JS -->
+                        </tbody>
+                    </table>
                 </div>
             </div>
             <div id="admin-pane-orders" class="pred-pane" style="display:none;">

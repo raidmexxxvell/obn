@@ -367,23 +367,59 @@ document.addEventListener('DOMContentLoaded', () => {
                 const tgt = a.target;
                 switch (a.group) {
                     case 'streak':
-                        return `Ежедневные чекины подряд. Цель: ${tgt} дней.`;
+                        {
+                            const all = Array.isArray(a.all_targets) ? a.all_targets : [7,30,120];
+                            const base = `Ежедневные чекины подряд. Цель: ${tgt} дней.`;
+                            return `${base} Цели: ${all.join(' / ')}.`;
+                        }
                     case 'credits':
-                        return `Накопите кредиты до порога: ${(tgt||0).toLocaleString()} кр.`;
+                        {
+                            const all = Array.isArray(a.all_targets) ? a.all_targets : null;
+                            const base = `Накопите кредиты до порога: ${(tgt||0).toLocaleString()} кр.`;
+                            return all && all.length>1 ? `${base} Цели: ${all.join(' / ')}.` : base;
+                        }
                     case 'level':
-                        return `Достигните уровень: ${tgt}. Получайте опыт за активность.`;
+                        {
+                            const all = Array.isArray(a.all_targets) ? a.all_targets : null;
+                            const base = `Достигните уровень: ${tgt}. Получайте опыт за активность.`;
+                            return all && all.length>1 ? `${base} Цели: ${all.join(' / ')}.` : base;
+                        }
                     case 'invited':
-                        return `Пригласите друзей по реферальной ссылке: ${tgt} человек.`;
+                        {
+                            const all = Array.isArray(a.all_targets) ? a.all_targets : null;
+                            const base = `Пригласите друзей по реферальной ссылке: ${tgt} человек.`;
+                            return all && all.length>1 ? `${base} Цели: ${all.join(' / ')}.` : base;
+                        }
                     case 'betcount':
-                        return `Сделайте ${tgt} ставок.`;
+                        {
+                            const all = Array.isArray(a.all_targets) ? a.all_targets : null;
+                            const base = `Сделайте ${tgt} ставок.`;
+                            return all && all.length>1 ? `${base} Цели: ${all.join(' / ')}.` : base;
+                        }
                     case 'betwins':
-                        return `Выиграйте ${tgt} ставок.`;
+                        {
+                            const all = Array.isArray(a.all_targets) ? a.all_targets : null;
+                            const base = `Выиграйте ${tgt} ставок.`;
+                            return all && all.length>1 ? `${base} Цели: ${all.join(' / ')}.` : base;
+                        }
                     case 'bigodds':
-                        return `Выиграйте ставку с коэффициентом не ниже ${Number(tgt).toFixed(1)}.`;
+                        {
+                            const all = Array.isArray(a.all_targets) ? a.all_targets : null;
+                            const base = `Выиграйте ставку с коэффициентом не ниже ${Number(tgt).toFixed(1)}.`;
+                            return all && all.length>1 ? `${base} Цели: ${all.join(' / ')}.` : base;
+                        }
                     case 'markets':
-                        return `Ставьте на разные рынки (1X2, тоталы, спецсобытия и т.д.). Цель: ${tgt} типа рынков.`;
+                        {
+                            const all = Array.isArray(a.all_targets) ? a.all_targets : null;
+                            const base = `Ставьте на разные рынки (1X2, тоталы, спецсобытия и т.д.). Цель: ${tgt} типа рынков.`;
+                            return all && all.length>1 ? `${base} Цели: ${all.join(' / ')}.` : base;
+                        }
                     case 'weeks':
-                        return `Делайте ставки в разные недели. Цель: ${tgt} недель.`;
+                        {
+                            const all = Array.isArray(a.all_targets) ? a.all_targets : null;
+                            const base = `Делайте ставки в разные недели. Цель: ${tgt} недель.`;
+                            return all && all.length>1 ? `${base} Цели: ${all.join(' / ')}.` : base;
+                        }
                     default:
                         return '';
                 }
@@ -412,9 +448,21 @@ document.addEventListener('DOMContentLoaded', () => {
             const name = document.createElement('div'); name.className='badge-name'; name.textContent = a.name;
             // Описание (скрыто по умолчанию) + кнопка «Описание»
             const req = document.createElement('div'); req.className='badge-requirements hidden';
-            // Короткая сводка прогресса
+            // Короткая сводка прогресса: показываем оставшееся до следующей цели, если текущая достигнута
             const progressLine = (() => {
-                const v = a.value ?? 0; const t = a.target ?? 0;
+                const vRaw = a.value ?? 0; const tRaw = a.target ?? 0;
+                const v = Number(vRaw) || 0; const t = Number(tRaw) || 0;
+                const tier = Number.isFinite(a.tier) ? Number(a.tier) : (a.unlocked ? 1 : 0);
+                const nt = (typeof a.next_target !== 'undefined' && a.next_target !== null) ? Number(a.next_target) : null;
+                const hasNext = nt !== null && Number.isFinite(nt) && nt > t;
+                const maxed = (!hasNext && v >= t) || (tier >= 3);
+                if (maxed) {
+                    return 'Все цели достигнуты';
+                }
+                if (hasNext && v >= t) {
+                    const remain = Math.max(0, nt - v);
+                    return `До следующей цели ${nt}: осталось ${remain}`;
+                }
                 if (a.group === 'bigodds') {
                     return `${a.unlocked ? 'Открыто' : 'Прогресс'}: ${Number(v||0).toFixed(2)} / ${Number(t||0).toFixed(1)}`;
                 }
@@ -434,10 +482,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const progressBar = document.createElement('div');
             progressBar.className = 'achv-progress';
             // Показываем прогресс к следующему тиру (если доступен) на основании next_target с бэкенда.
-            const val = a.value || 0;
-            const curTarget = a.target || 1;
-            const tier = a.tier || (a.unlocked ? 1 : 0);
-            const nextTarget = (typeof a.next_target !== 'undefined' && a.next_target !== null) ? a.next_target : curTarget;
+            const val = Number(a.value || 0);
+            const curTarget = Number(a.target || 1);
+            const tier = Number.isFinite(a.tier) ? Number(a.tier) : (a.unlocked ? 1 : 0);
+            const nextTarget = (typeof a.next_target !== 'undefined' && a.next_target !== null) ? Number(a.next_target) : curTarget;
             // Если тир < 3 и nextTarget > curTarget, считаем прогресс против следующей цели; иначе — против текущей
             const denom = (tier && tier < 3 && Number(nextTarget) > Number(curTarget)) ? Number(nextTarget) : Number(curTarget);
             const pct = Math.max(0, Math.min(100, Math.floor((Math.min(val, denom) / (denom || 1)) * 100)));
@@ -451,17 +499,20 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         renderBatch();
-        // Кнопка «Показать ещё», пока есть элементы
-        const moreBtn = document.createElement('button');
-        moreBtn.className = 'details-btn';
-        moreBtn.textContent = 'Показать ещё';
-        moreBtn.style.marginTop = '8px';
-        moreBtn.addEventListener('click', () => {
-            renderBatch();
-            if (shown >= safe.length) moreBtn.remove();
-        });
+        // Кнопка «Показать ещё», пока есть элементы (без дублей, по центру)
+        const parent = elements.badgesContainer.parentElement;
+        try { parent.querySelectorAll('.achv-more-btn').forEach(b => b.remove()); } catch(_) {}
         if (safe.length > shown) {
-            elements.badgesContainer.parentElement.appendChild(moreBtn);
+            const moreBtn = document.createElement('button');
+            moreBtn.className = 'details-btn achv-more-btn';
+            moreBtn.textContent = 'Показать ещё';
+            moreBtn.style.display = 'block';
+            moreBtn.style.margin = '12px auto';
+            moreBtn.addEventListener('click', () => {
+                renderBatch();
+                if (shown >= safe.length) moreBtn.remove();
+            });
+            parent.appendChild(moreBtn);
         }
     // отметим, что достижения готовы
     _achLoaded = true;
@@ -2499,6 +2550,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (isAdmin && topbar) {
                 // Всегда пересоздаем кнопку под конкретный матч, чтобы обработчик и видимость были корректными
                 const prev = topbar.querySelector('#md-finish-btn'); if (prev) prev.remove();
+                if (mdPane.__finishBtnTimer) { try { clearInterval(mdPane.__finishBtnTimer); } catch(_) {} mdPane.__finishBtnTimer = null; }
                 const btn = document.createElement('button');
                 btn.id = 'md-finish-btn'; btn.className = 'details-btn'; btn.textContent = 'Завершить матч';
                 btn.style.marginLeft = 'auto';
@@ -2511,8 +2563,26 @@ document.addEventListener('DOMContentLoaded', () => {
                     } catch(_) { return `${(m.home||'').toLowerCase().trim()}__${(m.away||'').toLowerCase().trim()}__`; }
                 };
                 const mKey = mkKey(match);
-                // Установим видимость кнопки в зависимости от локального статуса только для этого матча
-                btn.style.display = finStore[mKey] ? 'none' : '';
+                // Хелпер: определяем «матч идет онлайн» по времени (старт → +2 часа)
+                const isLiveNow = (mm) => {
+                    try {
+                        const now = Date.now();
+                        let start = null;
+                        if (mm?.datetime) { start = new Date(mm.datetime).getTime(); }
+                        else if (mm?.date && mm?.time) {
+                            const t = mm.time.length===5 ? mm.time+':00' : mm.time;
+                            start = new Date(`${mm.date}T${t}`).getTime();
+                        }
+                        if (!start || isNaN(start)) return false;
+                        const end = start + 2*60*60*1000; // 2 часа окно прямого эфира
+                        return now >= start && now < end;
+                    } catch(_) { return false; }
+                };
+                // Установим видимость кнопки: только для этого матча, только когда он «live» и не завершен локально
+                const applyVisibility = () => { btn.style.display = (!finStore[mKey] && isLiveNow(match)) ? '' : 'none'; };
+                applyVisibility();
+                // Переоценивать каждые 30 секунд, чтобы кнопка появлялась/скрывалась по времени
+                mdPane.__finishBtnTimer = setInterval(applyVisibility, 30000);
                 const confirmFinish = () => new Promise((resolve) => {
                     let ov = document.querySelector('.modal-overlay');
                     if (!ov) {
@@ -2584,6 +2654,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // очистка
             homePane.innerHTML = '';
             awayPane.innerHTML = '';
+            try { if (mdPane.__finishBtnTimer) { clearInterval(mdPane.__finishBtnTimer); mdPane.__finishBtnTimer = null; } } catch(_) {}
             try { if (scorePoll) { clearInterval(scorePoll); scorePoll = null; } } catch(_) {}
             // останов поллинга комментариев, если был
             try { if (typeof streamPane.__stopCommentsPoll === 'function') streamPane.__stopCommentsPoll(); } catch(_) {}

@@ -148,6 +148,19 @@ def _rl_identity_from_request(allow_pseudo: bool = False) -> str:
     except Exception:
         return "anon:0"
 
+# Единый набор целей для всех групп достижений (возрастание)
+ACHIEVEMENT_TARGETS = {
+    'streak': [7, 30, 120],
+    'credits': [10000, 50000, 500000],
+    'level': [25, 50, 100],
+    'invited': [10, 50, 150],
+    'betcount': [10, 50, 200],
+    'betwins': [5, 20, 75],
+    'bigodds': [3.0, 4.5, 6.0],
+    'markets': [2, 3, 4],
+    'weeks': [2, 5, 10],
+}
+
 def _rate_limit(scope: str, limit: int, window_sec: int, identity: str | None = None, allow_pseudo: bool = False):
     """Returns a Flask response (429) if limited, else None. Sliding window in-memory.
     scope: logical bucket name (e.g., 'betting_place').
@@ -2064,6 +2077,19 @@ def compute_tier(value: int, thresholds) -> int:
             return tier
     return 0
 
+def _thresholds_from_targets(targets):
+    """Преобразует список целей [t1<t2<t3] в список порогов [(t3,3),(t2,2),(t1,1)]."""
+    try:
+        if not targets:
+            return []
+        # берём последние три (на случай большего списка) и сортируем по убыванию
+        ts = list(targets)[-3:]
+        ts_sorted = sorted(ts)
+        # Возвращаем убывающие пороги
+        return [(ts_sorted[2], 3), (ts_sorted[1], 2), (ts_sorted[0], 1)]
+    except Exception:
+        return []
+
 # Вспомогательные функции
 def find_user_row(user_id):
     """Ищет строку пользователя по user_id"""
@@ -2491,22 +2517,9 @@ def _build_schedule_payload_from_sheet():
         _tz_min = _tz_h * 60
     now_local = datetime.now() + timedelta(minutes=_tz_min)
     today = now_local.date()
-    def tour_is_upcoming(t):
-        for m in t.get('matches', []):
-            try:
-                if m.get('datetime'):
-                    dt = datetime.fromisoformat(m['datetime'])
-                    # исключаем матчи, завершенные >3ч назад (грубая эвристика: 2 часа длительность + буфер)
-                    if dt + timedelta(hours=3) >= now_local:
-                        return True
-                elif m.get('date'):
-                    if datetime.fromisoformat(m['date']).date() >= today:
-                        return True
-            except Exception:
-                continue
-        return False
-    # Соберём множество завершённых матчей из снапшота результатов (а не по факту наличия счёта 0:0 во время live)
+    # Снимок завершенности: пары и последний номер тура с прошедшими матчами
     finished_pairs = set()
+    last_finished_tour = 0
     if SessionLocal is not None:
         dbx = get_db()
         try:
@@ -2515,12 +2528,37 @@ def _build_schedule_payload_from_sheet():
             for r in (payload_res.get('results') or []):
                 try:
                     finished_pairs.add(((r.get('home') or ''), (r.get('away') or '')))
+                    tr = r.get('tour')
+                    if isinstance(tr, int):
+                        if tr > last_finished_tour:
+                            last_finished_tour = tr
                 except Exception:
                     continue
         except Exception:
             pass
         finally:
             dbx.close()
+    def tour_is_upcoming(t):
+        # 1) по времени
+        for m in t.get('matches', []):
+            try:
+                if m.get('datetime'):
+                    dt = datetime.fromisoformat(m['datetime'])
+                    if dt + timedelta(hours=3) >= now_local:
+                        return True
+                elif m.get('date'):
+                    if datetime.fromisoformat(m['date']).date() >= today:
+                        return True
+            except Exception:
+                continue
+        # 2) fallback: если тур строго больше последнего завершённого, показываем его даже без дат
+        try:
+            trn = t.get('tour')
+            if isinstance(trn, int) and last_finished_tour and trn > last_finished_tour:
+                return True
+        except Exception:
+            pass
+        return False
     upcoming = [t for t in tours if tour_is_upcoming(t)]
     # Внутри каждого тура также отфильтруем сами матчи по этому правилу
     for t in upcoming:
@@ -2534,6 +2572,11 @@ def _build_schedule_payload_from_sheet():
                 elif m.get('date'):
                     d = datetime.fromisoformat(m['date']).date()
                     keep = (d >= today)
+                else:
+                    # Нет даты/времени: если тур впереди (после последнего завершённого) — оставляем
+                    trn = t.get('tour')
+                    if isinstance(trn, int) and last_finished_tour and trn > last_finished_tour:
+                        keep = True
                 # скрыть, если матч уже попал в «Результаты» (админ завершил матч)
                 if keep and ((m.get('home') or '', m.get('away') or '') in finished_pairs):
                     keep = False
@@ -3866,6 +3909,10 @@ def api_achievements_catalog():
                 'description': 'Делайте ставки в разные недели (2/5/10 недель)'
             }
         ]
+        # Добавим агрегированное поле all_targets из констант
+        for item in catalog:
+            g = item.get('group')
+            item['all_targets'] = ACHIEVEMENT_TARGETS.get(g, [t['target'] for t in item.get('tiers', [])])
         return jsonify({'catalog': catalog})
     except Exception as e:
         app.logger.error(f"Ошибка achievements-catalog: {str(e)}")
@@ -4083,17 +4130,26 @@ def get_achievements():
                 user = serialize_user(db_user)
             finally:
                 db.close()
-        # Пороговые значения и названия
-        streak_thresholds = [(120, 3), (30, 2), (7, 1)]
-        credits_thresholds = [(500000, 3), (50000, 2), (10000, 1)]
-        level_thresholds = [(100, 3), (50, 2), (25, 1)]
-        invited_thresholds = [(150, 3), (50, 2), (10, 1)]
-        # Новые достижения
-        betcount_thresholds = [(200, 3), (50, 2), (10, 1)]
-        betwins_thresholds = [(75, 3), (20, 2), (5, 1)]
-        bigodds_thresholds = [(6.0, 3), (4.5, 2), (3.0, 1)]
-        markets_thresholds = [(4, 3), (3, 2), (2, 1)]
-        weeks_thresholds = [(10, 3), (5, 2), (2, 1)]
+        # Списки целей и пороги из констант
+        streak_targets = ACHIEVEMENT_TARGETS['streak']
+        credits_targets = ACHIEVEMENT_TARGETS['credits']
+        level_targets = ACHIEVEMENT_TARGETS['level']
+        invited_targets = ACHIEVEMENT_TARGETS['invited']
+        betcount_targets = ACHIEVEMENT_TARGETS['betcount']
+        betwins_targets = ACHIEVEMENT_TARGETS['betwins']
+        bigodds_targets = ACHIEVEMENT_TARGETS['bigodds']
+        markets_targets = ACHIEVEMENT_TARGETS['markets']
+        weeks_targets = ACHIEVEMENT_TARGETS['weeks']
+
+        streak_thresholds = _thresholds_from_targets(streak_targets)
+        credits_thresholds = _thresholds_from_targets(credits_targets)
+        level_thresholds = _thresholds_from_targets(level_targets)
+        invited_thresholds = _thresholds_from_targets(invited_targets)
+        betcount_thresholds = _thresholds_from_targets(betcount_targets)
+        betwins_thresholds = _thresholds_from_targets(betwins_targets)
+        bigodds_thresholds = _thresholds_from_targets(bigodds_targets)
+        markets_thresholds = _thresholds_from_targets(markets_targets)
+        weeks_thresholds = _thresholds_from_targets(weeks_targets)
 
         # Вспомогательная функция для вычисления следующей цели (next_target) по текущему тиру
         def _make_next_target_fn(thresholds: list[tuple]):
@@ -4111,6 +4167,16 @@ def get_achievements():
         next_bigodds = _make_next_target_fn(bigodds_thresholds)
         next_markets = _make_next_target_fn(markets_thresholds)
         next_weeks = _make_next_target_fn(weeks_thresholds)
+
+        # Универсальная функция: следующая цель по текущему значению
+        def _next_target_by_value(value, targets_list):
+            try:
+                for t in targets_list:
+                    if value < t:
+                        return t
+                return None
+            except Exception:
+                return None
 
         # Вычисляем текущие тиры
         streak_tier = compute_tier(user['consecutive_days'], streak_thresholds)
@@ -4214,57 +4280,57 @@ def get_achievements():
 
         # Серия дней (как было)
         if streak_tier:
-            achievements.append({ 'group': 'streak', 'tier': streak_tier, 'name': {1:'Бронза',2:'Серебро',3:'Золото'}[streak_tier], 'value': user['consecutive_days'], 'target': {1:7,2:30,3:120}[streak_tier], 'next_target': next_streak(streak_tier), 'icon': {1:'bronze',2:'silver',3:'gold'}[streak_tier], 'unlocked': True })
+            achievements.append({ 'group': 'streak', 'tier': streak_tier, 'name': {1:'Бронза',2:'Серебро',3:'Золото'}[streak_tier], 'value': user['consecutive_days'], 'target': {1:7,2:30,3:120}[streak_tier], 'next_target': _next_target_by_value(user['consecutive_days'], streak_targets), 'all_targets': streak_targets, 'icon': {1:'bronze',2:'silver',3:'gold'}[streak_tier], 'unlocked': True })
         else:
-            achievements.append({ 'group': 'streak', 'tier': 1, 'name': 'Бронза', 'value': user['consecutive_days'], 'target': 7, 'next_target': next_streak(0), 'icon': 'bronze', 'unlocked': False })
+            achievements.append({ 'group': 'streak', 'tier': 1, 'name': 'Бронза', 'value': user['consecutive_days'], 'target': 7, 'next_target': _next_target_by_value(user['consecutive_days'], streak_targets), 'all_targets': streak_targets, 'icon': 'bronze', 'unlocked': False })
 
         # Кредиты: 10k/50k/500k
         if credits_tier:
-            achievements.append({ 'group': 'credits', 'tier': credits_tier, 'name': {1:'Бедолага',2:'Мажор',3:'Олигарх'}[credits_tier], 'value': user['credits'], 'target': {1:10000,2:50000,3:500000}[credits_tier], 'next_target': next_credits(credits_tier), 'icon': {1:'bronze',2:'silver',3:'gold'}[credits_tier], 'unlocked': True })
+            achievements.append({ 'group': 'credits', 'tier': credits_tier, 'name': {1:'Бедолага',2:'Мажор',3:'Олигарх'}[credits_tier], 'value': user['credits'], 'target': {1:10000,2:50000,3:500000}[credits_tier], 'next_target': _next_target_by_value(user['credits'], credits_targets), 'all_targets': credits_targets, 'icon': {1:'bronze',2:'silver',3:'gold'}[credits_tier], 'unlocked': True })
         else:
-            achievements.append({ 'group': 'credits', 'tier': 1, 'name': 'Бедолага', 'value': user['credits'], 'target': 10000, 'next_target': next_credits(0), 'icon': 'bronze', 'unlocked': False })
+            achievements.append({ 'group': 'credits', 'tier': 1, 'name': 'Бедолага', 'value': user['credits'], 'target': 10000, 'next_target': _next_target_by_value(user['credits'], credits_targets), 'all_targets': credits_targets, 'icon': 'bronze', 'unlocked': False })
 
         # Уровень: 25/50/100
         if level_tier:
-            achievements.append({ 'group': 'level', 'tier': level_tier, 'name': {1:'Новобранец',2:'Ветеран',3:'Легенда'}[level_tier], 'value': user['level'], 'target': {1:25,2:50,3:100}[level_tier], 'next_target': next_level(level_tier), 'icon': {1:'bronze',2:'silver',3:'gold'}[level_tier], 'unlocked': True })
+            achievements.append({ 'group': 'level', 'tier': level_tier, 'name': {1:'Новобранец',2:'Ветеран',3:'Легенда'}[level_tier], 'value': user['level'], 'target': {1:25,2:50,3:100}[level_tier], 'next_target': _next_target_by_value(user['level'], level_targets), 'all_targets': level_targets, 'icon': {1:'bronze',2:'silver',3:'gold'}[level_tier], 'unlocked': True })
         else:
-            achievements.append({ 'group': 'level', 'tier': 1, 'name': 'Новобранец', 'value': user['level'], 'target': 25, 'next_target': next_level(0), 'icon': 'bronze', 'unlocked': False })
+            achievements.append({ 'group': 'level', 'tier': 1, 'name': 'Новобранец', 'value': user['level'], 'target': 25, 'next_target': _next_target_by_value(user['level'], level_targets), 'all_targets': level_targets, 'icon': 'bronze', 'unlocked': False })
 
         # Приглашённые: 10/50/150
         if invited_tier:
-            achievements.append({ 'group': 'invited', 'tier': invited_tier, 'name': {1:'Рекрутер',2:'Посол',3:'Легенда'}[invited_tier], 'value': invited_count, 'target': {1:10,2:50,3:150}[invited_tier], 'next_target': next_invited(invited_tier), 'icon': {1:'bronze',2:'silver',3:'gold'}[invited_tier], 'unlocked': True })
+            achievements.append({ 'group': 'invited', 'tier': invited_tier, 'name': {1:'Рекрутер',2:'Посол',3:'Легенда'}[invited_tier], 'value': invited_count, 'target': {1:10,2:50,3:150}[invited_tier], 'next_target': _next_target_by_value(invited_count, invited_targets), 'all_targets': invited_targets, 'icon': {1:'bronze',2:'silver',3:'gold'}[invited_tier], 'unlocked': True })
         else:
-            achievements.append({ 'group': 'invited', 'tier': 1, 'name': 'Рекрутер', 'value': invited_count, 'target': 10, 'next_target': next_invited(0), 'icon': 'bronze', 'unlocked': False })
+            achievements.append({ 'group': 'invited', 'tier': 1, 'name': 'Рекрутер', 'value': invited_count, 'target': 10, 'next_target': _next_target_by_value(invited_count, invited_targets), 'all_targets': invited_targets, 'icon': 'bronze', 'unlocked': False })
 
         # Количество ставок: 10/50/200
         if betcount_tier:
-            achievements.append({ 'group': 'betcount', 'tier': betcount_tier, 'name': {1:'Новичок ставок',2:'Профи ставок',3:'Марафонец'}[betcount_tier], 'value': bet_stats['total'], 'target': {1:10,2:50,3:200}[betcount_tier], 'next_target': next_betcount(betcount_tier), 'icon': {1:'bronze',2:'silver',3:'gold'}[betcount_tier], 'unlocked': True })
+            achievements.append({ 'group': 'betcount', 'tier': betcount_tier, 'name': {1:'Новичок ставок',2:'Профи ставок',3:'Марафонец'}[betcount_tier], 'value': bet_stats['total'], 'target': {1:10,2:50,3:200}[betcount_tier], 'next_target': _next_target_by_value(bet_stats['total'], betcount_targets), 'all_targets': betcount_targets, 'icon': {1:'bronze',2:'silver',3:'gold'}[betcount_tier], 'unlocked': True })
         else:
-            achievements.append({ 'group': 'betcount', 'tier': 1, 'name': 'Новичок ставок', 'value': bet_stats['total'], 'target': 10, 'next_target': next_betcount(0), 'icon': 'bronze', 'unlocked': False })
+            achievements.append({ 'group': 'betcount', 'tier': 1, 'name': 'Новичок ставок', 'value': bet_stats['total'], 'target': 10, 'next_target': _next_target_by_value(bet_stats['total'], betcount_targets), 'all_targets': betcount_targets, 'icon': 'bronze', 'unlocked': False })
 
         # Победы в ставках: 5/20/75
         if betwins_tier:
-            achievements.append({ 'group': 'betwins', 'tier': betwins_tier, 'name': {1:'Счастливчик',2:'Снайпер',3:'Чемпион'}[betwins_tier], 'value': bet_stats['won'], 'target': {1:5,2:20,3:75}[betwins_tier], 'next_target': next_betwins(betwins_tier), 'icon': {1:'bronze',2:'silver',3:'gold'}[betwins_tier], 'unlocked': True })
+            achievements.append({ 'group': 'betwins', 'tier': betwins_tier, 'name': {1:'Счастливчик',2:'Снайпер',3:'Чемпион'}[betwins_tier], 'value': bet_stats['won'], 'target': {1:5,2:20,3:75}[betwins_tier], 'next_target': _next_target_by_value(bet_stats['won'], betwins_targets), 'all_targets': betwins_targets, 'icon': {1:'bronze',2:'silver',3:'gold'}[betwins_tier], 'unlocked': True })
         else:
-            achievements.append({ 'group': 'betwins', 'tier': 1, 'name': 'Счастливчик', 'value': bet_stats['won'], 'target': 5, 'next_target': next_betwins(0), 'icon': 'bronze', 'unlocked': False })
+            achievements.append({ 'group': 'betwins', 'tier': 1, 'name': 'Счастливчик', 'value': bet_stats['won'], 'target': 5, 'next_target': _next_target_by_value(bet_stats['won'], betwins_targets), 'all_targets': betwins_targets, 'icon': 'bronze', 'unlocked': False })
 
         # Крупный коэффициент: 3.0/4.5/6.0
         if bigodds_tier:
-            achievements.append({ 'group': 'bigodds', 'tier': bigodds_tier, 'name': {1:'Рисковый',2:'Хайроллер',3:'Легенда кэфов'}[bigodds_tier], 'value': bet_stats['max_win_odds'], 'target': {1:3.0,2:4.5,3:6.0}[bigodds_tier], 'next_target': next_bigodds(bigodds_tier), 'icon': {1:'bronze',2:'silver',3:'gold'}[bigodds_tier], 'unlocked': True })
+            achievements.append({ 'group': 'bigodds', 'tier': bigodds_tier, 'name': {1:'Рисковый',2:'Хайроллер',3:'Легенда кэфов'}[bigodds_tier], 'value': bet_stats['max_win_odds'], 'target': {1:3.0,2:4.5,3:6.0}[bigodds_tier], 'next_target': _next_target_by_value(bet_stats['max_win_odds'], bigodds_targets), 'all_targets': bigodds_targets, 'icon': {1:'bronze',2:'silver',3:'gold'}[bigodds_tier], 'unlocked': True })
         else:
-            achievements.append({ 'group': 'bigodds', 'tier': 1, 'name': 'Рисковый', 'value': bet_stats['max_win_odds'], 'target': 3.0, 'next_target': next_bigodds(0), 'icon': 'bronze', 'unlocked': False })
+            achievements.append({ 'group': 'bigodds', 'tier': 1, 'name': 'Рисковый', 'value': bet_stats['max_win_odds'], 'target': 3.0, 'next_target': _next_target_by_value(bet_stats['max_win_odds'], bigodds_targets), 'all_targets': bigodds_targets, 'icon': 'bronze', 'unlocked': False })
 
         # Разнообразие рынков: 2/3/4
         if markets_tier:
-            achievements.append({ 'group': 'markets', 'tier': markets_tier, 'name': {1:'Универсал I',2:'Универсал II',3:'Универсал III'}[markets_tier], 'value': len(bet_stats['markets_used']), 'target': {1:2,2:3,3:4}[markets_tier], 'next_target': next_markets(markets_tier), 'icon': {1:'bronze',2:'silver',3:'gold'}[markets_tier], 'unlocked': True })
+            achievements.append({ 'group': 'markets', 'tier': markets_tier, 'name': {1:'Универсал I',2:'Универсал II',3:'Универсал III'}[markets_tier], 'value': len(bet_stats['markets_used']), 'target': {1:2,2:3,3:4}[markets_tier], 'next_target': _next_target_by_value(len(bet_stats['markets_used']), markets_targets), 'all_targets': markets_targets, 'icon': {1:'bronze',2:'silver',3:'gold'}[markets_tier], 'unlocked': True })
         else:
-            achievements.append({ 'group': 'markets', 'tier': 1, 'name': 'Универсал I', 'value': len(bet_stats['markets_used']), 'target': 2, 'next_target': next_markets(0), 'icon': 'bronze', 'unlocked': False })
+            achievements.append({ 'group': 'markets', 'tier': 1, 'name': 'Универсал I', 'value': len(bet_stats['markets_used']), 'target': 2, 'next_target': _next_target_by_value(len(bet_stats['markets_used']), markets_targets), 'all_targets': markets_targets, 'icon': 'bronze', 'unlocked': False })
 
         # Регулярность по неделям: 2/5/10
         if weeks_tier:
-            achievements.append({ 'group': 'weeks', 'tier': weeks_tier, 'name': {1:'Регуляр',2:'Постоянный',3:'Железный'}[weeks_tier], 'value': len(bet_stats['weeks_active']), 'target': {1:2,2:5,3:10}[weeks_tier], 'next_target': next_weeks(weeks_tier), 'icon': {1:'bronze',2:'silver',3:'gold'}[weeks_tier], 'unlocked': True })
+            achievements.append({ 'group': 'weeks', 'tier': weeks_tier, 'name': {1:'Регуляр',2:'Постоянный',3:'Железный'}[weeks_tier], 'value': len(bet_stats['weeks_active']), 'target': {1:2,2:5,3:10}[weeks_tier], 'next_target': _next_target_by_value(len(bet_stats['weeks_active']), weeks_targets), 'all_targets': weeks_targets, 'icon': {1:'bronze',2:'silver',3:'gold'}[weeks_tier], 'unlocked': True })
         else:
-            achievements.append({ 'group': 'weeks', 'tier': 1, 'name': 'Регуляр', 'value': len(bet_stats['weeks_active']), 'target': 2, 'next_target': next_weeks(0), 'icon': 'bronze', 'unlocked': False })
+            achievements.append({ 'group': 'weeks', 'tier': 1, 'name': 'Регуляр', 'value': len(bet_stats['weeks_active']), 'target': 2, 'next_target': _next_target_by_value(len(bet_stats['weeks_active']), weeks_targets), 'all_targets': weeks_targets, 'icon': 'bronze', 'unlocked': False })
         return jsonify({'achievements': achievements})
 
     except Exception as e:
