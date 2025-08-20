@@ -6188,12 +6188,15 @@ def api_streams_get():
                     row0 = db0.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away).order_by(MatchStream.updated_at.desc()).first()
                 if row0 and ((row0.vk_video_id and row0.vk_video_id.strip()) or (row0.vk_post_url and row0.vk_post_url.strip())):
                     return jsonify({'available': True, 'vkVideoId': row0.vk_video_id or '', 'vkPostUrl': row0.vk_post_url or ''})
+                # Туровой фолбэк: если для текущей пары нет прямой записи, но есть ссылка в этом же туре — отдадим её
+                # Для этого чуть ниже определим тур; здесь просто продолжим
             finally:
                 db0.close()
         except Exception:
             pass
-        # найдём матч и время старта
+        # найдём матч и время старта, а также сам тур для турового фолбэка
         start_ts = None
+        matched_tour = None
         try:
             tours = []
             if SessionLocal is not None:
@@ -6214,6 +6217,7 @@ def api_streams_get():
                             try:
                                 if m.get('datetime') and str(m['datetime']).startswith(date_str):
                                     start_ts = int(datetime.fromisoformat(m['datetime']).timestamp() * 1000)
+                                    matched_tour = t
                                     raise StopIteration
                                 if m.get('date') and str(m['date']).startswith(date_str):
                                     # Построим dt из date+time
@@ -6224,6 +6228,7 @@ def api_streams_get():
                                         tm = datetime.min.time()
                                     dt = datetime.combine(d, tm)
                                     start_ts = int(dt.timestamp() * 1000)
+                                    matched_tour = t
                                     raise StopIteration
                             except Exception:
                                 pass
@@ -6232,6 +6237,7 @@ def api_streams_get():
                             try:
                                 if m.get('datetime'):
                                     start_ts = int(datetime.fromisoformat(m['datetime']).timestamp() * 1000)
+                                    matched_tour = t
                                 elif m.get('date'):
                                     d = datetime.fromisoformat(str(m['date'])).date()
                                     try:
@@ -6239,6 +6245,7 @@ def api_streams_get():
                                     except Exception:
                                         tm = datetime.min.time()
                                     start_ts = int(datetime.combine(d, tm).timestamp() * 1000)
+                                    matched_tour = t
                                 raise StopIteration
                             except Exception:
                                 start_ts = None
@@ -6294,6 +6301,44 @@ def api_streams_get():
     except Exception as e:
         app.logger.error(f"streams/get error: {e}")
         return jsonify({'available': False})
+
+@app.route('/api/streams/reset', methods=['POST'])
+def api_streams_reset():
+    """Админ: сбросить ссылку на трансляцию для конкретного матча (home/away/date)."""
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData',''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID','')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+        home = (request.form.get('home') or '').strip()
+        away = (request.form.get('away') or '').strip()
+        date_str = (request.form.get('date') or '').strip()
+        if not home or not away:
+            return jsonify({'error': 'home/away обязательны'}), 400
+        if SessionLocal is None:
+            return jsonify({'error': 'БД недоступна'}), 500
+        db: Session = get_db()
+        try:
+            row = db.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None)).first()
+            if not row and date_str:
+                # поддержка старых записей без даты
+                row = db.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away).order_by(MatchStream.updated_at.desc()).first()
+            if not row:
+                return jsonify({'error': 'Запись не найдена'}), 404
+            row.vk_video_id = None
+            row.vk_post_url = None
+            row.confirmed_at = None
+            row.updated_at = datetime.now(timezone.utc)
+            db.commit()
+            return jsonify({'status': 'ok'})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"streams/reset error: {e}")
+        return jsonify({'error': 'Не удалось сбросить ссылку'}), 500
 
 COMMENT_TTL_MINUTES = 10
 COMMENT_RATE_MINUTES = 5
