@@ -11,6 +11,7 @@
     // 'дождь__звезда__2025-08-16': { vkVideoId: '123456789_987654321', autoplay: 0 },
     // 'дождь__звезда__': { vkPostUrl: 'https://vk.com/video-123456_654321', autoplay: 0 },
   };
+
   function makeKey(match){
     const h = (match?.home||'').toLowerCase().trim();
     const a = (match?.away||'').toLowerCase().trim();
@@ -21,10 +22,11 @@
     }catch(_){ d=''; }
     return `${h}__${a}__${d}`;
   }
+
   function findStream(match){
-  const keyExact = makeKey(match);
-  if (DBG) console.debug('[streams] findStream', { keyExact });
-  return registry[keyExact] || null;
+    const keyExact = makeKey(match);
+    if (DBG) console.debug('[streams] findStream', { keyExact });
+    return registry[keyExact] || null;
   }
 
   function vUrl(u){
@@ -50,11 +52,43 @@
     return '';
   }
 
+  // ---- вспомогательные операции удаления / демонтажа ----
+  function detachStreamPane(){
+    try {
+      const pane = document.getElementById('md-pane-stream');
+      if (!pane) return false;
+      // остановим поллинг комментариев
+      try { typeof pane.__stopCommentsPoll === 'function' && pane.__stopCommentsPoll(); } catch(_) {}
+      // обнулить iframe src
+      try { const ifr = pane.querySelector('iframe'); if (ifr) ifr.src = ''; } catch(_) {}
+      // удалить из DOM
+      if (pane.parentNode) pane.parentNode.removeChild(pane);
+      if (DBG) console.debug('[streams] detachStreamPane: removed pane');
+      return true;
+    } catch(e){ if (DBG) console.debug('[streams] detachStreamPane: error', e); return false; }
+  }
 
+  function removeStreamTab(subtabs, matchKey){
+    try {
+      if (!subtabs) return;
+      const selector = `[data-mdtab="stream"]`;
+      const candidates = Array.from(subtabs.querySelectorAll(selector));
+      candidates.forEach(t => {
+        // если таб навешан на конкретный матч — удаляем только для этого матча
+        const tk = t.getAttribute('data-match-key') || '';
+        if (!matchKey || tk === matchKey) {
+          t.parentNode && t.parentNode.removeChild(t);
+          if (DBG) console.debug('[streams] removeStreamTab: removed tab', { tabKey: tk });
+        }
+      });
+    } catch(_) {}
+  }
+
+  // ---- основной код панели / вкладки ----
   function ensurePane(mdPane, match){
     if (DBG) console.debug('[streams] ensurePane: enter', { mdKey: mdPane?.getAttribute?.('data-match-key')||null, key: makeKey(match) });
     let pane = document.getElementById('md-pane-stream');
-    const body = mdPane.querySelector('.modal-body');
+    const body = mdPane?.querySelector('.modal-body');
 
     if (!pane) {
       pane = document.createElement('div');
@@ -82,6 +116,7 @@
       pane.__streamInfo = null;
       pane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
       pane.setAttribute('data-match-key', key);
+      // Убедимся, что pane виден внутри модалки (модал сам контролирует видимость)
       pane.style.display = '';
     }
     return pane;
@@ -92,7 +127,7 @@
     if (!tab) {
       tab = document.createElement('div'); tab.className='subtab-item'; tab.setAttribute('data-mdtab','stream'); tab.textContent='Трансляция';
       subtabs.appendChild(tab);
-  if (DBG) console.debug('[streams] ensureTab: created');
+      if (DBG) console.debug('[streams] ensureTab: created');
     }
     if (match) tab.setAttribute('data-match-key', makeKey(match));
     return tab;
@@ -100,18 +135,23 @@
 
   function buildStreamInto(pane, info, match){
     if (!info || pane.__inited) return !!pane.__inited;
-  if (DBG) console.debug('[streams] buildStreamInto', { key: pane.getAttribute('data-match-key'), info: { hasVideoId: !!info.vkVideoId, hasPostUrl: !!info.vkPostUrl } });
-  const host = document.createElement('div'); host.className = 'stream-wrap';
+    if (DBG) console.debug('[streams] buildStreamInto', { key: pane.getAttribute('data-match-key'), info: { hasVideoId: !!info.vkVideoId, hasPostUrl: !!info.vkPostUrl } });
+
+    const host = document.createElement('div'); host.className = 'stream-wrap';
     const ratio = document.createElement('div'); ratio.className = 'stream-aspect';
     const ifr = document.createElement('iframe');
+
     // используем vUrl для перебивки кэша версии приложения (если применимо)
-    ifr.src = vUrl(buildIframeSrc(info));
+    const src = buildIframeSrc(info) || '';
+    ifr.src = vUrl(src);
     ifr.setAttribute('allowfullscreen','true');
     ifr.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture; screen-wake-lock;';
     ifr.referrerPolicy = 'strict-origin-when-cross-origin';
     ratio.appendChild(ifr); host.appendChild(ratio);
-  pane.innerHTML='';
-  pane.appendChild(host);
+
+    // вставляем и помечаем инициализированным
+    pane.innerHTML = '';
+    pane.appendChild(host);
     pane.__inited = true;
     try { typeof window.initStreamComments === 'function' && window.initStreamComments(pane, match); } catch(_) {}
     return true;
@@ -127,19 +167,24 @@
           if (parts.length >= 3 && parts[2]) dateStr = parts[2];
         } catch(_) {}
       }
-  if (DBG) console.debug('[streams] fetchServerStream: request', { home: match?.home, away: match?.away, dateStr });
-  const url = `/api/streams/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}&date=${encodeURIComponent(dateStr)}`;
+      if (DBG) console.debug('[streams] fetchServerStream: request', { home: match?.home, away: match?.away, dateStr });
+      const url = `/api/streams/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}&date=${encodeURIComponent(dateStr)}`;
       const r = await fetch(url, { cache: 'no-store' });
       const ans = await r.json();
       if (DBG) console.debug('[streams] fetchServerStream: response', ans);
+      // Возвращаем только если сервер явно вернул ссылку/доступность
       if (ans && ans.available && (ans.vkVideoId || ans.vkPostUrl)) return ans;
-    }catch(_){/* noop */}
+    }catch(_){/* noop */ }
     return null;
   }
 
+  // Теперь: создаём pane/tab ТОЛЬКО если есть streamInfo (локально или с сервера).
+  // Если ссылки нет — удаляем существующую панель/вкладку, чтобы не показывать "скелетон" под составом.
   function setupMatchStream(mdPane, subtabs, match){
     if (DBG) console.debug('[streams] setupMatchStream: enter', { key: makeKey(match), match });
-    // Fallback сначала из локального реестра, затем запрос на сервер
+    const key = makeKey(match);
+
+    // 1) Сначала локальный реестр — если нашли, создаём pane/tab и возвращаем.
     let streamInfo = findStream(match);
     if (streamInfo) {
       const pane = ensurePane(mdPane, match);
@@ -148,19 +193,31 @@
       if (DBG) console.debug('[streams] setupMatchStream: local registry hit -> tab added');
       return pane;
     }
-    // Асинхронно проверим у сервера и, если есть, добавим вкладку
-    const expectedKey = makeKey(match);
+
+    // 2) Нет локальной ссылки — для предотвращения отображения пустой панели:
+    //    удалим существующую панель и вкладку (если они остались от прошлого матча).
+    try { detachStreamPane(); } catch(_) {}
+    try { removeStreamTab(subtabs, key); } catch(_) {}
+
+    // 3) Асинхронно проверим у сервера; но панель/вкладка будут созданы только если сервер вернул ссылку.
     // Маркируем запрос последовательностью, чтобы игнорировать устаревшие ответы
     mdPane.__streamSetupSeq = (mdPane.__streamSetupSeq || 0) + 1;
     const reqId = mdPane.__streamSetupSeq;
-    mdPane.__streamSetupKey = expectedKey;
+    mdPane.__streamSetupKey = key;
     fetchServerStream(match).then((ans)=>{
-      if (!ans) return;
+      // Если нет ответа — ничего не создаём (и убедимся, что панель/вкладка удалены)
+      if (!ans) {
+        if (DBG) console.debug('[streams] setupMatchStream: no server link -> ensure removed');
+        try { detachStreamPane(); } catch(_) {}
+        try { removeStreamTab(subtabs, key); } catch(_) {}
+        return;
+      }
       // Матч всё ещё тот же? (могли уйти на другой экран)
-      const currentKey = mdPane.getAttribute('data-match-key') || expectedKey;
-      if (currentKey !== expectedKey) { if (DBG) console.debug('[streams] setupMatchStream: stale resp by mdKey', { expectedKey, currentKey }); return; }
-      if (mdPane.__streamSetupSeq !== reqId || mdPane.__streamSetupKey !== expectedKey) { if (DBG) console.debug('[streams] setupMatchStream: stale resp by reqId'); return; }
-      if (DBG) console.debug('[streams] setupMatchStream: server provided link');
+      const currentKey = mdPane.getAttribute('data-match-key') || key;
+      if (currentKey !== key) { if (DBG) console.debug('[streams] setupMatchStream: stale resp by mdKey', { expectedKey: key, currentKey }); return; }
+      if (mdPane.__streamSetupSeq !== reqId || mdPane.__streamSetupKey !== key) { if (DBG) console.debug('[streams] setupMatchStream: stale resp by reqId'); return; }
+
+      if (DBG) console.debug('[streams] setupMatchStream: server provided link -> create pane/tab');
       const pane = ensurePane(mdPane, match);
       const tab = ensureTab(subtabs, match);
       pane.__streamInfo = ans;
@@ -172,7 +229,13 @@
           buildStreamInto(pane, ans, match);
         }
       } catch(_) {}
-    }).catch(()=>{});
+    }).catch((e)=>{
+      if (DBG) console.debug('[streams] setupMatchStream: fetch error', e);
+      // при ошибке — не показываем панель
+      try { detachStreamPane(); } catch(_) {}
+      try { removeStreamTab(subtabs, key); } catch(_) {}
+    });
+
     return null; // пока не знаем — не показываем вкладку
   }
 
@@ -193,16 +256,21 @@
         if (DBG) console.debug('[streams] onStreamTabActivated: build from cached info');
         setTimeout(()=>buildStreamInto(pane, info, match), 50);
       } else {
-        // Попробуем ещё раз спросить сервер и построить
-        const expectedKey = key;
-        // Пер-запрос маркируем токеном, чтобы игнорировать устаревшие ответы
+        // Если у нас нет ссылки — покажем информативный текст и не создаём iframe.
+        if (DBG) console.debug('[streams] onStreamTabActivated: no info -> show unavailable');
+        const sk = pane.querySelector('.stream-skeleton');
+        if (sk) {
+          sk.textContent = 'Трансляция отсутствует для этого матча';
+        } else {
+          pane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция отсутствует для этого матча</div></div>';
+        }
+        // И попытаемся ещё раз опросить сервер (только чтобы не упустить появление ссылки)
         pane.__streamTabSeq = (pane.__streamTabSeq || 0) + 1;
         const reqId = pane.__streamTabSeq;
         fetchServerStream(match).then((ans)=>{
-          // Проверяем, что мы всё ещё на этом матче
-          if (!ans) { if (DBG) console.debug('[streams] onStreamTabActivated: no link on server'); const sk=pane.querySelector('.stream-skeleton'); if (sk) sk.textContent='Трансляция недоступна'; return; }
-          const mdKey = (mdPaneFrom(pane)?.getAttribute('data-match-key') || expectedKey);
-          if (mdKey !== expectedKey) { if (DBG) console.debug('[streams] onStreamTabActivated: stale resp by mdKey', { expectedKey, mdKey }); return; }
+          if (!ans) { if (DBG) console.debug('[streams] onStreamTabActivated: server still no link'); return; }
+          const mdKey = (mdPaneFrom(pane)?.getAttribute('data-match-key') || key);
+          if (mdKey !== key) { if (DBG) console.debug('[streams] onStreamTabActivated: stale resp by mdKey', { expectedKey: key, mdKey }); return; }
           if (pane.__streamTabSeq !== reqId) { if (DBG) console.debug('[streams] onStreamTabActivated: stale resp by reqId'); return; }
           if (DBG) console.debug('[streams] onStreamTabActivated: server returned link -> build');
           pane.__streamInfo = ans; buildStreamInto(pane, ans, match);
@@ -219,30 +287,35 @@
   }
 
   window.__STREAMS__ = { findStream, registry };
+
   // Сброс состояния при выходе с экрана матча (переход по нижним вкладкам/кнопка Назад)
   function resetOnLeave(mdPane){
     try {
       const pane = document.getElementById('md-pane-stream');
       if (!pane) return;
-  if (DBG) console.debug('[streams] resetOnLeave');
+      if (DBG) console.debug('[streams] resetOnLeave');
+
       // Остановить возможный поллинг комментариев
       try { typeof pane.__stopCommentsPoll === 'function' && pane.__stopCommentsPoll(); } catch(_) {}
+
       // Поставить видео на паузу / полностью сбросить src iframe
       try { const ifr = pane.querySelector('iframe'); if (ifr) { try { ifr.src = ''; } catch(_) { /* noop */ } } } catch(_) {}
-  // Инвалидируем любые ожидающие ответы
-  try { mdPane.__streamSetupSeq = (mdPane.__streamSetupSeq || 0) + 1; } catch(_) {}
-  try { pane.__streamTabSeq = (pane.__streamTabSeq || 0) + 1; } catch(_) {}
+
+      // Инвалидируем любые ожидающие ответы
+      try { mdPane.__streamSetupSeq = (mdPane.__streamSetupSeq || 0) + 1; } catch(_) {}
+      try { pane.__streamTabSeq = (pane.__streamTabSeq || 0) + 1; } catch(_) {}
+
+      // Сбросим внутреннее состояние и удалим панель/вкладку
       pane.__inited = false;
       pane.__streamInfo = null;
-      pane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
 
-      // Убираем ключ и отсоединяем панель от старого модала, чтобы при следующем открытии
-      // ensurePane корректно поместит её в новый mdPane
+      try { detachStreamPane(); } catch(_) {}
+      // Если есть контейнер subtabs — удалим таб
       try {
-        pane.removeAttribute('data-match-key');
-        if (pane.parentNode) pane.parentNode.removeChild(pane);
-        if (DBG) console.debug('[streams] resetOnLeave: detached pane from old mdPane');
+        const subtabs = mdPane?.querySelector?.('.subtabs') || null;
+        if (subtabs) removeStreamTab(subtabs);
       } catch(_) {}
+
     } catch(_) {}
   }
 
