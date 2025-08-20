@@ -21,9 +21,8 @@
     return `${h}__${a}__${d}`;
   }
   function findStream(match){
-    const keyExact = makeKey(match);
-    const keyDateAgnostic = `${(match?.home||'').toLowerCase().trim()}__${(match?.away||'').toLowerCase().trim()}__`;
-    return registry[keyExact] || registry[keyDateAgnostic] || null;
+  const keyExact = makeKey(match);
+  return registry[keyExact] || null;
   }
 
   function vUrl(u){
@@ -101,7 +100,7 @@
   async function fetchServerStream(match){
     try{
       const dateStr = (match?.datetime || match?.date || '').toString().slice(0,10);
-      const url = `/api/streams/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}&date=${encodeURIComponent(dateStr)}&window=60`;
+  const url = `/api/streams/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}&date=${encodeURIComponent(dateStr)}`;
       const r = await fetch(url, { cache: 'no-store' });
       const ans = await r.json();
       if (ans && ans.available && (ans.vkVideoId || ans.vkPostUrl)) return ans;
@@ -126,8 +125,15 @@
       const currentKey = mdPane.getAttribute('data-match-key') || expectedKey;
       if (currentKey !== expectedKey) return;
       const pane = ensurePane(mdPane, match);
-      ensureTab(subtabs, match);
+      const tab = ensureTab(subtabs, match);
       pane.__streamInfo = ans;
+      // Если пользователь уже на вкладке «Трансляция», инициализируем немедленно
+      try {
+        const isActive = tab?.classList?.contains('active') || pane?.style?.display === '';
+        if (isActive && !pane.__inited) {
+          buildStreamInto(pane, ans, match);
+        }
+      } catch(_) {}
     }).catch(()=>{});
     return null; // пока не знаем — не показываем вкладку
   }
