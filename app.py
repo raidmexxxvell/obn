@@ -6255,44 +6255,43 @@ def api_streams_get():
     try:
         if SessionLocal is None:
             return jsonify({'available': False})
+    except Exception:
+        return jsonify({'available': False})
     home = (request.args.get('home') or '').strip()
     away = (request.args.get('away') or '').strip()
     date_str = (request.args.get('date') or '').strip()
     tour = (request.args.get('tour') or '').strip()
-        try:
-            app.logger.info(f"streams/get req: home='{home}' away='{away}' date='{date_str}'")
-        except Exception:
-            pass
-        try:
-            win = int(request.args.get('window') or '60')
-        except Exception:
-            win = 60
-        # минимальное окно 10 минут
-        win = max(10, min(240, win))
+    try:
+        app.logger.info(f"streams/get req: home='{home}' away='{away}' date='{date_str}'")
+    except Exception:
+        pass
+    try:
+        win = int(request.args.get('window') or '60')
+    except Exception:
+        win = 60
+    # минимальное окно 10 минут
+    win = max(10, min(240, win))
 
-        # 1) Приоритет: если для матча уже сохранена трансляция — сразу отдаем её, без привязки ко времени (по запросу пользователя)
-        try:
-            db0: Session = get_db()
+    # 1) Приоритет: если для матча уже сохранена трансляция — сразу отдаем её, без привязки ко времени (по запросу пользователя)
+    db0: Session = get_db()
+    try:
+        row0 = None
+        if tour:
+            row0 = db0.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None), MatchStream.tour==tour).first()
+        if not row0:
+            row0 = db0.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None)).first()
+        if not row0 and date_str:
+            row0 = db0.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away).order_by(MatchStream.updated_at.desc()).first()
+        if row0 and ((row0.vk_video_id and row0.vk_video_id.strip()) or (row0.vk_post_url and row0.vk_post_url.strip())):
             try:
-                row0 = None
-                if tour:
-                    row0 = db0.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None), MatchStream.tour==tour).first()
-                if not row0:
-                    row0 = db0.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None)).first()
-                if not row0 and date_str:
-                    row0 = db0.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away).order_by(MatchStream.updated_at.desc()).first()
-                if row0 and ((row0.vk_video_id and row0.vk_video_id.strip()) or (row0.vk_post_url and row0.vk_post_url.strip())):
-                    try:
-                        app.logger.info("streams/get hit: immediate saved link")
-                    except Exception:
-                        pass
-                    return jsonify({'available': True, 'vkVideoId': row0.vk_video_id or '', 'vkPostUrl': row0.vk_post_url or ''})
-                # Туровой фолбэк: если для текущей пары нет прямой записи, но есть ссылка в этом же туре — отдадим её
-                # Для этого чуть ниже определим тур; здесь просто продолжим
-            finally:
-                db0.close()
-        except Exception:
-            pass
+                app.logger.info("streams/get hit: immediate saved link")
+            except Exception:
+                pass
+            return jsonify({'available': True, 'vkVideoId': row0.vk_video_id or '', 'vkPostUrl': row0.vk_post_url or ''})
+        # Туровой фолбэк: если для текущей пары нет прямой записи, но есть ссылка в этом же туре — отдадим её
+        # Для этого чуть ниже определим тур; здесь просто продолжим
+    finally:
+        db0.close()
         # найдём матч и время старта, а также сам тур для турового фолбэка
         start_ts = None
         matched_tour = None
@@ -6420,33 +6419,30 @@ def api_streams_reset():
     away = (request.form.get('away') or '').strip()
     date_str = (request.form.get('date') or '').strip()
     tour = (request.form.get('tour') or '').strip()
-        if not home or not away:
-            return jsonify({'error': 'home/away обязательны'}), 400
-        if SessionLocal is None:
-            return jsonify({'error': 'БД недоступна'}), 500
-        db: Session = get_db()
-        try:
-            row = None
-            if tour:
-                row = db.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None), MatchStream.tour==tour).first()
-            if not row:
-                row = db.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None)).first()
-            if not row and date_str:
-                # поддержка старых записей без даты
-                row = db.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away).order_by(MatchStream.updated_at.desc()).first()
-            if not row:
-                return jsonify({'error': 'Запись не найдена'}), 404
-            row.vk_video_id = None
-            row.vk_post_url = None
-            row.confirmed_at = None
-            row.updated_at = datetime.now(timezone.utc)
-            db.commit()
-            return jsonify({'status': 'ok'})
-        finally:
-            db.close()
-    except Exception as e:
-        app.logger.error(f"streams/reset error: {e}")
-        return jsonify({'error': 'Не удалось сбросить ссылку'}), 500
+    if not home or not away:
+        return jsonify({'error': 'home/away обязательны'}), 400
+    if SessionLocal is None:
+        return jsonify({'error': 'БД недоступна'}), 500
+    db: Session = get_db()
+    try:
+        row = None
+        if tour:
+            row = db.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None), MatchStream.tour==tour).first()
+        if not row:
+            row = db.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None)).first()
+        if not row and date_str:
+            # поддержка старых записей без даты
+            row = db.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away).order_by(MatchStream.updated_at.desc()).first()
+        if not row:
+            return jsonify({'error': 'Запись не найдена'}), 404
+        row.vk_video_id = None
+        row.vk_post_url = None
+        row.confirmed_at = None
+        row.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        return jsonify({'status': 'ok'})
+    finally:
+        db.close()
 
 COMMENT_TTL_MINUTES = 10
 COMMENT_RATE_MINUTES = 5
