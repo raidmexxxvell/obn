@@ -1,0 +1,30 @@
+# Liga Obninska - Render.com Configuration
+
+# Build settings
+build: pip install -r requirements.txt
+start: python app.py
+
+# Environment settings  
+env: python
+python_version: 3.13
+
+# Required environment variables
+environment:
+  FLASK_ENV: production
+  FLASK_DEBUG: false
+  ENABLE_SCHEDULER: 1
+  SYNC_INTERVAL_SEC: 600
+  
+# Optional environment variables (configure in Render dashboard):
+# DATABASE_URL - automatically set when PostgreSQL is connected
+# REDIS_URL - set when Redis is connected (optional)
+# SHEET_ID - Google Sheets ID for match schedule
+# GOOGLE_CREDENTIALS_JSON - Google service account credentials
+# SECRET_KEY - Flask secret key
+# ADMIN_SECRET - Admin panel secret
+
+# Health check
+health_check_path: /ping
+
+# Auto-deploy
+auto_deploy: true

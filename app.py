@@ -16,9 +16,12 @@ try:
     from database.database_api import db_api
     DATABASE_SYSTEM_AVAILABLE = True
     print("[INFO] New database system initialized")
-except ImportError as e:
+except (ImportError, RuntimeError, ValueError) as e:
     print(f"[WARN] New database system not available: {e}")
     DATABASE_SYSTEM_AVAILABLE = False
+    db_manager = None
+    db_ops = None
+    db_api = None
 
 # Импорты для оптимизации
 try:
@@ -170,21 +173,38 @@ DATABASE_URL_RAW = os.environ.get('DATABASE_URL', '').strip()
 DATABASE_URL = _normalize_db_url(DATABASE_URL_RAW)
 engine = None
 SessionLocal = None
+
 if DATABASE_URL:
-    # Пул подключений с pre_ping и таймаутами; параметры можно переопределить через переменные окружения
-    _pool_size = int(os.environ.get('DB_POOL_SIZE', '5'))
-    _max_overflow = int(os.environ.get('DB_MAX_OVERFLOW', '10'))
-    _pool_recycle = int(os.environ.get('DB_POOL_RECYCLE', '1800'))  # 30 минут
-    _pool_timeout = int(os.environ.get('DB_POOL_TIMEOUT', '30'))
-    engine = create_engine(
-        DATABASE_URL,
-        pool_pre_ping=True,
-        pool_size=_pool_size,
-        max_overflow=_max_overflow,
-        pool_recycle=_pool_recycle,
-        pool_timeout=_pool_timeout,
-    )
-    SessionLocal = sessionmaker(bind=engine)
+    try:
+        # Пул подключений с pre_ping и таймаутами; параметры можно переопределить через переменные окружения
+        _pool_size = int(os.environ.get('DB_POOL_SIZE', '5'))
+        _max_overflow = int(os.environ.get('DB_MAX_OVERFLOW', '10'))
+        _pool_recycle = int(os.environ.get('DB_POOL_RECYCLE', '1800'))  # 30 минут
+        _pool_timeout = int(os.environ.get('DB_POOL_TIMEOUT', '30'))
+        
+        engine = create_engine(
+            DATABASE_URL,
+            pool_pre_ping=True,
+            pool_size=_pool_size,
+            max_overflow=_max_overflow,
+            pool_recycle=_pool_recycle,
+            pool_timeout=_pool_timeout,
+        )
+        
+        # Проверяем соединение
+        with engine.connect() as conn:
+            conn.execute("SELECT 1")
+            
+        SessionLocal = sessionmaker(bind=engine)
+        print("[INFO] PostgreSQL database connected successfully")
+        
+    except Exception as e:
+        print(f"[ERROR] Failed to connect to PostgreSQL: {e}")
+        print("[INFO] Application will run without database functionality")
+        engine = None
+        SessionLocal = None
+else:
+    print("[WARN] DATABASE_URL not configured, running without database")
 Base = declarative_base()
 
 # Caches and TTLs

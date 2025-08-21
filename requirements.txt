@@ -1,17 +1,16 @@
-Flask==2.3.3
-gspread==5.12.1
-google-auth==2.33.0
-python-dotenv==1.0.1
-SQLAlchemy==2.0.32
-psycopg[binary]==3.2.9
-flask-compress==1.15
-requests==2.32.3
+Flask==3.0.0
+gspread==6.0.0
+google-auth==2.23.4
+python-dotenv==1.0.0
+SQLAlchemy==2.0.23
+flask-compress==1.14
+requests==2.31.0
 
 # Оптимизации производительности
-redis==5.0.7
+redis==5.0.1
 flask-socketio==5.3.6
 python-socketio==5.11.0
 
 # Database system dependencies
-psycopg2-binary==2.9.9  # Alternative PostgreSQL adapter
-alembic==1.13.2  # Database migrations (optional)
+psycopg[binary]==3.1.18  # PostgreSQL adapter for Python 3.13
+alembic==1.13.1  # Database migrations (optional)

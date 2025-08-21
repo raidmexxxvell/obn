@@ -183,29 +183,47 @@ class PlayerStatistics(Base):
 # Database connection and session management
 class DatabaseManager:
     def __init__(self, database_url=None):
-        if database_url is None:
-            database_url = os.getenv('DATABASE_URL', 'postgresql://user:password@localhost/liga_obninska')
-        
-        self.engine = create_engine(database_url, 
-                                   pool_size=10, 
-                                   max_overflow=20, 
-                                   pool_pre_ping=True)
-        self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
+        self.database_url = database_url or os.getenv('DATABASE_URL')
+        self.engine = None
+        self.SessionLocal = None
+        self._initialized = False
+    
+    def _ensure_initialized(self):
+        """Ленивая инициализация - подключение только при первом использовании"""
+        if self._initialized:
+            return
+            
+        if not self.database_url:
+            raise ValueError("DATABASE_URL not configured")
+            
+        try:
+            self.engine = create_engine(self.database_url, 
+                                       pool_size=10, 
+                                       max_overflow=20, 
+                                       pool_pre_ping=True)
+            self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
+            self._initialized = True
+        except Exception as e:
+            raise RuntimeError(f"Failed to initialize database: {e}")
     
     def create_tables(self):
         """Создание всех таблиц"""
+        self._ensure_initialized()
         Base.metadata.create_all(bind=self.engine)
     
     def drop_tables(self):
         """Удаление всех таблиц"""
+        self._ensure_initialized()
         Base.metadata.drop_all(bind=self.engine)
     
     def get_session(self):
         """Получение сессии БД"""
+        self._ensure_initialized()
         return self.SessionLocal()
     
     def execute_sql_file(self, file_path):
         """Выполнение SQL файла"""
+        self._ensure_initialized()
         with open(file_path, 'r', encoding='utf-8') as file:
             sql_content = file.read()
         
