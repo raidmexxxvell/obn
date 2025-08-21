@@ -82,7 +82,8 @@
       pane.__streamInfo = null;
       pane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
       pane.setAttribute('data-match-key', key);
-      pane.style.display = '';
+      // Держим панель скрытой до явной активации вкладки «Трансляция»
+      pane.style.display = 'none';
     }
     return pane;
   }
@@ -132,7 +133,46 @@
       lastTapTime = now;
     }, { passive: false });
     
-    ratio.appendChild(ifr); host.appendChild(ratio);
+    // Кнопка «на весь экран»: сначала пробуем нативный Fullscreen API, иначе — псевдо-фуллскрин
+    const fsBtn = document.createElement('button');
+    fsBtn.className = 'stream-fs-btn';
+    fsBtn.type = 'button';
+    fsBtn.title = 'На весь экран';
+    fsBtn.setAttribute('aria-label', 'На весь экран');
+    fsBtn.textContent = '\u2922'; // ⤢
+    const enterFs = () => {
+      let ok = false;
+      try {
+        if (ifr.requestFullscreen) { ifr.requestFullscreen(); ok = true; }
+        else if (ifr.webkitRequestFullscreen) { ifr.webkitRequestFullscreen(); ok = true; }
+        else if (ifr.mozRequestFullScreen) { ifr.mozRequestFullScreen(); ok = true; }
+      } catch(_) {}
+      if (!ok) {
+        // Псевдо-фуллскрин: фиксируем контейнер на весь вьюпорт
+        try { const paneEl = pane; paneEl.classList.add('fs-mode'); document.body.classList.add('allow-landscape'); } catch(_) {}
+      }
+    };
+    const exitPseudo = () => { try { pane.classList.remove('fs-mode'); } catch(_) {} };
+    fsBtn.addEventListener('click', (e)=>{ 
+      e.preventDefault(); 
+      try {
+        if (document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement) {
+          if (document.exitFullscreen) document.exitFullscreen();
+          else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+          else if (document.mozCancelFullScreen) document.mozCancelFullScreen();
+          return;
+        }
+      } catch(_) {}
+      if (pane.classList?.contains('fs-mode')) exitPseudo(); else enterFs();
+    });
+    document.addEventListener('fullscreenchange', ()=>{
+      try {
+        const fs = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement;
+        if (!fs) exitPseudo();
+      } catch(_) {}
+    });
+
+    ratio.appendChild(ifr); host.appendChild(ratio); host.appendChild(fsBtn);
   pane.innerHTML='';
   pane.appendChild(host);
     pane.__inited = true;

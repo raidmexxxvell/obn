@@ -2558,7 +2558,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 btn.classList.add('active');
                 const key = btn.getAttribute('data-mdtab');
                 // Всегда скрываем панель трансляции при переходе на другие вкладки и запрещаем landscape
-                if (streamPane) streamPane.style.display = 'none';
+                try { const spForce = document.getElementById('md-pane-stream'); if (spForce) spForce.style.display = 'none'; } catch(_) {}
                 try { document.body.classList.remove('allow-landscape'); } catch(_) {}
     if (key === 'home') { homePane.style.display = ''; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; statsPane.style.display = 'none'; }
     else if (key === 'away') { homePane.style.display = 'none'; awayPane.style.display = ''; specialsPane.style.display = 'none'; statsPane.style.display = 'none'; }
@@ -2597,8 +2597,13 @@ document.addEventListener('DOMContentLoaded', () => {
             if (subtabs && !subtabs.__streamDelegated) {
                 subtabs.__streamDelegated = true;
                 subtabs.addEventListener('click', (e) => {
+                    // Если клик не по вкладке stream — принудительно прячем панель
+                    if (!e.target.closest('.subtab-item[data-mdtab="stream"]')) {
+                        try { const spLeak = document.getElementById('md-pane-stream'); if (spLeak) spLeak.style.display='none'; } catch(_) {}
+                        try { document.body.classList.remove('allow-landscape'); } catch(_) {}
+                        return;
+                    }
                     const btn = e.target.closest('.subtab-item[data-mdtab="stream"]');
-                    if (!btn) return;
                     e.preventDefault();
                     // Имитация логики обработки клика по вкладке «stream»
                     mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach((x)=>x.classList.remove('active'));
@@ -2740,6 +2745,8 @@ document.addEventListener('DOMContentLoaded', () => {
             try { if (scorePoll) { clearInterval(scorePoll); scorePoll = null; } } catch(_) {}
             // останов поллинга комментариев, если был
             try { if (window.Streams && typeof window.Streams.resetOnLeave === 'function') window.Streams.resetOnLeave(mdPane); } catch(_) {}
+            try { const spLeak = document.getElementById('md-pane-stream'); if (spLeak) spLeak.classList.remove('fs-mode'); } catch(_) {}
+            try { document.body.classList.remove('allow-landscape'); } catch(_) {}
             // вернуть расписание
             mdPane.style.display = 'none';
             schedulePane.style.display = '';
