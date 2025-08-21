@@ -1765,6 +1765,7 @@ if(!window.openMatchScreen){
     // Стартовая предзагрузка UFO-данных во время заставки
     preloadUfoData();
     setupEventListeners();
+    try { window.__NAV_INITIALIZED__ = true; } catch(_) {}
     try { window.Shop?.updateCartBadge?.(); } catch(_) {}
 
     // LIVE notifications перенесены в profile-live.js

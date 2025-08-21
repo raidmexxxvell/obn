@@ -18,22 +18,25 @@ class RealtimeUpdater {
     
     initSocket() {
         try {
+            if (!window.__WEBSOCKETS_ENABLED__) { console.log('[RealtimeUpdater] WebSockets disabled flag'); return; }
             // Проверяем поддержку Socket.IO
             if (typeof io === 'undefined') {
                 console.warn('[RealtimeUpdater] Socket.IO not available, falling back to polling');
                 return;
             }
-            
+            // Пробный ping на /socket.io/ без апгрейда: если 4xx/5xx — отключаем
+            try {
+                fetch('/socket.io/?EIO=4&transport=polling&t=' + Date.now(), { method: 'GET' })
+                    .then(r => { if (!r.ok) { console.warn('[RealtimeUpdater] Preflight failed', r.status); window.__WEBSOCKETS_ENABLED__ = false; } });
+            } catch(_) {}
             this.socket = io({
-                transports: ['websocket', 'polling'],
+                transports: ['websocket','polling'],
                 upgrade: true,
                 rememberUpgrade: true,
                 timeout: 20000,
                 forceNew: false
             });
-            
             this.setupEventHandlers();
-            
         } catch (error) {
             console.error('[RealtimeUpdater] Failed to initialize WebSocket:', error);
         }

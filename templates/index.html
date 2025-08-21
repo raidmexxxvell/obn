@@ -11,6 +11,10 @@
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <!-- Socket.IO для real-time обновлений -->
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script>
+        // Флаг наличия серверной поддержки WebSocket (можно прокинуть динамически при необходимости)
+        window.__WEBSOCKETS_ENABLED__ = true; // при необходимости заменить серверной логикой
+    </script>
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="stylesheet" href="/static/css/splash.css">
     <link rel="stylesheet" href="/static/css/blb.css">
@@ -517,6 +521,7 @@
     <script src="/static/js/profile-ads-featured.js"></script>
     <script src="/static/js/profile-core.js"></script>
     <script src="/static/js/profile.js"></script>
+    <script src="/static/js/nav-fallback.js"></script>
     <script src="/static/js/streams.js"></script>
     <script src="/static/js/predictions.js"></script>
     <!-- Real-time обновления через WebSocket -->
