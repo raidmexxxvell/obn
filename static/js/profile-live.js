@@ -67,18 +67,7 @@
     } catch(_) {}
   }
   setInterval(scan, 30000);
-  document.addEventListener('DOMContentLoaded', () => {
-    try {
-      const adminId = document.body.getAttribute('data-admin');
-      const currentId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id ? String(window.Telegram.WebApp.initDataUnsafe.user.id) : '';
-      if (adminId && currentId && String(adminId) === currentId){
-        const btn = document.createElement('button');
-        btn.textContent='Тест уведомления LIVE'; btn.className='details-btn';
-        btn.style.position='fixed'; btn.style.bottom='90px'; btn.style.right='12px'; btn.style.zIndex='9999';
-        btn.addEventListener('click', () => notify('Демо уведомление: Команда 1 — Команда 2'));
-        document.body.appendChild(btn);
-      }
-    } catch(_) {}
-  });
+  // Убрана тестовая кнопка уведомления LIVE (оставляем возможность повторно включить через консоль при необходимости)
+  document.addEventListener('DOMContentLoaded', () => { /* no test button */ });
   window.ProfileLive = { scan };
 })();

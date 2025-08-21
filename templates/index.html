@@ -521,6 +521,31 @@
     <script src="/static/js/predictions.js"></script>
     <!-- Real-time обновления через WebSocket -->
     <script src="/static/js/realtime-updates.js"></script>
+        <script>
+        // Fallback навигации: активируется, если основной скрипт не сработал (некоторые мобильные WebView срезают ошибки)
+        (function(){
+            try {
+                if (window.__NAV_FALLBACK_INIT__) return; // уже инициализировано
+                const nav = document.querySelectorAll('.nav-item');
+                // если основная логика не выставила глобальный маркер
+                if (!window.ProfileLive && nav.length) {
+                    window.__NAV_FALLBACK_INIT__ = true;
+                    nav.forEach(it => {
+                        it.addEventListener('click', () => {
+                            try {
+                                document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+                                it.classList.add('active');
+                                const tab = it.getAttribute('data-tab');
+                                ['home','ufo','predictions','leaderboard','shop','admin','profile'].forEach(id=>{
+                                    const el = document.getElementById('tab-'+id); if(el) el.style.display = (tab===id?'':'none');
+                                });
+                            } catch(e) { console.warn('Fallback nav error', e); }
+                        }, { passive:true });
+                    });
+                }
+            } catch(e) {}
+        })();
+        </script>
 
 </body>
 </html>

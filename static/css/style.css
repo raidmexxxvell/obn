@@ -70,6 +70,9 @@ body {
     cursor: pointer;
     min-width: auto;
     position: relative;
+    -webkit-tap-highlight-color: transparent; /* убрать подсветку */
+    touch-action: manipulation; /* улучшить отзывчивость */
+    user-select: none;
 }
 
 .nav-item:hover, .nav-item.active {
