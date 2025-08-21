@@ -2557,8 +2557,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach((x)=>x.classList.remove('active'));
                 btn.classList.add('active');
                 const key = btn.getAttribute('data-mdtab');
-                // Всегда скрываем панель трансляции при переходе на другие вкладки
+                // Всегда скрываем панель трансляции при переходе на другие вкладки и запрещаем landscape
                 if (streamPane) streamPane.style.display = 'none';
+                try { document.body.classList.remove('allow-landscape'); } catch(_) {}
     if (key === 'home') { homePane.style.display = ''; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; statsPane.style.display = 'none'; }
     else if (key === 'away') { homePane.style.display = 'none'; awayPane.style.display = ''; specialsPane.style.display = 'none'; statsPane.style.display = 'none'; }
                 else if (key === 'specials') {
@@ -2566,7 +2567,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     // отрисуем спецпанель внутри specialsPane
                     renderSpecialsPane(specialsPane, match);
                     statsPane.style.display = 'none';
-        } else if (key === 'stream') {
+    } else if (key === 'stream') {
                     homePane.style.display = 'none'; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; statsPane.style.display = 'none';
                     // Гарантируем наличие панели и запускаем ленивую инициализацию через Streams.js
                     streamPane = document.getElementById('md-pane-stream');
@@ -2577,6 +2578,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         streamPane.style.display = '';
             try { console.debug('[profile] stream tab activated'); } catch(_) {}
             try { if (window.Streams && typeof window.Streams.onStreamTabActivated === 'function') window.Streams.onStreamTabActivated(streamPane, match); } catch(_) {}
+            // Разрешаем landscape для полноэкранного режима VK плеера
+            try { document.body.classList.add('allow-landscape'); } catch(_) {}
                     } else {
                         // Нет ссылки/панели — возвращаемся на вкладку команды
                         btn.classList.remove('active');
@@ -2609,10 +2612,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         sp.style.display = '';
                         try { console.debug('[profile] stream tab delegated click -> activate'); } catch(_) {}
                         try { if (window.Streams && typeof window.Streams.onStreamTabActivated === 'function') window.Streams.onStreamTabActivated(sp, match); } catch(_) {}
+                        try { document.body.classList.add('allow-landscape'); } catch(_) {}
                     } else {
                         // Нет ссылки — возвращаемся на «home»
                         const homeTab = mdPane.querySelector('.modal-subtabs .subtab-item[data-mdtab="home"]');
                         if (homeTab) { homeTab.classList.add('active'); homePane.style.display=''; }
+                        try { document.body.classList.remove('allow-landscape'); } catch(_) {}
                     }
                 });
             }

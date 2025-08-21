@@ -31,7 +31,8 @@ body {
 .orientation-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); color:#fff; display:none; z-index: 2000; }
 .orientation-overlay .orientation-inner { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); text-align:center; padding:16px 20px; border:1px solid rgba(255,255,255,0.15); border-radius:12px; background: rgba(15,23,42,0.95); font-weight:800; }
 @media (orientation: landscape) and (max-width: 1024px) {
-    .orientation-overlay { display: block; }
+    /* Показываем оверлей только если НЕ разрешён ландшафт (напр. вне вкладки с трансляцией) */
+    body:not(.allow-landscape) .orientation-overlay { display: block; }
 }
 
 .container { max-width: 600px; margin: 0 auto; padding: 0 12px; } /* внутренние отступы переносим в контейнер */
