@@ -66,10 +66,16 @@ if OPTIMIZATIONS_AVAILABLE:
         # WebSocket для real-time обновлений
         try:
             from flask_socketio import SocketIO
-            socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+            # Упрощенная инициализация для совместимости
+            socketio = SocketIO(app, cors_allowed_origins="*", logger=False, engineio_logger=False)
             websocket_manager = WebSocketManager(socketio)
+            print("[INFO] WebSocket system initialized successfully")
         except ImportError:
             print("[WARN] Flask-SocketIO not available, WebSocket disabled")
+            socketio = None
+            websocket_manager = None
+        except Exception as e:
+            print(f"[WARN] Failed to initialize WebSocket: {e}")
             socketio = None
             websocket_manager = None
         

@@ -36,6 +36,9 @@ class WebSocketManager:
         Уведомляет всех подключенных пользователей об изменении данных
         data_type: 'league_table', 'schedule', 'match_score', 'match_status', etc.
         """
+        if not self.socketio:
+            return
+            
         message = {
             'type': 'data_update',
             'data_type': data_type,
@@ -43,20 +46,29 @@ class WebSocketManager:
             'data': data
         }
         
-        # Отправляем всем подключенным пользователям
-        self.socketio.emit('data_changed', message, broadcast=True)
-        logger.info(f"Sent {data_type} update to all connected users")
+        try:
+            # Отправляем всем подключенным пользователям (совместимый синтаксис)
+            self.socketio.emit('data_changed', message, namespace='/')
+            logger.info(f"Sent {data_type} update to all connected users")
+        except Exception as e:
+            logger.warning(f"Failed to send WebSocket notification for {data_type}: {e}")
 
     def notify_match_live_update(self, home: str, away: str, update_data: dict):
         """Специальные уведомления для live-матчей"""
-        room = f"match_{home}_{away}"
-        message = {
-            'type': 'match_live_update',
-            'home': home,
-            'away': away,
-            'data': update_data
-        }
-        self.socketio.emit('live_update', message, room=room)
+        if not self.socketio:
+            return
+            
+        try:
+            room = f"match_{home}_{away}"
+            message = {
+                'type': 'match_live_update',
+                'home': home,
+                'away': away,
+                'data': update_data
+            }
+            self.socketio.emit('live_update', message, room=room, namespace='/')
+        except Exception as e:
+            logger.warning(f"Failed to send live match update: {e}")
 
     def get_connected_count(self) -> int:
         """Возвращает количество подключенных пользователей"""
