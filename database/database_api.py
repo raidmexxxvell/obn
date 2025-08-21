@@ -4,6 +4,7 @@ Replaces Google Sheets functionality with PostgreSQL database
 """
 
 from flask import Blueprint, request, jsonify, session
+from flask import current_app
 from .database_models import db_ops, db_manager, Tournament, Team, Player, Match, MatchEvent, TeamComposition, PlayerStatistics
 from sqlalchemy import text
 from datetime import datetime, timedelta
@@ -138,21 +139,18 @@ def update_match_score(match_id):
         
         if db_ops.update_match_score(match_id, home_score, away_score):
             
-            # Отправить WebSocket уведомление
+            # Отправить WebSocket уведомление (без прямого импорта)
             try:
-                from optimizations.websocket_manager import websocket_manager
-                if websocket_manager:
-                    websocket_manager.notify_match_live_update(
-                        data.get('home_team', ''), 
-                        data.get('away_team', ''),
-                        {
-                            'home_score': home_score,
-                            'away_score': away_score,
-                            'updated_at': datetime.now().isoformat()
-                        }
-                    )
-            except Exception as e:
-                logging.warning(f"Failed to send WebSocket update: {e}")
+                ws = current_app.config.get('websocket_manager')
+                if ws:
+                    ws.notify_data_change('match_score', {
+                        'match_id': match_id,
+                        'home_score': home_score,
+                        'away_score': away_score,
+                        'updated_at': datetime.now().isoformat()
+                    })
+            except Exception:
+                pass
             
             return jsonify({'success': True, 'message': 'Счет обновлен'})
         else:
@@ -211,9 +209,9 @@ def add_match_event(match_id):
         
         # Отправить WebSocket уведомление
         try:
-            from optimizations.websocket_manager import websocket_manager
-            if websocket_manager:
-                websocket_manager.notify_data_change('match_events', {
+            ws = current_app.config.get('websocket_manager')
+            if ws:
+                ws.notify_data_change('match_events', {
                     'event_id': event_id,
                     'event_type': event_type,
                     'player_id': player_id,
@@ -222,8 +220,8 @@ def add_match_event(match_id):
                     'description': description,
                     'updated_at': datetime.now().isoformat()
                 })
-        except Exception as e:
-            logging.warning(f"Failed to send WebSocket update: {e}")
+        except Exception:
+            pass
         
         return jsonify({'success': True, 'event_id': event_id})
         

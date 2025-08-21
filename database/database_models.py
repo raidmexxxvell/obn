@@ -4,8 +4,7 @@ Using PostgreSQL database schema
 """
 
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Text, Date, BigInteger, ForeignKey, UniqueConstraint, CheckConstraint, text
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from sqlalchemy.sql import func
 from datetime import datetime
 import os

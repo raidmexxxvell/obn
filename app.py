@@ -72,6 +72,8 @@ if OPTIMIZATIONS_AVAILABLE:
             # Упрощенная инициализация для совместимости
             socketio = SocketIO(app, cors_allowed_origins="*", logger=False, engineio_logger=False)
             websocket_manager = WebSocketManager(socketio)
+            # Делаем доступным через current_app.config
+            app.config['websocket_manager'] = websocket_manager
             print("[INFO] WebSocket system initialized successfully")
         except ImportError:
             print("[WARN] Flask-SocketIO not available, WebSocket disabled")
