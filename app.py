@@ -7180,28 +7180,102 @@ def api_stats_table():
                     resp.headers['ETag'] = _etag
                     resp.headers['Cache-Control'] = 'public, max-age=1800, stale-while-revalidate=600'
                     return resp
-                # Если снапшота нет – сформируем временную таблицу из случайных игроков (10 строк)
+                # Если снапшота нет – сформируем таблицу из реальных игроков БД
                 # Структура: A: Имя, B: Матчи, C: Голы, D: Пасы, E: Желтые, F: Красные, G: Очки
                 try:
-                    from database.database_models import PlayerStatistics, Player  # локальный импорт чтобы не падать при отсутствии новой БД
+                    from database.database_models import PlayerStatistics, Player, MatchEvent
                 except Exception:
-                    PlayerStatistics = Player = None
+                    PlayerStatistics = Player = MatchEvent = None
+                    
                 temp_values = []
                 header = ['Игрок', 'Матчи', 'Голы', 'Пасы', 'ЖК', 'КК', 'Очки']
-                if Player and PlayerStatistics:
+                
+                if Player and MatchEvent:
                     try:
-                        # Выбираем до 25 игроков, затем случайно 10 (если доступно random в SQL)
-                        q = db.query(Player).limit(25).all()
-                        import random as _r
-                        _r.shuffle(q)
-                        pick = q[:10]
-                        for p in pick:
-                            temp_values.append([
-                                (p.first_name or '') + ((' ' + p.last_name) if p.last_name else ''),
-                                0, 0, 0, 0, 0, 0
-                            ])
+                        # Получаем статистику игроков из событий матчей
+                        from sqlalchemy import func, desc
+                        
+                        # Подзапрос для подсчета голов
+                        goals_subq = db.query(
+                            MatchEvent.player_id,
+                            func.count(MatchEvent.id).label('goals')
+                        ).filter(MatchEvent.event_type == 'goal').group_by(MatchEvent.player_id).subquery()
+                        
+                        # Подзапрос для подсчета передач
+                        assists_subq = db.query(
+                            MatchEvent.assisted_by_player_id.label('player_id'),
+                            func.count(MatchEvent.id).label('assists')
+                        ).filter(
+                            MatchEvent.event_type == 'goal',
+                            MatchEvent.assisted_by_player_id.isnot(None)
+                        ).group_by(MatchEvent.assisted_by_player_id).subquery()
+                        
+                        # Подзапрос для желтых карточек
+                        yellow_subq = db.query(
+                            MatchEvent.player_id,
+                            func.count(MatchEvent.id).label('yellows')
+                        ).filter(MatchEvent.event_type == 'yellow_card').group_by(MatchEvent.player_id).subquery()
+                        
+                        # Подзапрос для красных карточек
+                        red_subq = db.query(
+                            MatchEvent.player_id,
+                            func.count(MatchEvent.id).label('reds')
+                        ).filter(MatchEvent.event_type == 'red_card').group_by(MatchEvent.player_id).subquery()
+                        
+                        # Основной запрос с джойнами
+                        stats_query = db.query(
+                            Player.first_name,
+                            Player.last_name,
+                            func.coalesce(goals_subq.c.goals, 0).label('goals'),
+                            func.coalesce(assists_subq.c.assists, 0).label('assists'),
+                            func.coalesce(yellow_subq.c.yellows, 0).label('yellows'),
+                            func.coalesce(red_subq.c.reds, 0).label('reds')
+                        ).outerjoin(goals_subq, Player.id == goals_subq.c.player_id
+                        ).outerjoin(assists_subq, Player.id == assists_subq.c.player_id
+                        ).outerjoin(yellow_subq, Player.id == yellow_subq.c.player_id
+                        ).outerjoin(red_subq, Player.id == red_subq.c.player_id
+                        ).order_by(
+                            desc(func.coalesce(goals_subq.c.goals, 0) + func.coalesce(assists_subq.c.assists, 0)),  # по голам+передачам
+                            desc(func.coalesce(goals_subq.c.goals, 0))  # затем по голам
+                        ).limit(10)
+                        
+                        results = stats_query.all()
+                        
+                        for row in results:
+                            name = (row.first_name or '') + ((' ' + row.last_name) if row.last_name else '')
+                            goals = int(row.goals or 0)
+                            assists = int(row.assists or 0)
+                            yellows = int(row.yellows or 0)
+                            reds = int(row.reds or 0)
+                            points = goals + assists
+                            matches = 0  # пока не считаем матчи, можно добавить позже
+                            
+                            temp_values.append([name, matches, goals, assists, yellows, reds, points])
+                            
+                        # Если игроков меньше 10, добавляем игроков без событий
+                        if len(temp_values) < 10:
+                            remaining_players = db.query(Player).filter(
+                                ~Player.id.in_([r[0] for r in results] if results else [])
+                            ).limit(10 - len(temp_values)).all()
+                            
+                            for p in remaining_players:
+                                name = (p.first_name or '') + ((' ' + p.last_name) if p.last_name else '')
+                                temp_values.append([name, 0, 0, 0, 0, 0, 0])
+                                
+                    except Exception as e:
+                        print(f"[DEBUG] Stats query error: {e}")
+                        pass
+                        
+                # Если все еще нет данных, случайные игроки из Player таблицы
+                if not temp_values and Player:
+                    try:
+                        players = db.query(Player).limit(10).all()
+                        for p in players:
+                            name = (p.first_name or '') + ((' ' + p.last_name) if p.last_name else '')
+                            temp_values.append([name, 0, 0, 0, 0, 0, 0])
                     except Exception:
                         pass
+                        
                 if not temp_values:
                     # Заглушки, если нет игроков
                     temp_values = [[f'Игрок {i}', 0, 0, 0, 0, 0, 0] for i in range(1, 11)]

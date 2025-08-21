@@ -95,7 +95,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch(_) { return _teamCountsCache; }
     }
     function withTeamCount(name) {
-        const n = (name || '').toString();
+        const n = String(name || '');
         try {
             const cnt = _teamCountsCache.byTeam && _teamCountsCache.byTeam[n];
             return cnt ? `${n} (${cnt})` : n;
@@ -108,12 +108,12 @@ document.addEventListener('DOMContentLoaded', () => {
         favoriteTeamSelect.innerHTML = '';
         const ph = document.createElement('option'); ph.value = ''; ph.textContent = '— выбрать —';
         favoriteTeamSelect.appendChild(ph);
-        (_teamCountsCache.teams || []).forEach(t => {
+        (_teamCountsCache.teams || []).forEach(teamName => {
             const opt = document.createElement('option');
-            opt.value = t;
+            opt.value = String(teamName);
             // В профиле — без числа фанатов
-            opt.textContent = t;
-            if (currentFavorite && currentFavorite === t) opt.selected = true;
+            opt.textContent = String(teamName);
+            if (currentFavorite && String(currentFavorite) === String(teamName)) opt.selected = true;
             favoriteTeamSelect.appendChild(opt);
         });
     }

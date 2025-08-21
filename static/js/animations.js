@@ -518,6 +518,65 @@ const animationStyles = `
     width: 18px;
     height: 18px;
     object-fit: contain;
+
+/* Уведомления о начале матча */
+.match-start-notification {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: linear-gradient(135deg, #1976d2, #42a5f5);
+    color: white;
+    padding: 16px 20px;
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+    z-index: 10000;
+    cursor: pointer;
+    animation: slideInFromTop 0.5s ease-out;
+    max-width: 90vw;
+    min-width: 280px;
+}
+
+.notification-content {
+    text-align: center;
+}
+
+.notification-title {
+    font-weight: bold;
+    font-size: 14px;
+    margin-bottom: 8px;
+}
+
+.match-teams {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+}
+
+.team-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+}
+
+.vs {
+    font-weight: bold;
+    font-size: 12px;
+    opacity: 0.8;
+}
+
+@keyframes slideInFromTop {
+    from {
+        opacity: 0;
+        transform: translateX(-50%) translateY(-100%);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
+}
     border-radius: 2px;
     flex-shrink: 0;
     filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
@@ -700,19 +759,51 @@ const styleSheet = document.createElement('style');
 styleSheet.textContent = animationStyles;
 document.head.appendChild(styleSheet);
 
-// Автоматическая инициализация при загрузке DOM
-document.addEventListener('DOMContentLoaded', () => {
-    // Добавляем логотипы к существующим названиям команд
-    setTimeout(() => {
-        if (window.enhanceTeamNames) {
-            window.enhanceTeamNames();
-        }
-    }, 1000); // небольшая задержка для загрузки контента
-});
-
-// Периодически проверяем новые элементы (для динамически добавляемого контента)
-setInterval(() => {
-    if (window.enhanceTeamNames) {
-        window.enhanceTeamNames();
+// Match start notification system
+window.MatchNotifications = {
+    shownMatches: new Set(),
+    
+    showMatchStartNotification(match) {
+        const matchKey = `${match.home}_${match.away}_${match.date}`;
+        if (this.shownMatches.has(matchKey)) return;
+        
+        this.shownMatches.add(matchKey);
+        
+        const notification = document.createElement('div');
+        notification.className = 'match-start-notification';
+        notification.innerHTML = `
+            <div class="notification-content">
+                <div class="notification-title">Матч начался!</div>
+                <div class="match-teams">
+                    <div class="team-item">
+                        ${window.createTeamWithLogo ? window.createTeamWithLogo(match.home, {logoSize: '20px'}).outerHTML : match.home}
+                    </div>
+                    <div class="vs">VS</div>
+                    <div class="team-item">
+                        ${window.createTeamWithLogo ? window.createTeamWithLogo(match.away, {logoSize: '20px'}).outerHTML : match.away}
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        notification.addEventListener('click', () => {
+            // Переход к деталям матча
+            if (window.showMatchDetails) {
+                window.showMatchDetails(match);
+            }
+            notification.remove();
+        });
+        
+        document.body.appendChild(notification);
+        
+        // Автоудаление через 8 секунд
+        setTimeout(() => {
+            try { notification.remove(); } catch(_) {}
+        }, 8000);
+    },
+    
+    checkLiveMatches() {
+        // Проверка запущенных матчей - вызывается при получении данных расписания
+        // Реализация будет добавлена в основной код загрузки матчей
     }
-}, 5000); // каждые 5 секунд
+};
