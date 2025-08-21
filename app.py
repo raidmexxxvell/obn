@@ -2937,9 +2937,180 @@ def _persist_league_table(normalized_values):
     finally:
         db.close()
 
+def _sync_stats_table():
+    """Синхронизация таблицы статистики"""
+    if SessionLocal is None:
+        return
+    db = get_db()
+    try:
+        _metrics_inc('bg_runs_total', 1)
+        t0 = time.time()
+        
+        # Используем оптимизированный Sheets менеджер
+        if sheets_manager:
+            values = sheets_manager.read_range('СТАТИСТИКА', 'A:G')
+            stats_payload = {'values': values or [], 'updated_at': datetime.now(timezone.utc).isoformat()}
+        else:
+            stats_payload = _build_stats_payload_from_sheet()
+            
+        _snapshot_set(db, 'stats-table', stats_payload)
+        _metrics_set('last_sync', 'stats-table', datetime.now(timezone.utc).isoformat())
+        _metrics_set('last_sync_status', 'stats-table', 'ok')
+        _metrics_set('last_sync_duration_ms', 'stats-table', int((time.time()-t0)*1000))
+        
+        # Инвалидируем соответствующий кэш
+        if cache_manager:
+            cache_manager.invalidate('stats_table')
+            
+        # Отправляем WebSocket уведомление
+        if websocket_manager:
+            websocket_manager.notify_data_change('stats_table', stats_payload)
+            
+    except Exception as e:
+        app.logger.warning(f"Stats table sync failed: {e}")
+        _metrics_set('last_sync_status', 'stats-table', 'error')
+        _metrics_note_rate_limit(e)
+    finally:
+        db.close()
+
+def _sync_schedule():
+    """Синхронизация расписания"""
+    if SessionLocal is None:
+        return
+    db = get_db()
+    try:
+        _metrics_inc('bg_runs_total', 1)
+        t0 = time.time()
+        
+        # Используем оптимизированный Sheets менеджер
+        if sheets_manager:
+            schedule_payload = _build_schedule_payload_from_sheet()
+        else:
+            schedule_payload = _build_schedule_payload_from_sheet()
+            
+        _snapshot_set(db, 'schedule', schedule_payload)
+        _metrics_set('last_sync', 'schedule', datetime.now(timezone.utc).isoformat())
+        _metrics_set('last_sync_status', 'schedule', 'ok')
+        _metrics_set('last_sync_duration_ms', 'schedule', int((time.time()-t0)*1000))
+        
+        # Инвалидируем соответствующий кэш
+        if cache_manager:
+            cache_manager.invalidate('schedule')
+            
+        # Отправляем WebSocket уведомление
+        if websocket_manager:
+            websocket_manager.notify_data_change('schedule', schedule_payload)
+            
+    except Exception as e:
+        app.logger.warning(f"Schedule sync failed: {e}")
+        _metrics_set('last_sync_status', 'schedule', 'error')
+        _metrics_note_rate_limit(e)
+    finally:
+        db.close()
+
+def _sync_results():
+    """Синхронизация результатов"""
+    if SessionLocal is None:
+        return
+    db = get_db()
+    try:
+        _metrics_inc('bg_runs_total', 1)
+        t0 = time.time()
+        
+        results_payload = _build_results_payload_from_sheet()
+        _snapshot_set(db, 'results', results_payload)
+        _metrics_set('last_sync', 'results', datetime.now(timezone.utc).isoformat())
+        _metrics_set('last_sync_status', 'results', 'ok')
+        _metrics_set('last_sync_duration_ms', 'results', int((time.time()-t0)*1000))
+        
+        # Инвалидируем соответствующий кэш
+        if cache_manager:
+            cache_manager.invalidate('results')
+            
+        # Отправляем WebSocket уведомление
+        if websocket_manager:
+            websocket_manager.notify_data_change('results', results_payload)
+            
+    except Exception as e:
+        app.logger.warning(f"Results sync failed: {e}")
+        _metrics_set('last_sync_status', 'results', 'error')
+        _metrics_note_rate_limit(e)
+    finally:
+        db.close()
+
+def _sync_betting_tours():
+    """Синхронизация туров ставок"""
+    if SessionLocal is None:
+        return
+    db = get_db()
+    try:
+        _metrics_inc('bg_runs_total', 1)
+        t0 = time.time()
+        
+        tours_payload = _build_betting_tours_payload()
+        _snapshot_set(db, 'betting-tours', tours_payload)
+        _metrics_set('last_sync', 'betting-tours', datetime.now(timezone.utc).isoformat())
+        _metrics_set('last_sync_status', 'betting-tours', 'ok')
+        _metrics_set('last_sync_duration_ms', 'betting-tours', int((time.time()-t0)*1000))
+        
+        # Инвалидируем соответствующий кэш
+        if cache_manager:
+            cache_manager.invalidate('betting_tours')
+            
+        # Отправляем WebSocket уведомление
+        if websocket_manager:
+            websocket_manager.notify_data_change('betting_tours', tours_payload)
+            
+    except Exception as e:
+        app.logger.warning(f"Betting tours sync failed: {e}")
+        _metrics_set('last_sync_status', 'betting-tours', 'error')
+        _metrics_note_rate_limit(e)
+    finally:
+        db.close()
+
+def _sync_leaderboards():
+    """Синхронизация лидербордов"""
+    if SessionLocal is None:
+        return
+    db = get_db()
+    try:
+        _metrics_inc('bg_runs_total', 1)
+        t0 = time.time()
+        
+        lb_payloads = _build_leaderboards_payloads(db)
+        _snapshot_set(db, 'leader-top-predictors', lb_payloads['top_predictors'])
+        _snapshot_set(db, 'leader-top-rich', lb_payloads['top_rich'])
+        _snapshot_set(db, 'leader-server-leaders', lb_payloads['server_leaders'])
+        _snapshot_set(db, 'leader-prizes', lb_payloads['prizes'])
+        
+        now_iso = datetime.now(timezone.utc).isoformat()
+        _metrics_set('last_sync', 'leaderboards', now_iso)
+        _metrics_set('last_sync_status', 'leaderboards', 'ok')
+        _metrics_set('last_sync_duration_ms', 'leaderboards', int((time.time()-t0)*1000))
+        
+        # Инвалидируем соответствующий кэш
+        if cache_manager:
+            cache_manager.invalidate('leaderboards')
+            
+        # Отправляем WebSocket уведомление
+        if websocket_manager:
+            websocket_manager.notify_data_change('leaderboards', lb_payloads)
+            
+    except Exception as e:
+        app.logger.warning(f"Leaderboards sync failed: {e}")
+        _metrics_set('last_sync_status', 'leaderboards', 'error')
+        _metrics_note_rate_limit(e)
+    finally:
+        db.close()
+
 def _bg_sync_once_legacy():
     """Старая логика синхронизации (fallback)"""
-
+    if SessionLocal is None:
+        return
+    db = get_db()
+    try:
+        _metrics_inc('bg_runs_total', 1)
+        
         # Stats table
         try:
             t0 = time.time()
