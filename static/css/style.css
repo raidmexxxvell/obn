@@ -185,26 +185,73 @@ body {
     right: 8px; 
     bottom: 8px; 
     z-index: 3; 
-    background: rgba(0,0,0,0.7); 
+    background: rgba(0,0,0,0.8); 
     color: #fff; 
-    border: 1px solid rgba(255,255,255,0.3); 
+    border: 2px solid rgba(255,255,255,0.4); 
     border-radius: 8px; 
-    padding: 8px 10px; 
+    padding: 10px 12px; 
     font-weight: 800; 
     line-height: 1; 
-    font-size: 16px;
+    font-size: 18px;
     cursor: pointer;
     user-select: none;
     -webkit-user-select: none;
     -webkit-tap-highlight-color: transparent;
+    min-width: 40px;
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
-.stream-fs-btn:hover { background: rgba(0,0,0,0.9); }
-.stream-fs-btn:active { transform: scale(0.95); background: rgba(0,0,0,0.9); }
+.stream-fs-btn:hover { background: rgba(0,0,0,0.95); border-color: rgba(255,255,255,0.6); }
+.stream-fs-btn:active { transform: scale(0.92); background: rgba(0,0,0,1); border-color: rgba(255,255,255,0.8); }
 
-/* Псевдо-фуллскрин, когда Fullscreen API недоступен */
-#md-pane-stream.fs-mode { position: fixed !important; inset: 0 !important; z-index: 2500 !important; background: #000 !important; }
-#md-pane-stream.fs-mode .stream-wrap { position: absolute !important; inset: 0 !important; width: 100% !important; height: 100% !important; border-radius: 0 !important; border: none !important; }
-#md-pane-stream.fs-mode .stream-aspect { position: absolute !important; inset: 0 !important; padding: 0 !important; }
+/* Псевдо-фуллскрин для Telegram WebApp на мобильных */
+#md-pane-stream.fs-mode { 
+    position: fixed !important; 
+    inset: 0 !important; 
+    z-index: 2500 !important; 
+    background: #000 !important; 
+    margin: 0 !important;
+    padding: 0 !important;
+    border-radius: 0 !important;
+    border: none !important;
+}
+#md-pane-stream.fs-mode .stream-wrap { 
+    position: absolute !important; 
+    inset: 0 !important; 
+    width: 100% !important; 
+    height: 100% !important; 
+    border-radius: 0 !important; 
+    border: none !important; 
+    margin: 0 !important;
+    padding: 0 !important;
+}
+#md-pane-stream.fs-mode .stream-aspect { 
+    position: absolute !important; 
+    inset: 0 !important; 
+    padding: 0 !important; 
+    margin: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+}
+#md-pane-stream.fs-mode .stream-aspect iframe { 
+    position: absolute !important; 
+    inset: 0 !important; 
+    width: 100% !important; 
+    height: 100% !important; 
+    border: 0 !important; 
+}
+/* Скрываем кнопку фуллскрина в псевдо-режиме */
+#md-pane-stream.fs-mode .stream-fs-btn { display: none !important; }
+
+/* Убираем скролл и другие элементы UI в псевдо-фуллскрине */
+body.allow-landscape #md-pane-stream.fs-mode {
+    overflow: hidden !important;
+}
+body.allow-landscape #md-pane-stream.fs-mode * {
+    -webkit-overflow-scrolling: touch;
+}
 
 /* Комментарии под трансляцией */
 .comments-box { margin-top: 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 8px; }

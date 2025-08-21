@@ -133,21 +133,56 @@
       lastTapTime = now;
     }, { passive: false });
     
-    // Кнопка «на весь экран»: улучшенная версия с отладкой для мобильных
+    // Кнопка «на весь экран»: специальная версия для Telegram WebApp на мобильных
     const fsBtn = document.createElement('button');
     fsBtn.className = 'stream-fs-btn';
     fsBtn.type = 'button';
     fsBtn.title = 'На весь экран';
     fsBtn.setAttribute('aria-label', 'На весь экран');
-    fsBtn.innerHTML = '&#x26F6;'; // ⛶ или используем ⤢
+    fsBtn.innerHTML = '&#x26F6;'; // ⛶
+    
+    // Проверяем среду выполнения
+    const isTelegramWebApp = typeof window.Telegram !== 'undefined' && window.Telegram.WebApp;
+    const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    const isTelegramMobile = isTelegramWebApp && isMobile;
     
     const enterFs = () => {
-      if (DBG) console.debug('[streams] enterFs: trying fullscreen');
+      if (DBG) console.debug('[streams] enterFs: trying fullscreen', { isTelegramMobile, isMobile, isTelegramWebApp });
+      
+      // В Telegram WebApp на мобильных устройствах Fullscreen API часто заблокирован
+      // Сразу переходим к псевдо-фуллскрину для лучшего UX
+      if (isTelegramMobile) {
+        if (DBG) console.debug('[streams] Telegram mobile detected, using pseudo-fullscreen directly');
+        try { 
+          pane.classList.add('fs-mode'); 
+          document.body.classList.add('allow-landscape');
+          // Принудительно разворачиваем в ландшафт на мобильном устройстве
+          if (window.screen && window.screen.orientation && window.screen.orientation.lock) {
+            window.screen.orientation.lock('landscape').catch(e => {
+              if (DBG) console.debug('[streams] orientation lock failed:', e);
+            });
+          }
+          if (DBG) console.debug('[streams] pseudo-fullscreen enabled for Telegram mobile');
+          return;
+        } catch(e) { 
+          if (DBG) console.debug('[streams] pseudo-fullscreen failed:', e); 
+        }
+      }
+      
+      // Для остальных случаев пробуем нативный API
       let ok = false;
-      // Пробуем разные варианты для мобильных браузеров
       try {
         if (ratio.requestFullscreen) { 
-          ratio.requestFullscreen().then(()=>{ if (DBG) console.debug('[streams] fullscreen success'); }).catch(e=>{ if (DBG) console.debug('[streams] fullscreen failed:', e); }); 
+          ratio.requestFullscreen().then(()=>{ 
+            if (DBG) console.debug('[streams] fullscreen success'); 
+          }).catch(e=>{ 
+            if (DBG) console.debug('[streams] fullscreen failed:', e); 
+            // Fallback к псевдо-фуллскрину
+            try { 
+              pane.classList.add('fs-mode'); 
+              document.body.classList.add('allow-landscape'); 
+            } catch(_) {}
+          }); 
           ok = true; 
         }
         else if (ratio.webkitRequestFullscreen) { 
@@ -161,7 +196,16 @@
           if (DBG) console.debug('[streams] moz fullscreen attempt');
         }
         else if (ifr.requestFullscreen) {
-          ifr.requestFullscreen().then(()=>{ if (DBG) console.debug('[streams] iframe fullscreen success'); }).catch(e=>{ if (DBG) console.debug('[streams] iframe fullscreen failed:', e); });
+          ifr.requestFullscreen().then(()=>{ 
+            if (DBG) console.debug('[streams] iframe fullscreen success'); 
+          }).catch(e=>{ 
+            if (DBG) console.debug('[streams] iframe fullscreen failed:', e);
+            // Fallback к псевдо-фуллскрину
+            try { 
+              pane.classList.add('fs-mode'); 
+              document.body.classList.add('allow-landscape'); 
+            } catch(_) {}
+          });
           ok = true;
         }
       } catch(e) { 
@@ -170,7 +214,6 @@
       
       if (!ok) {
         if (DBG) console.debug('[streams] fallback to pseudo-fullscreen');
-        // Псевдо-фуллскрин: фиксируем контейнер на весь вьюпорт
         try { 
           pane.classList.add('fs-mode'); 
           document.body.classList.add('allow-landscape'); 
@@ -183,7 +226,11 @@
     
     const exitPseudo = () => { 
       try { 
-        pane.classList.remove('fs-mode'); 
+        pane.classList.remove('fs-mode');
+        // Разблокируем ориентацию
+        if (window.screen && window.screen.orientation && window.screen.orientation.unlock) {
+          window.screen.orientation.unlock();
+        }
         if (DBG) console.debug('[streams] pseudo-fullscreen disabled');
       } catch(e) { 
         if (DBG) console.debug('[streams] exit pseudo failed:', e); 

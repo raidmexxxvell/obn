@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Тест фуллскрина в Telegram WebApp</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body { margin: 0; padding: 20px; font-family: Arial, sans-serif; background: #1a1a1a; color: #fff; }
+        .test-area { background: #333; padding: 20px; border-radius: 10px; margin: 10px 0; }
+        .test-btn { 
+            display: block; 
+            width: 100%; 
+            padding: 15px; 
+            margin: 10px 0; 
+            background: #007acc; 
+            color: white; 
+            border: none; 
+            border-radius: 5px; 
+            font-size: 16px; 
+            cursor: pointer;
+        }
+        .test-btn:active { background: #005a99; }
+        .log { background: #000; padding: 10px; border-radius: 5px; font-family: monospace; font-size: 12px; max-height: 200px; overflow-y: auto; }
+        .video-area { 
+            width: 100%; 
+            height: 200px; 
+            background: #000; 
+            position: relative; 
+            border-radius: 10px; 
+            overflow: hidden;
+        }
+        .video-area iframe { width: 100%; height: 100%; border: 0; }
+        .fs-btn { 
+            position: absolute; 
+            right: 10px; 
+            bottom: 10px; 
+            background: rgba(0,0,0,0.7); 
+            color: white; 
+            border: 1px solid #fff; 
+            padding: 5px 10px; 
+            border-radius: 5px; 
+            cursor: pointer;
+        }
+        .pseudo-fs { 
+            position: fixed !important; 
+            inset: 0 !important; 
+            z-index: 9999 !important; 
+            background: #000 !important; 
+        }
+    </style>
+</head>
+<body>
+    <h1>Тест фуллскрина в Telegram WebApp</h1>
+    
+    <div class="test-area">
+        <h3>Информация о среде</h3>
+        <div id="env-info"></div>
+    </div>
+    
+    <div class="test-area">
+        <h3>Тесты Fullscreen API</h3>
+        <button class="test-btn" onclick="testElement()">Тест 1: Фуллскрин элемента</button>
+        <button class="test-btn" onclick="testDocument()">Тест 2: Фуллскрин документа</button>
+        <button class="test-btn" onclick="testIframe()">Тест 3: Фуллскрин iframe</button>
+        <button class="test-btn" onclick="testPseudo()">Тест 4: Псевдо-фуллскрин</button>
+    </div>
+    
+    <div class="test-area">
+        <h3>Тестовое видео</h3>
+        <div class="video-area" id="video-container">
+            <iframe src="https://vk.com/video_ext.php?oid=-123456789&id=456123789&hd=2&autoplay=0" 
+                    allowfullscreen webkitallowfullscreen mozallowfullscreen
+                    allow="autoplay; fullscreen; encrypted-media; picture-in-picture">
+            </iframe>
+            <button class="fs-btn" onclick="testVideoFullscreen()">⛶</button>
+        </div>
+    </div>
+    
+    <div class="test-area">
+        <h3>Лог</h3>
+        <div class="log" id="log"></div>
+        <button class="test-btn" onclick="clearLog()">Очистить лог</button>
+    </div>
+
+    <script>
+        function log(msg) {
+            const logEl = document.getElementById('log');
+            const time = new Date().toLocaleTimeString();
+            logEl.innerHTML += `[${time}] ${msg}\n`;
+            logEl.scrollTop = logEl.scrollHeight;
+            console.log(`[FS-TEST] ${msg}`);
+        }
+        
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+        }
+        
+        // Информация о среде
+        function showEnvInfo() {
+            const info = document.getElementById('env-info');
+            const ua = navigator.userAgent;
+            const isTg = typeof window.Telegram !== 'undefined';
+            const tgInfo = isTg ? window.Telegram.WebApp : null;
+            
+            info.innerHTML = `
+                <strong>UserAgent:</strong> ${ua}<br>
+                <strong>Telegram WebApp:</strong> ${isTg ? 'Да' : 'Нет'}<br>
+                <strong>Platform:</strong> ${tgInfo?.platform || 'Unknown'}<br>
+                <strong>Version:</strong> ${tgInfo?.version || 'Unknown'}<br>
+                <strong>Viewport:</strong> ${tgInfo?.viewportHeight || 'Unknown'}x${tgInfo?.viewportWidth || 'Unknown'}<br>
+                <strong>Fullscreen API:</strong> ${document.fullscreenEnabled ? 'Поддерживается' : 'НЕ поддерживается'}<br>
+                <strong>Webkit Fullscreen:</strong> ${document.webkitFullscreenEnabled ? 'Поддерживается' : 'НЕ поддерживается'}<br>
+            `;
+            
+            log(`Среда: UA=${ua.substring(0,50)}...`);
+            log(`Telegram WebApp: ${isTg}, Platform: ${tgInfo?.platform}`);
+            log(`Fullscreen API: ${document.fullscreenEnabled}`);
+        }
+        
+        // Тесты
+        async function testElement() {
+            log('Тест 1: Пытаемся сделать фуллскрин элемента');
+            const container = document.getElementById('video-container');
+            try {
+                if (container.requestFullscreen) {
+                    await container.requestFullscreen();
+                    log('✓ Fullscreen успешно через requestFullscreen');
+                } else if (container.webkitRequestFullscreen) {
+                    container.webkitRequestFullscreen();
+                    log('✓ Fullscreen успешно через webkitRequestFullscreen');
+                } else if (container.mozRequestFullScreen) {
+                    container.mozRequestFullScreen();
+                    log('✓ Fullscreen успешно через mozRequestFullScreen');
+                } else {
+                    log('✗ Fullscreen API недоступен');
+                }
+            } catch (e) {
+                log(`✗ Ошибка fullscreen: ${e.message}`);
+            }
+        }
+        
+        async function testDocument() {
+            log('Тест 2: Пытаемся сделать фуллскрин документа');
+            try {
+                if (document.documentElement.requestFullscreen) {
+                    await document.documentElement.requestFullscreen();
+                    log('✓ Document fullscreen успешно');
+                } else {
+                    log('✗ Document fullscreen недоступен');
+                }
+            } catch (e) {
+                log(`✗ Ошибка document fullscreen: ${e.message}`);
+            }
+        }
+        
+        async function testIframe() {
+            log('Тест 3: Пытаемся сделать фуллскрин iframe');
+            const iframe = document.querySelector('iframe');
+            try {
+                if (iframe.requestFullscreen) {
+                    await iframe.requestFullscreen();
+                    log('✓ Iframe fullscreen успешно');
+                } else if (iframe.webkitRequestFullscreen) {
+                    iframe.webkitRequestFullscreen();
+                    log('✓ Iframe webkit fullscreen успешно');
+                } else {
+                    log('✗ Iframe fullscreen недоступен');
+                }
+            } catch (e) {
+                log(`✗ Ошибка iframe fullscreen: ${e.message}`);
+            }
+        }
+        
+        function testPseudo() {
+            log('Тест 4: Псевдо-фуллскрин');
+            const container = document.getElementById('video-container');
+            if (container.classList.contains('pseudo-fs')) {
+                container.classList.remove('pseudo-fs');
+                log('✓ Псевдо-фуллскрин выключен');
+            } else {
+                container.classList.add('pseudo-fs');
+                log('✓ Псевдо-фуллскрин включен');
+            }
+        }
+        
+        async function testVideoFullscreen() {
+            log('Тест видео: Комбинированный подход');
+            const container = document.getElementById('video-container');
+            const iframe = container.querySelector('iframe');
+            
+            try {
+                // Сначала пробуем контейнер
+                if (container.requestFullscreen) {
+                    await container.requestFullscreen();
+                    log('✓ Видео контейнер в фуллскрине');
+                    return;
+                }
+                
+                // Потом iframe
+                if (iframe.requestFullscreen) {
+                    await iframe.requestFullscreen();
+                    log('✓ Iframe в фуллскрине');
+                    return;
+                }
+                
+                // Webkit варианты
+                if (container.webkitRequestFullscreen) {
+                    container.webkitRequestFullscreen();
+                    log('✓ Webkit контейнер в фуллскрине');
+                    return;
+                }
+                
+                if (iframe.webkitRequestFullscreen) {
+                    iframe.webkitRequestFullscreen();
+                    log('✓ Webkit iframe в фуллскрине');
+                    return;
+                }
+                
+                // Fallback к псевдо-фуллскрину
+                log('⚠ Нативный fullscreen недоступен, используем псевдо');
+                testPseudo();
+                
+            } catch (e) {
+                log(`✗ Все методы fullscreen не работают: ${e.message}`);
+                log('⚠ Включаем псевдо-фуллскрин как fallback');
+                testPseudo();
+            }
+        }
+        
+        // Слушаем изменения fullscreen
+        document.addEventListener('fullscreenchange', () => {
+            log(`Fullscreen изменился: ${document.fullscreenElement ? 'включен' : 'выключен'}`);
+        });
+        
+        document.addEventListener('webkitfullscreenchange', () => {
+            log(`Webkit fullscreen изменился: ${document.webkitFullscreenElement ? 'включен' : 'выключен'}`);
+        });
+        
+        // Проверяем, что Telegram WebApp готов
+        if (typeof window.Telegram !== 'undefined') {
+            window.Telegram.WebApp.ready();
+            log('Telegram WebApp готов');
+        }
+        
+        // Показываем информацию при загрузке
+        window.addEventListener('load', showEnvInfo);
+    </script>
+</body>
+</html>
