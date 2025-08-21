@@ -6,3 +6,12 @@ SQLAlchemy==2.0.32
 psycopg[binary]==3.2.9
 flask-compress==1.15
 requests==2.32.3
+
+# Оптимизации производительности
+redis==5.0.7
+flask-socketio==5.3.6
+python-socketio==5.11.0
+
+# Database system dependencies
+psycopg2-binary==2.9.9  # Alternative PostgreSQL adapter
+alembic==1.13.2  # Database migrations (optional)

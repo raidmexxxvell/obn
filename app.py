@@ -9,6 +9,28 @@ from datetime import timedelta
 from urllib.parse import parse_qs, urlparse
 
 from flask import Flask, request, jsonify, render_template, send_from_directory
+
+# Импорты для новой системы БД
+try:
+    from database.database_models import db_manager, db_ops, Base
+    from database.database_api import db_api
+    DATABASE_SYSTEM_AVAILABLE = True
+    print("[INFO] New database system initialized")
+except ImportError as e:
+    print(f"[WARN] New database system not available: {e}")
+    DATABASE_SYSTEM_AVAILABLE = False
+
+# Импорты для оптимизации
+try:
+    from optimizations.multilevel_cache import get_cache
+    from optimizations.smart_invalidator import SmartCacheInvalidator, extract_match_context, extract_user_context
+    from optimizations.optimized_sheets import get_sheets_manager
+    from optimizations.background_tasks import get_task_manager, TaskPriority, background_task
+    from optimizations.websocket_manager import WebSocketManager
+    OPTIMIZATIONS_AVAILABLE = True
+except ImportError as e:
+    print(f"[WARN] Optimizations not available: {e}")
+    OPTIMIZATIONS_AVAILABLE = False
 # Optional gzip/br compression via flask-compress (lazy/dynamic import to avoid hard dependency in dev)
 Compress = None
 try:
@@ -31,6 +53,67 @@ import threading
 
 # Flask app
 app = Flask(__name__, static_folder='static', template_folder='templates')
+
+# Инициализация оптимизаций
+if OPTIMIZATIONS_AVAILABLE:
+    try:
+        # Многоуровневый кэш
+        cache_manager = get_cache()
+        
+        # Менеджер фоновых задач
+        task_manager = get_task_manager()
+        
+        # WebSocket для real-time обновлений
+        try:
+            from flask_socketio import SocketIO
+            socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+            websocket_manager = WebSocketManager(socketio)
+        except ImportError:
+            print("[WARN] Flask-SocketIO not available, WebSocket disabled")
+            socketio = None
+            websocket_manager = None
+        
+        # Система умной инвалидации кэша
+        invalidator = SmartCacheInvalidator(cache_manager, websocket_manager)
+        
+        # Оптимизированный Google Sheets менеджер
+        try:
+            sheets_manager = get_sheets_manager()
+        except Exception as e:
+            print(f"[WARN] Optimized Sheets manager failed: {e}")
+            sheets_manager = None
+            
+    except Exception as e:
+        print(f"[ERROR] Failed to initialize optimizations: {e}")
+        cache_manager = None
+        task_manager = None
+        websocket_manager = None
+        invalidator = None
+        sheets_manager = None
+        
+else:
+    cache_manager = None
+    task_manager = None 
+    websocket_manager = None
+    invalidator = None
+    sheets_manager = None
+
+# Регистрация новой системы БД
+if DATABASE_SYSTEM_AVAILABLE:
+    try:
+        # Регистрируем API blueprint для новой системы БД
+        app.register_blueprint(db_api)
+        print("[INFO] Database API registered successfully")
+        
+        # Инициализируем таблицы БД если нужно
+        if os.getenv('INIT_DATABASE_TABLES', '').lower() in ('1', 'true', 'yes'):
+            print("[INFO] Initializing database tables...")
+            db_manager.create_tables()
+            print("[INFO] Database tables initialized")
+            
+    except Exception as e:
+        print(f"[ERROR] Failed to register database API: {e}")
+        DATABASE_SYSTEM_AVAILABLE = False
 if 'COMPRESS_DISABLE' not in os.environ:
     if Compress is not None:
         try:
@@ -1464,14 +1547,21 @@ def get_table_sheet():
 
 def _load_league_ranks() -> dict:
     """Возвращает словарь {нормализованное_имя_команды: позиция}.
-    Источник приоритетов: 1) снапшот БД 'league-table', 2) строки LeagueTableRow, 3) (fallback) чтение из Sheets.
-    Результат кэшируется в памяти на RANKS_TTL.
+    ОПТИМИЗИРОВАНО: Использует многоуровневый кэш вместо простых переменных.
     """
-    now = time.time()
-    cached = RANKS_CACHE.get('data')
-    if cached and (now - (RANKS_CACHE.get('ts') or 0) < RANKS_TTL):
-        return cached
+    if cache_manager:
+        # Используем оптимизированный кэш
+        def loader():
+            return _load_league_ranks_from_source()
+        
+        ranks = cache_manager.get('league_table', 'ranks', loader)
+        return ranks or {}
+    else:
+        # Fallback к старой логике
+        return _load_league_ranks_from_source()
 
+def _load_league_ranks_from_source() -> dict:
+    """Загружает ранги команд из источника данных"""
     def norm(s: str) -> str:
         s = (s or '').strip().lower().replace('\u00A0',' ').replace('ё','е')
         return ''.join(ch for ch in s if ch.isalnum())
@@ -1524,8 +1614,6 @@ def _load_league_ranks() -> dict:
             app.logger.warning(f"Не удалось загрузить ранги лиги: {e}")
             ranks = {}
 
-    RANKS_CACHE['data'] = ranks
-    RANKS_CACHE['ts'] = now
     return ranks
 
 def _dc_poisson(k: int, lam: float) -> float:
@@ -2764,41 +2852,93 @@ def _should_start_bg() -> bool:
     return True
 
 def _bg_sync_once():
+    """Оптимизированная фоновая синхронизация с использованием новых систем"""
+    if SessionLocal is None:
+        return
+    
+    # Используем фоновые задачи для параллельной обработки
+    if task_manager:
+        # Запускаем синхронизацию разных типов данных параллельно
+        task_manager.submit_task("sync_league_table", _sync_league_table, priority=TaskPriority.HIGH)
+        task_manager.submit_task("sync_stats_table", _sync_stats_table, priority=TaskPriority.HIGH) 
+        task_manager.submit_task("sync_schedule", _sync_schedule, priority=TaskPriority.HIGH)
+        task_manager.submit_task("sync_results", _sync_results, priority=TaskPriority.NORMAL)
+        task_manager.submit_task("sync_betting_tours", _sync_betting_tours, priority=TaskPriority.NORMAL)
+        task_manager.submit_task("sync_leaderboards", _sync_leaderboards, priority=TaskPriority.LOW)
+    else:
+        # Fallback к старой синхронной логике
+        _bg_sync_once_legacy()
+
+def _sync_league_table():
+    """Синхронизация таблицы лиги"""
     if SessionLocal is None:
         return
     db = get_db()
     try:
         _metrics_inc('bg_runs_total', 1)
-        # League table
-        try:
-            t0 = time.time()
+        t0 = time.time()
+        
+        # Используем оптимизированный Sheets менеджер
+        if sheets_manager:
+            values = sheets_manager.read_range('ТАБЛИЦА', 'A:H')
+            league_payload = {'values': values or [], 'updated_at': datetime.now(timezone.utc).isoformat()}
+        else:
             league_payload = _build_league_payload_from_sheet()
-            _snapshot_set(db, 'league-table', league_payload)
-            _metrics_set('last_sync', 'league-table', datetime.now(timezone.utc).isoformat())
-            _metrics_set('last_sync_status', 'league-table', 'ok')
-            _metrics_set('last_sync_duration_ms', 'league-table', int((time.time()-t0)*1000))
-            # also persist normalized rows to relational tables (as before)
-            normalized = league_payload.get('values') or []
-            when = datetime.now(timezone.utc)
-            for idx, r in enumerate(normalized, start=1):
-                row = db.get(LeagueTableRow, idx)
-                if not row:
-                    row = LeagueTableRow(
-                        row_index=idx,
-                        c1=str(r[0] or ''), c2=str(r[1] or ''), c3=str(r[2] or ''), c4=str(r[3] or ''),
-                        c5=str(r[4] or ''), c6=str(r[5] or ''), c7=str(r[6] or ''), c8=str(r[7] or ''),
-                        updated_at=when
-                    )
-                    db.add(row)
-                else:
-                    row.c1, row.c2, row.c3, row.c4 = str(r[0] or ''), str(r[1] or ''), str(r[2] or ''), str(r[3] or '')
-                    row.c5, row.c6, row.c7, row.c8 = str(r[4] or ''), str(r[5] or ''), str(r[6] or ''), str(r[7] or '')
-                    row.updated_at = when
-            db.commit()
-        except Exception as e:
-            app.logger.warning(f"BG sync league failed: {e}")
-            _metrics_set('last_sync_status', 'league-table', 'error')
-            _metrics_note_rate_limit(e)
+            
+        _snapshot_set(db, 'league-table', league_payload)
+        _metrics_set('last_sync', 'league-table', datetime.now(timezone.utc).isoformat())
+        _metrics_set('last_sync_status', 'league-table', 'ok')
+        _metrics_set('last_sync_duration_ms', 'league-table', int((time.time()-t0)*1000))
+        
+        # Инвалидируем соответствующий кэш
+        if cache_manager:
+            cache_manager.invalidate('league_table')
+            
+        # Отправляем WebSocket уведомление
+        if websocket_manager:
+            websocket_manager.notify_data_change('league_table', league_payload)
+            
+        # Сохраняем в реляционную таблицу (фоновая задача низкого приоритета)
+        if task_manager:
+            task_manager.submit_task("persist_league_table", _persist_league_table, 
+                                   league_payload.get('values', []), priority=TaskPriority.BACKGROUND)
+            
+    except Exception as e:
+        app.logger.warning(f"League table sync failed: {e}")
+        _metrics_set('last_sync_status', 'league-table', 'error')
+        _metrics_note_rate_limit(e)
+    finally:
+        db.close()
+
+def _persist_league_table(normalized_values):
+    """Сохраняет данные таблицы лиги в реляционную таблицу"""
+    if SessionLocal is None:
+        return
+    db = get_db()
+    try:
+        when = datetime.now(timezone.utc)
+        for idx, r in enumerate(normalized_values, start=1):
+            if len(r) < 8:
+                r.extend([''] * (8 - len(r)))  # Дополняем пустыми значениями
+            row = db.get(LeagueTableRow, idx)
+            if not row:
+                row = LeagueTableRow(
+                    row_index=idx,
+                    c1=str(r[0] or ''), c2=str(r[1] or ''), c3=str(r[2] or ''), c4=str(r[3] or ''),
+                    c5=str(r[4] or ''), c6=str(r[5] or ''), c7=str(r[6] or ''), c8=str(r[7] or ''),
+                    updated_at=when
+                )
+                db.add(row)
+            else:
+                row.c1, row.c2, row.c3, row.c4 = str(r[0] or ''), str(r[1] or ''), str(r[2] or ''), str(r[3] or '')
+                row.c5, row.c6, row.c7, row.c8 = str(r[4] or ''), str(r[5] or ''), str(r[6] or ''), str(r[7] or '')
+                row.updated_at = when
+        db.commit()
+    finally:
+        db.close()
+
+def _bg_sync_once_legacy():
+    """Старая логика синхронизации (fallback)"""
 
         # Stats table
         try:
@@ -6572,6 +6712,140 @@ def api_match_comments_add():
     except Exception as e:
         app.logger.error(f"comments/add error: {e}")
         return jsonify({'error': 'Не удалось сохранить комментарий'}), 500
+
+@app.route('/admin')
+@app.route('/admin/')
+def admin_dashboard():
+    """Админ панель для управления БД"""
+    return render_template('admin_dashboard.html')
+
+@app.route('/admin/init-database', methods=['POST'])
+def admin_init_database():
+    """Админский роут для инициализации БД через веб-интерфейс"""
+    try:
+        # Простая авторизация через заголовок
+        auth_header = request.headers.get('Authorization', '')
+        admin_password = os.environ.get('ADMIN_PASSWORD', 'admin123')
+        
+        if not auth_header.startswith('Basic '):
+            return jsonify({'error': 'Authorization required'}), 401
+            
+        import base64
+        try:
+            credentials = base64.b64decode(auth_header[6:]).decode('utf-8')
+            username, password = credentials.split(':', 1)
+        except:
+            return jsonify({'error': 'Invalid authorization format'}), 401
+            
+        if username != 'admin' or password != admin_password:
+            return jsonify({'error': 'Invalid credentials'}), 401
+            
+        # Импорт и запуск инициализации
+        from scripts.init_database import main as init_main
+        result = init_main()
+        
+        return jsonify({
+            'status': 'success' if result == 0 else 'error',
+            'message': 'Database initialized successfully' if result == 0 else 'Database initialization failed',
+            'result_code': result
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Database initialization error: {e}")
+        return jsonify({
+            'status': 'error', 
+            'message': str(e)
+        }), 500
+
+@app.route('/admin/init-database-form')
+def admin_init_database_form():
+    """Форма для инициализации БД"""
+    return '''
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Liga Obninska - Database Initialization</title>
+        <style>
+            body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
+            .container { background: #f5f5f5; padding: 30px; border-radius: 10px; }
+            h2 { color: #1976d2; margin-bottom: 20px; }
+            .form-group { margin-bottom: 15px; }
+            label { display: block; margin-bottom: 5px; font-weight: bold; }
+            input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px; }
+            button { background: #1976d2; color: white; padding: 12px 24px; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; }
+            button:hover { background: #1565c0; }
+            #result { margin-top: 20px; padding: 15px; border-radius: 5px; white-space: pre-wrap; }
+            .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+            .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+            .info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h2>🏆 Liga Obninska - Database Initialization</h2>
+            <p>Инициализация базы данных PostgreSQL. Выполните только один раз при первом деплое.</p>
+            
+            <div class="form-group">
+                <label for="username">Admin Username:</label>
+                <input type="text" id="username" value="admin" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="password">Admin Password:</label>
+                <input type="password" id="password" placeholder="Введите пароль" required>
+            </div>
+            
+            <button onclick="initDatabase()">🚀 Initialize Database</button>
+            
+            <div id="result"></div>
+        </div>
+        
+        <script>
+        function initDatabase() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const resultDiv = document.getElementById('result');
+            
+            if (!password) {
+                alert('Введите пароль!');
+                return;
+            }
+            
+            resultDiv.innerHTML = '<div class="info">⏳ Инициализация базы данных...</div>';
+            
+            fetch('/admin/init-database', {
+                method: 'POST',
+                headers: {
+                    'Authorization': 'Basic ' + btoa(username + ':' + password)
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                const className = data.status === 'success' ? 'success' : 'error';
+                resultDiv.innerHTML = `<div class="${className}">
+                    <strong>Статус:</strong> ${data.status}
+                    <br><strong>Сообщение:</strong> ${data.message}
+                    ${data.result_code !== undefined ? '<br><strong>Код:</strong> ' + data.result_code : ''}
+                </div>`;
+                
+                if (data.status === 'success') {
+                    setTimeout(() => {
+                        resultDiv.innerHTML += '<div class="info">✅ Теперь можете перейти к <a href="/admin">админ панели</a></div>';
+                    }, 2000);
+                }
+            })
+            .catch(error => {
+                resultDiv.innerHTML = `<div class="error">
+                    <strong>Ошибка:</strong> ${error.message || error}
+                </div>`;
+            });
+        }
+        </script>
+    </body>
+    </html>
+    '''
 
 @app.route('/api/admin/users-stats', methods=['POST'])
 def api_admin_users_stats():

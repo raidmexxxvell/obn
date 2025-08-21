@@ -55,7 +55,7 @@
         const d = await r.json().catch(()=>({}));
         const v = d?.ver != null ? d.ver : '—';
         const msg = r.ok ? `Версия обновлена до v${v}. Клиентам будет предложено обновление.` : (d?.error || 'Ошибка');
-        try { window.Telegram?.WebApp?.showAlert?.(msg); } catch(_) { alert(msg); }
+        try { window.showAlert?.(msg, 'info'); } catch(_) { alert(msg); }
       } finally {
         btnBump.disabled = false; btnBump.textContent = 'Применить';
       }

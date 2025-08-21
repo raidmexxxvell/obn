@@ -134,7 +134,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await res.json().catch(()=>({}));
             if (!res.ok) {
                 const msg = data?.message || (data?.error === 'limit' ? 'Сменить любимый клуб можно только один раз' : 'Не удалось сохранить клуб');
-                try { window.Telegram?.WebApp?.showAlert?.(msg); } catch(_) { try { alert(msg); } catch(_) {} }
+                try { window.showAlert?.(msg, 'info'); } catch(_) { try { alert(msg); } catch(_) {} }
                 return false;
             }
             await fetchTeamsAndCounts(true);
@@ -603,7 +603,68 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function showError(msg) { if (elements.checkinStatus) { elements.checkinStatus.textContent = msg; elements.checkinStatus.style.color = 'var(--danger)'; setTimeout(()=>{ elements.checkinStatus.textContent=''; elements.checkinStatus.style.color=''; },3000);} else console.warn(msg); }
     function showSuccessMessage(msg) { if (elements.checkinStatus) { elements.checkinStatus.textContent = msg; elements.checkinStatus.style.color = 'var(--success)'; setTimeout(()=>{ elements.checkinStatus.textContent=''; elements.checkinStatus.style.color=''; },2000);} else console.log(msg); }
-    function showRewardAnimation(xp, credits) { if (!elements.checkinStatus) return; elements.checkinStatus.innerHTML = `<div class="reward-animation">+${xp} XP | +${credits} кредитов</div>`; setTimeout(()=>{ elements.checkinStatus.textContent='Награда получена!'; },2000); }
+    
+    function showRewardAnimation(xp, credits) { 
+        if (!elements.checkinStatus) return; 
+        
+        // Используем новую систему анимации наград
+        if (window.RewardAnimation) {
+            window.RewardAnimation.show(document.body, xp, credits).then(() => {
+                // После анимации показываем сообщение об успехе
+                if (elements.checkinStatus) {
+                    elements.checkinStatus.textContent = 'Награда получена!';
+                    elements.checkinStatus.style.color = 'var(--success)';
+                    
+                    // Обновляем счетчики XP и кредитов с анимацией
+                    updateUserStatsWithAnimation(xp, credits);
+                    
+                    setTimeout(() => {
+                        elements.checkinStatus.textContent = '';
+                        elements.checkinStatus.style.color = '';
+                    }, 3000);
+                }
+            });
+        } else {
+            // Fallback на старую версию
+            elements.checkinStatus.innerHTML = `<div class="reward-animation">+${xp} XP | +${credits} кредитов</div>`; 
+            setTimeout(() => { 
+                elements.checkinStatus.textContent = 'Награда получена!'; 
+            }, 2000); 
+        }
+    }
+    
+    // Новая функция для обновления статистики пользователя с анимацией
+    function updateUserStatsWithAnimation(xpGain, creditsGain) {
+        try {
+            // Обновляем XP с анимацией
+            const xpElement = document.querySelector('.stat-value[data-stat="xp"]') || 
+                             document.querySelector('.user-level-progress span') ||
+                             document.querySelector('[data-xp]');
+            
+            if (xpElement && window.CounterAnimation) {
+                const currentXP = parseInt(xpElement.textContent) || 0;
+                window.CounterAnimation.animate(xpElement, currentXP, currentXP + xpGain, 1000);
+            }
+            
+            // Обновляем кредиты с анимацией
+            const creditsElement = document.querySelector('.stat-value[data-stat="credits"]') || 
+                                  document.querySelector('[data-credits]') ||
+                                  document.querySelector('.user-credits');
+            
+            if (creditsElement && window.CounterAnimation) {
+                const currentCredits = parseInt(creditsElement.textContent) || 0;
+                window.CounterAnimation.animate(creditsElement, currentCredits, currentCredits + creditsGain, 1000);
+            }
+            
+            // Добавляем пульсацию к обновленным элементам
+            if (window.UIAnimations) {
+                if (xpElement) window.UIAnimations.pulse(xpElement);
+                if (creditsElement) window.UIAnimations.pulse(creditsElement);
+            }
+        } catch (e) {
+            console.warn('Ошибка обновления статистики с анимацией:', e);
+        }
+    }
 
     function setupEventListeners() {
         if (elements.checkinBtn) elements.checkinBtn.addEventListener('click', handleCheckin);
@@ -2313,13 +2374,13 @@ document.addEventListener('DOMContentLoaded', () => {
                             fetch('/api/match/events/add', { method: 'POST', body: fd })
                                 .then(r=>r.json())
                                 .then(d => {
-                                    if (d?.error) { try { tg?.showAlert?.(d.error); } catch(_) {} return; }
+                                    if (d?.error) { try { window.showAlert?.(d.error, 'error'); } catch(_) {} return; }
                                     icon.style.opacity = '1';
                                     // пометим наличие локально, чтобы следующий клик мог удалить
                                     if (!evIdx.has(key)) evIdx.set(key, new Set()); evIdx.get(key).add(type);
                                     highlightRow(trRef, key);
                                 })
-                                .catch(err => { console.error('events/add', err); try { tg?.showAlert?.('Ошибка сохранения'); } catch(_) {} })
+                                .catch(err => { console.error('events/add', err); try { window.showAlert?.('Ошибка сохранения', 'error'); } catch(_) {} })
                         } catch(_) {}
                     } else if (sel.value === '' && (has || (evIdx.get(key) && evIdx.get(key).has(type)))) {
                         // удаляем событие
@@ -2334,12 +2395,12 @@ document.addEventListener('DOMContentLoaded', () => {
                             fetch('/api/match/events/remove', { method: 'POST', body: fd })
                                 .then(r=>r.json())
                                 .then(d => {
-                                    if (d?.error) { try { tg?.showAlert?.(d.error); } catch(_) {} sel.value='yes'; return; }
+                                    if (d?.error) { try { window.showAlert?.(d.error, 'error'); } catch(_) {} sel.value='yes'; return; }
                                     icon.style.opacity = '0.2';
                                     if (evIdx.get(key)) evIdx.get(key).delete(type);
                                     highlightRow(trRef, key);
                                 })
-                                .catch(err => { console.error('events/remove', err); try { tg?.showAlert?.('Ошибка удаления'); } catch(_) {} sel.value='yes'; })
+                                .catch(err => { console.error('events/remove', err); try { window.showAlert?.('Ошибка удаления', 'error'); } catch(_) {} sel.value='yes'; })
                         } catch(_) {}
                     }
                 });
@@ -2537,7 +2598,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                             if (!r.ok || d?.error) throw new Error(d?.error || 'Ошибка сохранения');
                                             applyScore(d.score_home, d.score_away);
                                         } catch(e) {
-                                            try { tg?.showAlert?.(e?.message || 'Не удалось сохранить счёт'); } catch(_) {}
+                                            try { window.showAlert?.(e?.message || 'Не удалось сохранить счёт', 'error'); } catch(_) {}
                                         }
                                     };
                                     hMinus.addEventListener('click', () => { const [h,a] = parseScore(); postScore(Math.max(0, h-1), a); });
@@ -2716,7 +2777,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         const fd = new FormData(); fd.append('initData', tg?.initData || ''); fd.append('home', match.home||''); fd.append('away', match.away||'');
                         const r = await fetch('/api/match/settle', { method: 'POST', body: fd }); const d = await r.json().catch(()=>({}));
                         if (!r.ok || d?.error) throw new Error(d?.error || 'Ошибка завершения');
-                        try { tg?.showAlert?.('Матч завершён'); } catch(_) {}
+                        try { window.showAlert?.('Матч завершён', 'success'); } catch(_) {}
                         // Очистим кэш трансляции, чтобы вкладка скрылась после завершения
                         try {
                             const dateStr = (match?.datetime || match?.date || '').toString().slice(0,10);
@@ -2735,7 +2796,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (statusEl) statusEl.textContent = 'Матч завершен';
                         } catch(_) {}
                     } catch(e) {
-                        console.error('finish match error', e); try { tg?.showAlert?.(e?.message || 'Ошибка'); } catch(_) {}
+                        console.error('finish match error', e); try { window.showAlert?.(e?.message || 'Ошибка', 'error'); } catch(_) {}
                     } finally { btn.disabled=false; btn.textContent = old; }
                 });
                 topbar.appendChild(btn);
@@ -2833,7 +2894,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const d = await r.json().catch(()=>({}));
                     if (!r.ok) {
                         const msg = d?.error || 'Не удалось отправить';
-                        try { tg?.showAlert?.(msg); } catch(_) { alert(msg); }
+                        try { window.showAlert?.(msg, 'error'); } catch(_) { alert(msg); }
                         // при лимите — заблокируем на 5 минут
                         if (r.status === 429) {
                             inputEl.disabled = true; sendBtn.disabled = true;
@@ -2845,7 +2906,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     // Мгновенно подтянем ленту
                     fetchComments();
                 } catch(e) {
-                    try { tg?.showAlert?.('Ошибка сети'); } catch(_) {}
+                    try { window.showAlert?.('Ошибка сети', 'error'); } catch(_) {}
                 } finally {
                     if (!inputEl.disabled) sendBtn.disabled = false;
                 }
@@ -2867,6 +2928,28 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderMatchStats(host, m) {
         host.innerHTML = '<div class="stats-wrap">Загрузка…</div>';
         const url = `/api/match/stats/get?home=${encodeURIComponent(m.home||'')}&away=${encodeURIComponent(m.away||'')}`;
+        
+        // Функция для обновления полосы статистики без перерисовки
+        const updateStatBar = (row, leftVal, rightVal) => {
+            try {
+                const total = (Number(leftVal)||0) + (Number(rightVal)||0);
+                const lp = total>0 ? Math.round((leftVal/total)*100) : 50;
+                const rp = 100 - lp;
+                
+                const leftFill = row.querySelector('.stat-fill-left');
+                const rightFill = row.querySelector('.stat-fill-right');
+                
+                if (leftFill && rightFill) {
+                    leftFill.style.transition = 'width 0.3s ease';
+                    rightFill.style.transition = 'width 0.3s ease';
+                    leftFill.style.width = lp+'%';
+                    rightFill.style.width = rp+'%';
+                }
+            } catch(e) {
+                console.warn('Ошибка обновления полосы статистики:', e);
+            }
+        };
+        
         fetch(url).then(r=>r.json()).then(d => {
             const metrics = [
                 { key: 'shots_total', label: 'Всего ударов' },
@@ -2925,10 +3008,90 @@ document.addEventListener('DOMContentLoaded', () => {
                             fd.append(base+'_home', String(lhv)); fd.append(base+'_away', String(rhv));
                             fetch('/api/match/stats/set', { method: 'POST', body: fd }).catch(()=>{});
                         };
-                        lh.addEventListener('click', () => { const l= Math.max(0, (parseInt(leftVal.textContent,10)||0)-1); const r=(parseInt(rightVal.textContent,10)||0); leftVal.textContent=String(l); post(l,r); renderMatchStats(host,m); });
-                        lplus.addEventListener('click', () => { const l=(parseInt(leftVal.textContent,10)||0)+1; const r=(parseInt(rightVal.textContent,10)||0); leftVal.textContent=String(l); post(l,r); renderMatchStats(host,m); });
-                        rh.addEventListener('click', () => { const r= Math.max(0, (parseInt(rightVal.textContent,10)||0)-1); const l=(parseInt(leftVal.textContent,10)||0); rightVal.textContent=String(r); post(l,r); renderMatchStats(host,m); });
-                        rplus.addEventListener('click', () => { const r=(parseInt(rightVal.textContent,10)||0)+1; const l=(parseInt(leftVal.textContent,10)||0); rightVal.textContent=String(r); post(l,r); renderMatchStats(host,m); });
+                        lh.addEventListener('click', () => { 
+                            const current = parseInt(leftVal.textContent,10)||0;
+                            const newVal = Math.max(0, current-1); 
+                            const r = parseInt(rightVal.textContent,10)||0;
+                            
+                            // Анимированное обновление значения
+                            if (window.CounterAnimation) {
+                                window.CounterAnimation.animate(leftVal, current, newVal, 200);
+                            } else {
+                                leftVal.textContent = String(newVal);
+                            }
+                            
+                            // Добавляем класс для анимации
+                            leftVal.classList.add('stat-update-animation');
+                            setTimeout(() => leftVal.classList.remove('stat-update-animation'), 300);
+                            
+                            // Обновляем полосу статистики
+                            updateStatBar(row, newVal, r);
+                            
+                            post(newVal, r); 
+                        });
+                        lplus.addEventListener('click', () => { 
+                            const current = parseInt(leftVal.textContent,10)||0;
+                            const newVal = current+1; 
+                            const r = parseInt(rightVal.textContent,10)||0;
+                            
+                            // Анимированное обновление значения
+                            if (window.CounterAnimation) {
+                                window.CounterAnimation.animate(leftVal, current, newVal, 200);
+                            } else {
+                                leftVal.textContent = String(newVal);
+                            }
+                            
+                            // Добавляем класс для анимации
+                            leftVal.classList.add('stat-update-animation');
+                            setTimeout(() => leftVal.classList.remove('stat-update-animation'), 300);
+                            
+                            // Обновляем полосу статистики
+                            updateStatBar(row, newVal, r);
+                            
+                            post(newVal, r); 
+                        });
+                        rh.addEventListener('click', () => { 
+                            const current = parseInt(rightVal.textContent,10)||0;
+                            const newVal = Math.max(0, current-1); 
+                            const l = parseInt(leftVal.textContent,10)||0;
+                            
+                            // Анимированное обновление значения
+                            if (window.CounterAnimation) {
+                                window.CounterAnimation.animate(rightVal, current, newVal, 200);
+                            } else {
+                                rightVal.textContent = String(newVal);
+                            }
+                            
+                            // Добавляем класс для анимации
+                            rightVal.classList.add('stat-update-animation');
+                            setTimeout(() => rightVal.classList.remove('stat-update-animation'), 300);
+                            
+                            // Обновляем полосу статистики
+                            updateStatBar(row, l, newVal);
+                            
+                            post(l, newVal); 
+                        });
+                        rplus.addEventListener('click', () => { 
+                            const current = parseInt(rightVal.textContent,10)||0;
+                            const newVal = current+1; 
+                            const l = parseInt(leftVal.textContent,10)||0;
+                            
+                            // Анимированное обновление значения
+                            if (window.CounterAnimation) {
+                                window.CounterAnimation.animate(rightVal, current, newVal, 200);
+                            } else {
+                                rightVal.textContent = String(newVal);
+                            }
+                            
+                            // Добавляем класс для анимации
+                            rightVal.classList.add('stat-update-animation');
+                            setTimeout(() => rightVal.classList.remove('stat-update-animation'), 300);
+                            
+                            // Обновляем полосу статистики
+                            updateStatBar(row, l, newVal);
+                            
+                            post(l, newVal); 
+                        });
             leftBox.append(lh, lplus); rightBox.append(rh, rplus);
             // Вставляем кнопки в крайние боксы
             const leftSide = row.querySelector('.stat-left');
@@ -3004,10 +3167,10 @@ document.addEventListener('DOMContentLoaded', () => {
             fd.append('home', m.home || '');
             fd.append('away', m.away || '');
             if (market === 'penalty') {
-                if (sel1.value === '') { try { tg?.showAlert?.('Укажите значение для Пенальти'); } catch(_) {} return; }
+                if (sel1.value === '') { try { window.showAlert?.('Укажите значение для Пенальти', 'warning'); } catch(_) {} return; }
                 fd.append('penalty_yes', sel1.value);
             } else if (market === 'redcard') {
-                if (sel2.value === '') { try { tg?.showAlert?.('Укажите значение для Красной карточки'); } catch(_) {} return; }
+                if (sel2.value === '') { try { window.showAlert?.('Укажите значение для Красной карточки', 'warning'); } catch(_) {} return; }
                 fd.append('redcard_yes', sel2.value);
             }
             const btn = market === 'penalty' ? savePenalty : saveRed;
@@ -3025,10 +3188,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 const r2 = await fetch('/api/specials/settle', { method: 'POST', body: fd2 });
                 const d2 = await r2.json().catch(()=>({}));
                 if (!r2.ok || d2?.error) { throw new Error(d2?.error || 'Ошибка расчёта'); }
-                try { tg?.showAlert?.(`Готово: изменено ${d2.changed||0}, выиграло ${d2.won||0}, проиграло ${d2.lost||0}`); } catch(_) {}
+                try { window.showAlert?.(`Готово: изменено ${d2.changed||0}, выиграло ${d2.won||0}, проиграло ${d2.lost||0}`, 'success'); } catch(_) {}
             } catch (e) {
                 console.error('specials save/settle error', e);
-                try { tg?.showAlert?.(e?.message || 'Ошибка операции'); } catch(_) {}
+                try { window.showAlert?.(e?.message || 'Ошибка операции', 'error'); } catch(_) {}
             } finally {
                 btn.disabled = false; btn.textContent = old;
             }
@@ -3079,7 +3242,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const r = await fetch('/api/match/settle', { method: 'POST', body: fd });
                 const d = await r.json().catch(()=>({}));
                 if (!r.ok || d?.error) throw new Error(d?.error || 'Ошибка расчёта матча');
-                try { tg?.showAlert?.(`Готово: изменено ${d.changed||0}, выиграло ${d.won||0}, проиграло ${d.lost||0}`); } catch(_) {}
+                try { window.showAlert?.(`Готово: изменено ${d.changed||0}, выиграло ${d.won||0}, проиграло ${d.lost||0}`, 'success'); } catch(_) {}
                 // Очистим кэш трансляции для матча, чтобы вкладка больше не показывалась
                 try {
                     const dateStr = (m?.datetime || m?.date || '').toString().slice(0,10);
@@ -3098,7 +3261,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 } catch(_) {}
             } catch(e) {
                 console.error('match settle error', e);
-                try { tg?.showAlert?.(e?.message || 'Ошибка расчёта'); } catch(_) {}
+                try { window.showAlert?.(e?.message || 'Ошибка расчёта', 'error'); } catch(_) {}
             } finally {
                 btn.disabled = false; btn.textContent = old;
             }
@@ -3167,10 +3330,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         const r = await fetch('/api/match/score/set', { method: 'POST', body: fd });
                         const d = await r.json().catch(()=>({}));
                         if (!r.ok || d?.error) throw new Error(d?.error || 'Ошибка сохранения счёта');
-                        try { tg?.showAlert?.('Счёт сохранён'); } catch(_) {}
+                        try { window.showAlert?.('Счёт сохранён', 'success'); } catch(_) {}
                     } catch(e) {
                         console.error('score set error', e);
-                        try { tg?.showAlert?.(e?.message || 'Ошибка'); } catch(_) {}
+                        try { window.showAlert?.(e?.message || 'Ошибка', 'error'); } catch(_) {}
                     } finally { btn.disabled=false; btn.textContent = old; }
                 });
             }
@@ -3265,7 +3428,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     fetch('/api/match/events/add', { method: 'POST', body: payload })
                         .then(r=>r.json())
                         .then(d => {
-                            if (d?.error) { try { tg?.showAlert?.(d.error); } catch(_) {} return; }
+                            if (d?.error) { try { window.showAlert?.(d.error, 'error'); } catch(_) {} return; }
                             // очистим поля и обновим список
                             form.querySelector('#ev-minute').value='';
                             form.querySelector('#ev-player').value='';
@@ -3273,7 +3436,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             form.querySelector('#ev-note').value='';
                             refresh();
                         })
-                        .catch(err => { console.error('events/add error', err); try { tg?.showAlert?.('Ошибка сохранения'); } catch(_) {} })
+                        .catch(err => { console.error('events/add error', err); try { window.showAlert?.('Ошибка сохранения', 'error'); } catch(_) {} })
                         .finally(()=>{ btn.disabled=false; btn.textContent = old; });
                 });
             }

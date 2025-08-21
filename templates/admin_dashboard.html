@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Админ панель - Liga Obninska</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/database-ui.css">
+    <style>
+        .admin-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .admin-section {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        .admin-section h2 {
+            margin: 0 0 20px 0;
+            color: #333;
+            border-bottom: 2px solid #1976d2;
+            padding-bottom: 8px;
+        }
+        
+        .form-group {
+            margin-bottom: 16px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        
+        .form-group textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+        
+        .form-row {
+            display: flex;
+            gap: 16px;
+        }
+        
+        .form-row .form-group {
+            flex: 1;
+        }
+        
+        .event-buttons {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        
+        .event-btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+        
+        .event-btn.goal { background: #4caf50; color: white; }
+        .event-btn.assist { background: #2196f3; color: white; }
+        .event-btn.yellow { background: #ff9800; color: white; }
+        .event-btn.red { background: #f44336; color: white; }
+        
+        .current-events {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 12px;
+            background: #f8f9fa;
+        }
+        
+        .alert {
+            padding: 12px 16px;
+            border-radius: 6px;
+            margin-bottom: 16px;
+        }
+        
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+    </style>
+</head>
+<body>
+    <div class="admin-container">
+        <h1>Админ панель - Liga Obninska</h1>
+        
+        <!-- Алерты -->
+        <div id="alerts"></div>
+        
+        <!-- Управление счетом матча -->
+        <div class="admin-section">
+            <h2>Управление счетом матча</h2>
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="match-select">Выберите матч:</label>
+                    <select id="match-select">
+                        <option value="">Загрузка матчей...</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="home-score">Счет хозяев:</label>
+                    <input type="number" id="home-score" min="0" value="0">
+                </div>
+                <div class="form-group">
+                    <label for="away-score">Счет гостей:</label>
+                    <input type="number" id="away-score" min="0" value="0">
+                </div>
+            </div>
+            
+            <button class="btn btn-primary" onclick="updateMatchScore()">Обновить счет</button>
+        </div>
+        
+        <!-- Добавление событий матча -->
+        <div class="admin-section">
+            <h2>События матча</h2>
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="event-player">Игрок:</label>
+                    <select id="event-player">
+                        <option value="">Выберите игрока</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="event-team">Команда:</label>
+                    <select id="event-team">
+                        <option value="">Выберите команду</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="event-minute">Минута:</label>
+                    <input type="number" id="event-minute" min="0" max="120" value="0">
+                </div>
+                <div class="form-group">
+                    <label for="event-additional">Доп. время:</label>
+                    <input type="number" id="event-additional" min="0" max="15" value="0">
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label for="event-assist">Передача от (если гол):</label>
+                <select id="event-assist">
+                    <option value="">Нет передачи</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label for="event-description">Описание:</label>
+                <textarea id="event-description" placeholder="Дополнительная информация о событии"></textarea>
+            </div>
+            
+            <div class="event-buttons">
+                <button class="event-btn goal" onclick="addEvent('goal')">⚽ Гол</button>
+                <button class="event-btn assist" onclick="addEvent('assist')">🅰️ Передача</button>
+                <button class="event-btn yellow" onclick="addEvent('yellow_card')">🟨 Желтая</button>
+                <button class="event-btn red" onclick="addEvent('red_card')">🟥 Красная</button>
+            </div>
+        </div>
+        
+        <!-- Текущие события матча -->
+        <div class="admin-section">
+            <h2>Текущие события</h2>
+            <div id="current-events" class="current-events">
+                <p>Выберите матч для просмотра событий</p>
+            </div>
+        </div>
+        
+        <!-- Создание игрока -->
+        <div class="admin-section">
+            <h2>Создать нового игрока</h2>
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="player-first-name">Имя:</label>
+                    <input type="text" id="player-first-name" required>
+                </div>
+                <div class="form-group">
+                    <label for="player-last-name">Фамилия:</label>
+                    <input type="text" id="player-last-name">
+                </div>
+            </div>
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="player-username">Username:</label>
+                    <input type="text" id="player-username">
+                </div>
+                <div class="form-group">
+                    <label for="player-position">Позиция:</label>
+                    <select id="player-position">
+                        <option value="">Не указана</option>
+                        <option value="goalkeeper">Вратарь</option>
+                        <option value="defender">Защитник</option>
+                        <option value="midfielder">Полузащитник</option>
+                        <option value="forward">Нападающий</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label for="player-telegram-id">Telegram ID:</label>
+                <input type="number" id="player-telegram-id">
+            </div>
+            
+            <button class="btn btn-success" onclick="createPlayer()">Создать игрока</button>
+        </div>
+        
+        <!-- Действия -->
+        <div class="admin-section">
+            <h2>Действия</h2>
+            
+            <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                <button class="btn btn-secondary" onclick="refreshStatistics()">Пересчитать статистику</button>
+                <button class="btn btn-secondary" onclick="loadAllData()">Обновить данные</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/database-client.js"></script>
+    <script>
+        // Глобальные переменные
+        let currentMatch = null;
+        let allMatches = [];
+        let allPlayers = [];
+        let allTeams = [];
+        
+        // Инициализация страницы
+        window.addEventListener('DOMContentLoaded', async function() {
+            await loadAllData();
+        });
+        
+        // Загрузка всех данных
+        async function loadAllData() {
+            try {
+                showAlert('Загрузка данных...', 'info');
+                
+                // Загружаем матчи, игроков и команды
+                const [matchesRes, playersRes, teamsRes] = await Promise.all([
+                    dbAPI.getMatches(),
+                    dbAPI.getPlayers(),
+                    dbAPI.getTeams()
+                ]);
+                
+                allMatches = matchesRes.matches;
+                allPlayers = playersRes.players;
+                allTeams = teamsRes.teams;
+                
+                populateMatchSelect();
+                populatePlayerSelects();
+                populateTeamSelect();
+                
+                showAlert('Данные загружены успешно', 'success');
+                
+            } catch (error) {
+                console.error('Error loading data:', error);
+                showAlert('Ошибка загрузки данных: ' + error.message, 'error');
+            }
+        }
+        
+        // Заполнение списка матчей
+        function populateMatchSelect() {
+            const select = document.getElementById('match-select');
+            select.innerHTML = '<option value="">Выберите матч</option>';
+            
+            allMatches.forEach(match => {
+                const option = document.createElement('option');
+                option.value = match.id;
+                option.textContent = `${match.home_team_name} vs ${match.away_team_name} (${DataUtils.formatMatchDate(match.match_date)})`;
+                select.appendChild(option);
+            });
+            
+            select.addEventListener('change', onMatchSelect);
+        }
+        
+        // Заполнение списков игроков
+        function populatePlayerSelects() {
+            const playerSelect = document.getElementById('event-player');
+            const assistSelect = document.getElementById('event-assist');
+            
+            playerSelect.innerHTML = '<option value="">Выберите игрока</option>';
+            assistSelect.innerHTML = '<option value="">Нет передачи</option>';
+            
+            allPlayers.forEach(player => {
+                const option1 = document.createElement('option');
+                option1.value = player.id;
+                option1.textContent = DataUtils.formatPlayerName(player);
+                playerSelect.appendChild(option1);
+                
+                const option2 = document.createElement('option');
+                option2.value = player.id;
+                option2.textContent = DataUtils.formatPlayerName(player);
+                assistSelect.appendChild(option2);
+            });
+        }
+        
+        // Заполнение списка команд
+        function populateTeamSelect() {
+            const select = document.getElementById('event-team');
+            select.innerHTML = '<option value="">Выберите команду</option>';
+            
+            allTeams.forEach(team => {
+                const option = document.createElement('option');
+                option.value = team.id;
+                option.textContent = team.name;
+                select.appendChild(option);
+            });
+        }
+        
+        // Выбор матча
+        async function onMatchSelect() {
+            const matchId = document.getElementById('match-select').value;
+            if (!matchId) {
+                currentMatch = null;
+                document.getElementById('current-events').innerHTML = '<p>Выберите матч для просмотра событий</p>';
+                return;
+            }
+            
+            currentMatch = allMatches.find(m => m.id == matchId);
+            if (currentMatch) {
+                document.getElementById('home-score').value = currentMatch.home_score;
+                document.getElementById('away-score').value = currentMatch.away_score;
+                
+                await loadMatchEvents(matchId);
+            }
+        }
+        
+        // Загрузка событий матча
+        async function loadMatchEvents(matchId) {
+            try {
+                const response = await dbAPI.getMatchEvents(matchId);
+                const eventsContainer = document.getElementById('current-events');
+                
+                if (response.events.length === 0) {
+                    eventsContainer.innerHTML = '<p>События не найдены</p>';
+                    return;
+                }
+                
+                const eventsHtml = response.events.map(event => `
+                    <div class="event-item">
+                        <div class="event-time">${event.minute}'${event.additional_time > 0 ? `+${event.additional_time}` : ''}</div>
+                        <div class="event-icon">${DataUtils.getEventIcon(event.event_type)}</div>
+                        <div class="event-description">
+                            <strong>${DataUtils.getEventType(event.event_type)}</strong><br>
+                            ${event.player_name} (${event.team_name})
+                            ${event.assisted_by_name ? `<br><small>Передача: ${event.assisted_by_name}</small>` : ''}
+                            ${event.description ? `<br><small>${event.description}</small>` : ''}
+                        </div>
+                    </div>
+                `).join('');
+                
+                eventsContainer.innerHTML = eventsHtml;
+                
+            } catch (error) {
+                console.error('Error loading match events:', error);
+                document.getElementById('current-events').innerHTML = '<p class="error">Ошибка загрузки событий</p>';
+            }
+        }
+        
+        // Обновление счета матча
+        async function updateMatchScore() {
+            if (!currentMatch) {
+                showAlert('Выберите матч', 'error');
+                return;
+            }
+            
+            const homeScore = parseInt(document.getElementById('home-score').value);
+            const awayScore = parseInt(document.getElementById('away-score').value);
+            
+            try {
+                await dbAPI.updateMatchScore(currentMatch.id, homeScore, awayScore);
+                showAlert('Счет обновлен успешно', 'success');
+                
+                // Обновляем локальные данные
+                currentMatch.home_score = homeScore;
+                currentMatch.away_score = awayScore;
+                
+            } catch (error) {
+                console.error('Error updating match score:', error);
+                showAlert('Ошибка обновления счета: ' + error.message, 'error');
+            }
+        }
+        
+        // Добавление события матча
+        async function addEvent(eventType) {
+            if (!currentMatch) {
+                showAlert('Выберите матч', 'error');
+                return;
+            }
+            
+            const playerId = document.getElementById('event-player').value;
+            const teamId = document.getElementById('event-team').value;
+            const minute = parseInt(document.getElementById('event-minute').value);
+            const additionalTime = parseInt(document.getElementById('event-additional').value) || 0;
+            const description = document.getElementById('event-description').value;
+            const assistedBy = document.getElementById('event-assist').value || null;
+            
+            if (!playerId || !teamId || minute === '') {
+                showAlert('Заполните все обязательные поля', 'error');
+                return;
+            }
+            
+            try {
+                const eventData = {
+                    player_id: parseInt(playerId),
+                    team_id: parseInt(teamId),
+                    event_type: eventType,
+                    minute: minute,
+                    additional_time: additionalTime,
+                    description: description,
+                    assisted_by_player_id: assistedBy ? parseInt(assistedBy) : null
+                };
+                
+                await dbAPI.addMatchEvent(currentMatch.id, eventData);
+                showAlert(`${DataUtils.getEventType(eventType)} добавлено успешно`, 'success');
+                
+                // Обновляем события матча
+                await loadMatchEvents(currentMatch.id);
+                
+                // Очищаем форму
+                document.getElementById('event-description').value = '';
+                document.getElementById('event-assist').value = '';
+                
+            } catch (error) {
+                console.error('Error adding match event:', error);
+                showAlert('Ошибка добавления события: ' + error.message, 'error');
+            }
+        }
+        
+        // Создание нового игрока
+        async function createPlayer() {
+            const firstName = document.getElementById('player-first-name').value.trim();
+            const lastName = document.getElementById('player-last-name').value.trim();
+            const username = document.getElementById('player-username').value.trim();
+            const position = document.getElementById('player-position').value;
+            const telegramId = document.getElementById('player-telegram-id').value;
+            
+            if (!firstName) {
+                showAlert('Имя обязательно для заполнения', 'error');
+                return;
+            }
+            
+            try {
+                const playerData = {
+                    first_name: firstName,
+                    last_name: lastName,
+                    username: username,
+                    position: position,
+                    telegram_id: telegramId ? parseInt(telegramId) : null
+                };
+                
+                await dbAPI.createPlayer(playerData);
+                showAlert('Игрок создан успешно', 'success');
+                
+                // Очищаем форму
+                document.getElementById('player-first-name').value = '';
+                document.getElementById('player-last-name').value = '';
+                document.getElementById('player-username').value = '';
+                document.getElementById('player-position').value = '';
+                document.getElementById('player-telegram-id').value = '';
+                
+                // Обновляем список игроков
+                await loadAllData();
+                
+            } catch (error) {
+                console.error('Error creating player:', error);
+                showAlert('Ошибка создания игрока: ' + error.message, 'error');
+            }
+        }
+        
+        // Пересчет статистики
+        async function refreshStatistics() {
+            try {
+                showAlert('Пересчет статистики...', 'info');
+                await dbAPI.refreshStatistics();
+                showAlert('Статистика обновлена успешно', 'success');
+            } catch (error) {
+                console.error('Error refreshing statistics:', error);
+                showAlert('Ошибка обновления статистики: ' + error.message, 'error');
+            }
+        }
+        
+        // Показ алерта
+        function showAlert(message, type = 'info') {
+            const alertsContainer = document.getElementById('alerts');
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type === 'info' ? 'success' : type}`;
+            alert.textContent = message;
+            
+            alertsContainer.appendChild(alert);
+            
+            // Автоматически убираем алерт через 5 секунд
+            setTimeout(() => {
+                alert.remove();
+            }, 5000);
+        }
+        
+        // Помечаем что это админ
+        window.isAdmin = true;
+    </script>
+</body>
+</html>

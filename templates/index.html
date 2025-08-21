@@ -9,6 +9,8 @@
     <title>Лига Обнинска</title>
     <!-- ИСПРАВЛЕНО: Убраны лишние пробелы в URL Telegram WebApp SDK -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <!-- Socket.IO для real-time обновлений -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="stylesheet" href="/static/css/splash.css">
     <link rel="stylesheet" href="/static/css/blb.css">
@@ -492,6 +494,7 @@
         </div>
     </div>
 
+    <script src="/static/js/animations.js"></script>
     <script src="/static/js/splash.js"></script>
     <script src="/static/js/telegram-patch.js"></script>
     <script src="/static/js/league.js"></script>
@@ -500,6 +503,8 @@
     <script src="/static/js/profile.js"></script>
     <script src="/static/js/streams.js"></script>
     <script src="/static/js/predictions.js"></script>
+    <!-- Real-time обновления через WebSocket -->
+    <script src="/static/js/realtime-updates.js"></script>
 
 </body>
 </html>
