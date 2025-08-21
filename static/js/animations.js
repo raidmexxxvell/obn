@@ -396,80 +396,14 @@ window.CounterAnimation = CounterAnimation;
 window.RewardAnimation = RewardAnimation;
 window.UIAnimations = UIAnimations;
 
-// Утилитарная функция для создания команды с логотипом
-window.createTeamWithLogo = function(teamName, options = {}) {
-    const { 
-        showLogo = true, 
-        logoSize = '20px', 
-        className = 'team-with-logo',
-        textClassName = 'team-name',
-        logoClassName = 'team-logo'
-    } = options;
-    
-    const container = document.createElement('div');
-    container.className = className;
-    container.style.cssText = `
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-    `;
-    
-    if (showLogo) {
-        const logo = document.createElement('img');
-        logo.className = logoClassName;
-        logo.alt = teamName || '';
-        logo.style.cssText = `
-            width: ${logoSize};
-            height: ${logoSize};
-            object-fit: contain;
-            border-radius: 2px;
-            flex-shrink: 0;
-        `;
-        
-        // Устанавливаем логотип команды
-        setTeamLogo(logo, teamName);
-        container.appendChild(logo);
-    }
-    
-    const nameEl = document.createElement('span');
-    nameEl.className = textClassName;
-    nameEl.textContent = teamName || '';
-    container.appendChild(nameEl);
-    
-    return container;
-};
+// Используем унифицированные утилиты (team-utils.js)
+if (!window.createTeamWithLogo && window.TeamUtils) {
+    window.createTeamWithLogo = window.TeamUtils.createTeamWithLogo;
+}
 
-// Функция для установки логотипа команды
-window.setTeamLogo = function(imgEl, teamName) {
-    const base = '/static/img/team-logos/';
-    const name = (teamName || '').trim();
-    const candidates = [];
-    
-    try { 
-        imgEl.loading = 'lazy'; 
-        imgEl.decoding = 'async'; 
-    } catch(_) {}
-    
-    if (name) {
-        const norm = name.toLowerCase()
-            .replace(/\s+/g, '')
-            .replace(/ё/g, 'е')
-            .replace(/фк/g, '')
-            .replace(/fc/g, '')
-            .replace(/fk/g, '');
-        candidates.push(base + encodeURIComponent(norm + '.png'));
-    }
-    
-    candidates.push(base + 'default.png');
-    
-    let i = 0;
-    const next = () => { 
-        if (i >= candidates.length) return; 
-        imgEl.onerror = () => { i++; next(); }; 
-        imgEl.src = candidates[i]; 
-    };
-    next();
-};
+if (!window.setTeamLogo && window.TeamUtils) {
+    window.setTeamLogo = window.TeamUtils.setTeamLogo;
+}
 
 // Функция для добавления логотипов к существующим названиям команд
 window.enhanceTeamNames = function(selector = '.team-name, .match-teams, .team-text') {
@@ -518,7 +452,7 @@ const animationStyles = `
     width: 18px;
     height: 18px;
     object-fit: contain;
-
+}
 /* Уведомления о начале матча */
 .match-start-notification {
     position: fixed;

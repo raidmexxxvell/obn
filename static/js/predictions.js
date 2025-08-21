@@ -204,7 +204,7 @@
     function mkTeam(name) {
       const d = document.createElement('div'); d.className = 'team';
       const img = document.createElement('img'); img.className = 'logo'; img.alt = name || '';
-      setTeamLogo(img, name||'');
+      (window.setTeamLogo || window.TeamUtils?.setTeamLogo || function(){ })(img, name||'');
       const nm = document.createElement('div'); nm.className = 'team-name';
       try {
         const withTeamCount = window.withTeamCount || (window.profileWithTeamCount /* fallback stub */);
@@ -212,21 +212,7 @@
       } catch(_) { nm.textContent = name || ''; }
       d.append(img, nm); return d;
     }
-
-    function setTeamLogo(imgEl, teamName) {
-      const base = '/static/img/team-logos/';
-      const name = (teamName || '').trim();
-      const candidates = [];
-      try { imgEl.loading = 'lazy'; imgEl.decoding = 'async'; } catch(_) {}
-      if (name) {
-        const norm = name.toLowerCase().replace(/\s+/g,'').replace(/ё/g,'е');
-        candidates.push(base + encodeURIComponent(norm + '.png'));
-        // candidates.push(base + encodeURIComponent(name + '.png'));
-      }
-      candidates.push(base + 'default.png');
-      let i = 0; const next = () => { if (i>=candidates.length) return; imgEl.onerror = () => { i++; next(); }; imgEl.src = candidates[i]; };
-      next();
-    }
+    // Удалена локальная setTeamLogo: используется глобальная TeamUtils
 
     function mkOptions(tour, m, locked) {
       const box = document.createElement('div'); box.className = 'options-box';
@@ -314,30 +300,9 @@
         .catch(err => { console.error('my bets load error', err); if (!cached) myBetsEl.innerHTML = '<div class="schedule-error">Ошибка загрузки</div>'; });
     }
 
-    function formatDateTime(dateIso, time) {
-      try {
-        if (!dateIso) return time || '';
-        const d = new Date(dateIso);
-        const ds = d.toLocaleDateString();
-        const ts = time || (d.toTimeString().slice(0,5));
-        return `${ds}${ts ? ' ' + ts : ''}`;
-      } catch(_) { return time || ''; }
-    }
-
-      function isLiveNow(m) {
-        try {
-          const now = new Date();
-          if (m.datetime) {
-            const dt = new Date(m.datetime); const dtEnd = new Date(dt.getTime() + 2*60*60*1000);
-            return now >= dt && now < dtEnd;
-          } else if (m.date && m.time) {
-            const dt = new Date(m.date + 'T' + (m.time?.length===5? m.time+':00': m.time||''));
-            const dtEnd = new Date(dt.getTime() + 2*60*60*1000);
-            return now >= dt && now < dtEnd;
-          }
-        } catch(_) {}
-        return false;
-      }
+  // Используем унифицированные утилиты форматирования и live-статуса
+  const formatDateTime = (d,t) => (window.MatchUtils? window.MatchUtils.formatDateTime(d,t): (d||'') );
+  const isLiveNow = (m) => (window.MatchUtils? window.MatchUtils.isLiveNow(m): false);
 
     // Автозагрузка при входе во вкладку
     document.addEventListener('click', (e) => {

@@ -183,73 +183,20 @@ class RealtimeUpdater {
     }
     
     showNotification(message) {
-        // Показываем уведомление пользователю
-        if ('Notification' in window && Notification.permission === 'granted') {
-            new Notification('Лига Обнинска', {
-                body: message,
-                icon: '/static/img/logo.png',
-                silent: false
-            });
+        // system notification (browser) optional
+        try {
+            if ('Notification' in window && Notification.permission === 'granted') {
+                new Notification('Лига Обнинска', { body: message, icon: '/static/img/logo.png', silent: true });
+            }
+        } catch(_) {}
+        // Unified UI notification
+        if (window.NotificationSystem) {
+            window.NotificationSystem.show(message, 'info', 4000);
+        } else if (window.showAlert) {
+            window.showAlert(message, 'info');
+        } else {
+            try { console.log('[RealtimeUpdater]', message); } catch(_) {}
         }
-        
-        // Также показываем в UI
-        this.showToast(message);
-    }
-    
-    showToast(message) {
-        // Создаем toast уведомление
-        const toast = document.createElement('div');
-        toast.className = 'toast-notification';
-        toast.textContent = message;
-        
-        // Добавляем стили если их еще нет
-        if (!document.querySelector('#toast-styles')) {
-            const styles = document.createElement('style');
-            styles.id = 'toast-styles';
-            styles.textContent = `
-                .toast-notification {
-                    position: fixed;
-                    top: 20px;
-                    right: 20px;
-                    background: var(--primary, #3b82f6);
-                    color: white;
-                    padding: 12px 16px;
-                    border-radius: 8px;
-                    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-                    z-index: 10000;
-                    font-size: 14px;
-                    max-width: 300px;
-                    transform: translateX(100%);
-                    transition: transform 0.3s ease;
-                }
-                
-                .toast-notification.show {
-                    transform: translateX(0);
-                }
-                
-                .score-updated {
-                    animation: scoreUpdate 0.5s ease;
-                }
-                
-                @keyframes scoreUpdate {
-                    0% { background: rgba(59, 130, 246, 0.3); }
-                    50% { background: rgba(59, 130, 246, 0.6); }
-                    100% { background: transparent; }
-                }
-            `;
-            document.head.appendChild(styles);
-        }
-        
-        document.body.appendChild(toast);
-        
-        // Показываем с анимацией
-        setTimeout(() => toast.classList.add('show'), 100);
-        
-        // Убираем через 4 секунды
-        setTimeout(() => {
-            toast.classList.remove('show');
-            setTimeout(() => document.body.removeChild(toast), 300);
-        }, 4000);
     }
     
     // API для подписки на обновления

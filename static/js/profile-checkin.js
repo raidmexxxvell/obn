@@ -1,0 +1,103 @@
+// profile-checkin.js
+// Ежедневный чек-ин: рендер календаря, получение награды, анимации
+(function(){
+  if (window.ProfileCheckin) return;
+  const tg = window.Telegram?.WebApp || null;
+  const elements = {
+    checkinDays: document.getElementById('checkin-days'),
+    checkinBtn: document.getElementById('checkin-btn'),
+    checkinStatus: document.getElementById('checkin-status'),
+    currentStreak: document.getElementById('current-streak'),
+  };
+
+  function getUser(){ return (window.ProfileUser && window.ProfileUser.getLastUser && window.ProfileUser.getLastUser()) || null; }
+
+  function renderCheckinSection(user){
+    if (!user || !elements.checkinDays) return;
+    elements.checkinDays.innerHTML='';
+    const today = new Date().toISOString().split('T')[0];
+    const lastCheckin = (user.last_checkin_date||'').split('T')[0];
+    const checkedToday = lastCheckin === today;
+    const mod = (user.consecutive_days||0) % 7;
+    const completedCount = checkedToday ? (mod === 0 ? 7 : mod) : mod;
+    const activeDay = checkedToday ? null : (mod + 1);
+    if (elements.currentStreak) elements.currentStreak.textContent = user.consecutive_days || 0;
+    for (let i=1;i<=7;i++){
+      const d=document.createElement('div');
+      d.className='checkin-day'; d.textContent=i;
+      if (i <= completedCount) d.classList.add('completed');
+      else if (activeDay && i===activeDay) d.classList.add('active');
+      elements.checkinDays.appendChild(d);
+    }
+    if (checkedToday){
+      if (elements.checkinBtn) elements.checkinBtn.disabled=true;
+      if (elements.checkinStatus) elements.checkinStatus.textContent='✅ Награда получена сегодня';
+    } else {
+      if (elements.checkinBtn) elements.checkinBtn.disabled=false;
+      if (elements.checkinStatus) elements.checkinStatus.textContent='';
+    }
+  }
+
+  function uiError(msg){
+    try { window.showAlert?.(msg,'error'); } catch(_) {}
+    if (elements.checkinStatus){ elements.checkinStatus.textContent = msg; elements.checkinStatus.style.color='var(--danger)'; setTimeout(()=>{ if(elements.checkinStatus){ elements.checkinStatus.textContent=''; elements.checkinStatus.style.color=''; } },3000); }
+  }
+  function uiSuccess(msg){
+    try { window.showAlert?.(msg,'success'); } catch(_) {}
+    if (elements.checkinStatus){ elements.checkinStatus.textContent = msg; elements.checkinStatus.style.color='var(--success)'; setTimeout(()=>{ if(elements.checkinStatus){ elements.checkinStatus.textContent=''; elements.checkinStatus.style.color=''; } },2000); }
+  }
+
+  function animateStats(xpGain, creditsGain){
+    try {
+      const xpElement = document.querySelector('.stat-value[data-stat="xp"]') || document.getElementById('xp');
+      const creditsElement = document.querySelector('.stat-value[data-stat="credits"]') || document.getElementById('credits');
+      if (window.CounterAnimation){
+        if (xpElement){
+          const parts = xpElement.textContent.split('/');
+            const curXP = parseInt(parts[0]) || 0;
+          window.CounterAnimation.animate(xpElement, curXP, curXP + xpGain, 1000, v=>`${v}/${parts[1]||100}`);
+        }
+        if (creditsElement){
+          const curCr = parseInt((creditsElement.textContent||'0').replace(/\D/g,''))||0;
+          window.CounterAnimation.animate(creditsElement, curCr, curCr + creditsGain, 1000, v=>v.toLocaleString());
+        }
+      }
+      if (window.UIAnimations){ if (xpElement) window.UIAnimations.pulse(xpElement); if (creditsElement) window.UIAnimations.pulse(creditsElement); }
+    } catch(e){ console.warn('animateStats fail', e); }
+  }
+
+  function showRewardAnimation(xp, credits){
+    if (!elements.checkinStatus) return;
+    if (window.RewardAnimation){
+      window.RewardAnimation.show(document.body, xp, credits).then(()=>{
+        if (elements.checkinStatus){ elements.checkinStatus.textContent='Награда получена!'; elements.checkinStatus.style.color='var(--success)'; setTimeout(()=>{ if(elements.checkinStatus){ elements.checkinStatus.textContent=''; elements.checkinStatus.style.color=''; } },3000); }
+        animateStats(xp, credits);
+      });
+    } else {
+      elements.checkinStatus.innerHTML = `<div class="reward-animation">+${xp} XP | +${credits} кредитов</div>`;
+      setTimeout(()=>{ if(elements.checkinStatus) elements.checkinStatus.textContent='Награда получена!'; },2000);
+    }
+  }
+
+  function handleCheckin(){
+    if (!elements.checkinBtn) return;
+    elements.checkinBtn.disabled = true;
+    if (elements.checkinStatus) elements.checkinStatus.textContent='Обработка...';
+    if (!tg || !tg.initDataUnsafe?.user){ uiError('Невозможно выполнить чекин без Telegram WebApp'); if(elements.checkinBtn) elements.checkinBtn.disabled=false; return; }
+    const fd = new FormData(); fd.append('initData', tg.initData || '');
+    fetch('/api/checkin',{ method:'POST', body: fd })
+      .then(res=>{ if(res.status===401){ uiError('Ошибка авторизации'); throw new Error('unauth'); } return res.json(); })
+      .then(data=>{ if(!data) return; if(data.status==='already_checked'){ if(elements.checkinStatus) elements.checkinStatus.textContent='✅ Награда получена сегодня'; return; } showRewardAnimation(data.xp, data.credits); return window.ProfileUser.fetchUserData(); })
+      .then(u=>{ if(u) renderCheckinSection(u); })
+      .catch(err=>{ console.error('checkin err', err); uiError('Ошибка получения награды'); if(elements.checkinBtn) elements.checkinBtn.disabled=false; });
+  }
+
+  function attach(){ if(elements.checkinBtn){ elements.checkinBtn.addEventListener('click', handleCheckin); elements.checkinBtn.setAttribute('data-throttle','2000'); } }
+
+  // Событие из ProfileUser
+  window.addEventListener('profile:user-loaded', e=>{ try { renderCheckinSection(e.detail); } catch(_) {} });
+  // Если данные уже загружены к моменту старта
+  document.addEventListener('DOMContentLoaded', ()=>{ const u=getUser(); if(u) renderCheckinSection(u); attach(); });
+
+  window.ProfileCheckin = { renderCheckinSection, handleCheckin };
+})();

@@ -373,7 +373,6 @@
                 <div class="subtab-item" data-atab="stats">Статистика</div>
                 <div class="subtab-item" data-atab="orders">Заказы</div>
                 <div class="subtab-item" data-atab="streams">Трансляции</div>
-                <div class="subtab-item" data-atab="lineups">Составы</div>
             </div>
             <div id="admin-pane-service" class="pred-pane">
                 <div class="store-grid" style="grid-template-columns: repeat(2, minmax(0,1fr));">
@@ -446,34 +445,6 @@
                 </div>
                 <div id="admin-streams-msg" style="margin-top:8px; font-size:12px; color: var(--gray);"></div>
             </div>
-            <div id="admin-pane-lineups" class="pred-pane" style="display:none;">
-                <div style="margin-bottom: 12px;">
-                    <div style="display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;">
-                        <input id="lineup-home" type="text" placeholder="Домашняя команда" style="flex: 1; min-width: 120px; padding: 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,.2); background: transparent; color: #fff;">
-                        <input id="lineup-away" type="text" placeholder="Гостевая команда" style="flex: 1; min-width: 120px; padding: 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,.2); background: transparent; color: #fff;">
-                        <input id="lineup-date" type="date" style="padding: 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,.2); background: transparent; color: #fff;">
-                    </div>
-                    <button class="details-btn" id="lineup-load">Загрузить составы</button>
-                </div>
-                
-                <div id="lineup-editor" style="display: none;">
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 12px;">
-                        <div>
-                            <h4 id="lineup-home-title" style="margin: 0 0 8px; color: #fff;">Домашняя команда</h4>
-                            <div id="lineup-home-players"></div>
-                            <button class="details-btn" id="add-home-player" style="margin-top: 8px; font-size: 12px;">+ Добавить игрока</button>
-                        </div>
-                        <div>
-                            <h4 id="lineup-away-title" style="margin: 0 0 8px; color: #fff;">Гостевая команда</h4>
-                            <div id="lineup-away-players"></div>
-                            <button class="details-btn" id="add-away-player" style="margin-top: 8px; font-size: 12px;">+ Добавить игрока</button>
-                        </div>
-                    </div>
-                    <button class="details-btn confirm" id="lineup-save">Сохранить составы</button>
-                </div>
-                
-                <div id="lineup-message" style="margin-top: 8px; font-size: 12px; color: var(--gray);"></div>
-            </div>
         </div>
     </div>
     {% endif %}
@@ -523,12 +494,28 @@
         </div>
     </div>
 
+    <script src="/static/js/team-utils.js"></script>
+    <script src="/static/js/match-utils.js"></script>
     <script src="/static/js/animations.js"></script>
     <script src="/static/js/splash.js"></script>
     <script src="/static/js/telegram-patch.js"></script>
     <script src="/static/js/league.js"></script>
     <script src="/static/js/shop.js"></script>
     <script src="/static/js/admin.js"></script>
+    <script src="/static/js/profile-user.js"></script>
+    <script src="/static/js/profile-achievements.js"></script>
+    <script src="/static/js/profile-checkin.js"></script>
+    <script src="/static/js/profile-live.js"></script>
+    <script src="/static/js/profile-match-roster-events.js"></script>
+    <script src="/static/js/profile-match-advanced.js"></script>
+    <script src="/static/js/profile-match-live-score.js"></script>
+    <script src="/static/js/profile-match-admin.js"></script>
+    <script src="/static/js/profile-match-stats.js"></script>
+    <script src="/static/js/profile-match-specials.js"></script>
+    <script src="/static/js/profile-match-stream.js"></script>
+    <script src="/static/js/profile-referral.js"></script>
+    <script src="/static/js/profile-ads-featured.js"></script>
+    <script src="/static/js/profile-core.js"></script>
     <script src="/static/js/profile.js"></script>
     <script src="/static/js/streams.js"></script>
     <script src="/static/js/predictions.js"></script>

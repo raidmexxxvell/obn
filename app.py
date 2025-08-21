@@ -555,8 +555,6 @@ class MatchVote(Base):
     )
 
 def _match_date_key(m: dict) -> str:
-    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     try:
         if m.get('date'):
             return str(m['date'])[:10]

@@ -166,18 +166,7 @@
   }
 
   function loadTeamLogo(imgEl, teamName) {
-    const base = '/static/img/team-logos/';
-    const name = (teamName || '').trim();
-    const candidates = [];
-    try { imgEl.loading = 'lazy'; imgEl.decoding = 'async'; } catch(_) {}
-    if (name) {
-      const norm = name.toLowerCase().replace(/\s+/g, '').replace(/ё/g, 'е');
-      candidates.push(base + encodeURIComponent(norm + '.png'));
-    }
-    candidates.push(base + 'default.png');
-    let idx = 0;
-    const tryNext = () => { if (idx >= candidates.length) return; imgEl.onerror = () => { idx++; tryNext(); }; imgEl.src = candidates[idx]; };
-    tryNext();
+    (window.setTeamLogo || window.TeamUtils?.setTeamLogo || function(){ })(imgEl, teamName);
   }
 
   function renderSchedule(pane, data) {
@@ -201,11 +190,8 @@
       const header = document.createElement('div'); header.className = 'match-header';
       const dateStr = (() => { try { if (m.date) { const d = new Date(m.date); return d.toLocaleDateString(); } } catch(_) {} return ''; })();
       const timeStr = m.time || '';
-      let isLive = false;
-      try {
-        if (m.datetime) { const dt = new Date(m.datetime); const dtEnd = new Date(dt.getTime() + 2*60*60*1000); const now = new Date(); isLive = now >= dt && now < dtEnd; }
-        else if (m.date && m.time) { const dt = new Date(m.date + 'T' + (m.time.length===5? m.time+':00': m.time)); const dtEnd = new Date(dt.getTime() + 2*60*60*1000); const now = new Date(); isLive = now >= dt && now < dtEnd; }
-      } catch(_) {}
+  let isLive = false;
+  try { if (window.MatchUtils) { isLive = window.MatchUtils.isLiveNow(m); } } catch(_) {}
       const headerText = document.createElement('span'); headerText.textContent = `${dateStr}${timeStr ? ' ' + timeStr : ''}`; header.appendChild(headerText);
   if (isLive) { const live = document.createElement('span'); live.className='live-badge'; const dot=document.createElement('span'); dot.className='live-dot'; const lbl=document.createElement('span'); lbl.textContent='Матч идет'; live.append(dot,lbl); header.appendChild(live); }
       card.appendChild(header);
