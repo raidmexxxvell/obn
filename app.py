@@ -6954,7 +6954,9 @@ def admin_init_database():
         })
         
     except Exception as e:
-        app.logger.error(f"Database initialization error: {e}")
+        import traceback
+        tb = traceback.format_exc(limit=5)
+        app.logger.error(f"Database initialization error: {e}\n{tb}")
         return jsonify({
             'status': 'error', 
             'message': str(e)

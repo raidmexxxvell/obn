@@ -8,8 +8,20 @@ import sys
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime, timedelta
-from database_models import db_manager, Tournament, Team, Player, Match
 import json
+import pathlib
+
+# Ensure project root on sys.path for package imports when executed via web route
+CURRENT_DIR = pathlib.Path(__file__).resolve().parent
+ROOT_DIR = CURRENT_DIR.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+try:
+    # Correct package-qualified import
+    from database.database_models import db_manager, Tournament, Team, Player, Match
+except ImportError as e:
+    raise ImportError(f"Failed to import database models: {e}. Ensure 'database' package is present and PYTHONPATH includes project root.")
 
 # Google Sheets configuration
 GOOGLE_SHEETS_CREDS_JSON = os.environ.get('GOOGLE_SHEETS_CREDS_JSON', '{}')
