@@ -48,7 +48,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 from sqlalchemy import (
-    create_engine, Column, Integer, String, Text, DateTime, Date, func, case, and_, Index
+    create_engine, Column, Integer, String, Text, DateTime, Date, func, case, and_, Index, text
 )
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
@@ -195,7 +195,7 @@ if DATABASE_URL:
         
         # Проверяем соединение
         with engine.connect() as conn:
-            conn.execute("SELECT 1")
+            conn.execute(text("SELECT 1"))
             
         SessionLocal = sessionmaker(bind=engine)
         print("[INFO] PostgreSQL database connected successfully")
