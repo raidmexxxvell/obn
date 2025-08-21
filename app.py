@@ -2348,6 +2348,12 @@ def _get_teams_from_snapshot(db: Session) -> list[str]:
         name = (row[1] if len(row) > 1 else '').strip()
         if name:
             teams.append(name)
+    # Fallback: если снапшота нет / пусто — используем TEAM_STRENGTHS_BASE
+    if not teams:
+        try:
+            teams = sorted({k for k in TEAM_STRENGTHS_BASE.keys()})
+        except Exception:
+            teams = []
     return teams
 
 @app.route('/api/teams', methods=['GET'])
@@ -7174,6 +7180,43 @@ def api_stats_table():
                     resp.headers['ETag'] = _etag
                     resp.headers['Cache-Control'] = 'public, max-age=1800, stale-while-revalidate=600'
                     return resp
+                # Если снапшота нет – сформируем временную таблицу из случайных игроков (10 строк)
+                # Структура: A: Имя, B: Матчи, C: Голы, D: Пасы, E: Желтые, F: Красные, G: Очки
+                try:
+                    from database.database_models import PlayerStatistics, Player  # локальный импорт чтобы не падать при отсутствии новой БД
+                except Exception:
+                    PlayerStatistics = Player = None
+                temp_values = []
+                header = ['Игрок', 'Матчи', 'Голы', 'Пасы', 'ЖК', 'КК', 'Очки']
+                if Player and PlayerStatistics:
+                    try:
+                        # Выбираем до 25 игроков, затем случайно 10 (если доступно random в SQL)
+                        q = db.query(Player).limit(25).all()
+                        import random as _r
+                        _r.shuffle(q)
+                        pick = q[:10]
+                        for p in pick:
+                            temp_values.append([
+                                (p.first_name or '') + ((' ' + p.last_name) if p.last_name else ''),
+                                0, 0, 0, 0, 0, 0
+                            ])
+                    except Exception:
+                        pass
+                if not temp_values:
+                    # Заглушки, если нет игроков
+                    temp_values = [[f'Игрок {i}', 0, 0, 0, 0, 0, 0] for i in range(1, 11)]
+                payload = {
+                    'range': 'A1:G11',
+                    'values': [header] + temp_values,
+                    'updated_at': datetime.now(timezone.utc).isoformat()
+                }
+                _snapshot_set(db, 'stats-table', payload)
+                _core = {'range': 'A1:G11', 'values': payload.get('values')}
+                _etag = hashlib.md5(json.dumps(_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+                resp = jsonify({**payload, 'version': _etag})
+                resp.headers['ETag'] = _etag
+                resp.headers['Cache-Control'] = 'public, max-age=600, stale-while-revalidate=300'
+                return resp
             finally:
                 db.close()
 
