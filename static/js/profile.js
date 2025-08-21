@@ -2557,13 +2557,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach((x)=>x.classList.remove('active'));
                 btn.classList.add('active');
                 const key = btn.getAttribute('data-mdtab');
-    if (key === 'home') { homePane.style.display = ''; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; if (streamPane) streamPane.style.display = 'none'; statsPane.style.display = 'none'; }
-    else if (key === 'away') { homePane.style.display = 'none'; awayPane.style.display = ''; specialsPane.style.display = 'none'; if (streamPane) streamPane.style.display = 'none'; statsPane.style.display = 'none'; }
+                // Всегда скрываем панель трансляции при переходе на другие вкладки
+                if (streamPane) streamPane.style.display = 'none';
+    if (key === 'home') { homePane.style.display = ''; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; statsPane.style.display = 'none'; }
+    else if (key === 'away') { homePane.style.display = 'none'; awayPane.style.display = ''; specialsPane.style.display = 'none'; statsPane.style.display = 'none'; }
                 else if (key === 'specials') {
                     homePane.style.display = 'none'; awayPane.style.display = 'none'; specialsPane.style.display = '';
                     // отрисуем спецпанель внутри specialsPane
                     renderSpecialsPane(specialsPane, match);
-                    if (streamPane) streamPane.style.display = 'none'; statsPane.style.display = 'none';
+                    statsPane.style.display = 'none';
         } else if (key === 'stream') {
                     homePane.style.display = 'none'; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; statsPane.style.display = 'none';
                     // Гарантируем наличие панели и запускаем ленивую инициализацию через Streams.js
@@ -2582,7 +2584,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (homeTab) { homeTab.classList.add('active'); homePane.style.display=''; awayPane.style.display='none'; specialsPane.style.display='none'; statsPane.style.display='none'; }
                     }
                 } else if (key === 'stats') {
-                    homePane.style.display = 'none'; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; if (streamPane) streamPane.style.display = 'none'; statsPane.style.display = '';
+                    homePane.style.display = 'none'; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; statsPane.style.display = '';
                     renderMatchStats(statsPane, match);
                     }
             };

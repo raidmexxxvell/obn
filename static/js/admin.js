@@ -161,8 +161,8 @@
         const name = document.createElement('div'); name.className='store-name'; name.textContent = `${m.home||''} — ${m.away||''}`;
         const when = document.createElement('div'); when.className='store-price'; when.textContent = m.datetime || m.date || '';
         const input = document.createElement('input'); input.type='text'; input.placeholder = 'Ссылка VK Live';
-        const btn = document.createElement('button'); btn.className='details-btn confirm'; btn.textContent='Подтвердить';
-        const btnReset = document.createElement('button'); btnReset.className='details-btn'; btnReset.textContent='Сбросить'; btnReset.style.marginLeft = '8px';
+        const btnReset = document.createElement('button'); btnReset.className='details-btn'; btnReset.textContent='Сбросить';
+        const btn = document.createElement('button'); btn.className='details-btn confirm'; btn.textContent='Подтвердить'; btn.style.marginLeft = '8px';
         const hint = document.createElement('div'); hint.className = 'save-hint';
         // Предзаполним, если уже была сохранённая ссылка
         try {
@@ -212,7 +212,7 @@
             } catch(_) {}
           } catch(_) { btn.disabled=false; btn.textContent='Подтвердить'; }
         });
-        const row = document.createElement('div'); row.className='stream-row'; row.append(input, btn, btnReset);
+        const row = document.createElement('div'); row.className='stream-row'; row.append(input, btnReset, btn);
         card.append(name, when, row, hint); list.appendChild(card);
 
         btnReset.addEventListener('click', async () => {

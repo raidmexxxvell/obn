@@ -170,6 +170,11 @@ body {
     position: relative; width: 100%; padding-top: 56.25%; /* 16:9 */
 }
 .stream-aspect iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+
+/* Поддержка полноэкранного режима для мобильных устройств */
+.stream-aspect iframe:-webkit-full-screen { width: 100vw !important; height: 100vh !important; }
+.stream-aspect iframe:-moz-full-screen { width: 100vw !important; height: 100vh !important; }
+.stream-aspect iframe:fullscreen { width: 100vw !important; height: 100vh !important; }
 .stream-skeleton { display:flex; align-items:center; justify-content:center; color: var(--gray); font-size: 12px; height: 220px; }
 
 /* Комментарии под трансляцией */

@@ -107,8 +107,31 @@
     // используем vUrl для перебивки кэша версии приложения (если применимо)
     ifr.src = vUrl(buildIframeSrc(info));
     ifr.setAttribute('allowfullscreen','true');
+    ifr.setAttribute('webkitallowfullscreen','true');
+    ifr.setAttribute('mozallowfullscreen','true');
     ifr.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture; screen-wake-lock;';
     ifr.referrerPolicy = 'strict-origin-when-cross-origin';
+    
+    // Добавляем обработчик двойного тапа для полноэкранного режима на мобильных
+    let lastTapTime = 0;
+    ifr.addEventListener('touchend', (e) => {
+      const now = Date.now();
+      if (now - lastTapTime < 300) {
+        e.preventDefault();
+        // Попытка входа в полноэкранный режим
+        try {
+          if (ifr.requestFullscreen) {
+            ifr.requestFullscreen();
+          } else if (ifr.webkitRequestFullscreen) {
+            ifr.webkitRequestFullscreen();
+          } else if (ifr.mozRequestFullScreen) {
+            ifr.mozRequestFullScreen();
+          }
+        } catch(_) {}
+      }
+      lastTapTime = now;
+    }, { passive: false });
+    
     ratio.appendChild(ifr); host.appendChild(ratio);
   pane.innerHTML='';
   pane.appendChild(host);
