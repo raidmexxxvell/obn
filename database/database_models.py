@@ -64,9 +64,19 @@ class Player(Base):
     
     # Relationships
     team_compositions = relationship("TeamComposition", back_populates="player")
-    match_events = relationship("MatchEvent", back_populates="player")
+    # match_events: события где игрок является основным участником (player_id)
+    match_events = relationship(
+        "MatchEvent",
+        back_populates="player",
+        foreign_keys="MatchEvent.player_id"
+    )
     player_statistics = relationship("PlayerStatistics", back_populates="player")
-    assisted_events = relationship("MatchEvent", foreign_keys="MatchEvent.assisted_by_player_id")
+    # assisted_events: события где игрок отдал передачу (assisted_by_player_id)
+    assisted_events = relationship(
+        "MatchEvent",
+        foreign_keys="MatchEvent.assisted_by_player_id",
+        back_populates="assisted_by"
+    )
 
 class Match(Base):
     __tablename__ = 'matches'
@@ -146,7 +156,11 @@ class MatchEvent(Base):
     match = relationship("Match", back_populates="match_events")
     player = relationship("Player", foreign_keys=[player_id], back_populates="match_events")
     team = relationship("Team", back_populates="match_events")
-    assisted_by = relationship("Player", foreign_keys=[assisted_by_player_id], back_populates="assisted_events")
+    assisted_by = relationship(
+        "Player",
+        foreign_keys=[assisted_by_player_id],
+        back_populates="assisted_events"
+    )
 
 class PlayerStatistics(Base):
     __tablename__ = 'player_statistics'
