@@ -82,8 +82,8 @@
       pane.__streamInfo = null;
       pane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
       pane.setAttribute('data-match-key', key);
-      // Держим панель скрытой до явной активации вкладки «Трансляция»
-      pane.style.display = 'none';
+      // Показываем панель при смене матча, но контролируем видимость через активную вкладку
+      pane.style.display = '';
     }
     return pane;
   }
@@ -133,44 +133,107 @@
       lastTapTime = now;
     }, { passive: false });
     
-    // Кнопка «на весь экран»: сначала пробуем нативный Fullscreen API, иначе — псевдо-фуллскрин
+    // Кнопка «на весь экран»: улучшенная версия с отладкой для мобильных
     const fsBtn = document.createElement('button');
     fsBtn.className = 'stream-fs-btn';
     fsBtn.type = 'button';
     fsBtn.title = 'На весь экран';
     fsBtn.setAttribute('aria-label', 'На весь экран');
-    fsBtn.textContent = '\u2922'; // ⤢
+    fsBtn.innerHTML = '&#x26F6;'; // ⛶ или используем ⤢
+    
     const enterFs = () => {
+      if (DBG) console.debug('[streams] enterFs: trying fullscreen');
       let ok = false;
+      // Пробуем разные варианты для мобильных браузеров
       try {
-        if (ifr.requestFullscreen) { ifr.requestFullscreen(); ok = true; }
-        else if (ifr.webkitRequestFullscreen) { ifr.webkitRequestFullscreen(); ok = true; }
-        else if (ifr.mozRequestFullScreen) { ifr.mozRequestFullScreen(); ok = true; }
-      } catch(_) {}
+        if (ratio.requestFullscreen) { 
+          ratio.requestFullscreen().then(()=>{ if (DBG) console.debug('[streams] fullscreen success'); }).catch(e=>{ if (DBG) console.debug('[streams] fullscreen failed:', e); }); 
+          ok = true; 
+        }
+        else if (ratio.webkitRequestFullscreen) { 
+          ratio.webkitRequestFullscreen(); 
+          ok = true; 
+          if (DBG) console.debug('[streams] webkit fullscreen attempt');
+        }
+        else if (ratio.mozRequestFullScreen) { 
+          ratio.mozRequestFullScreen(); 
+          ok = true; 
+          if (DBG) console.debug('[streams] moz fullscreen attempt');
+        }
+        else if (ifr.requestFullscreen) {
+          ifr.requestFullscreen().then(()=>{ if (DBG) console.debug('[streams] iframe fullscreen success'); }).catch(e=>{ if (DBG) console.debug('[streams] iframe fullscreen failed:', e); });
+          ok = true;
+        }
+      } catch(e) { 
+        if (DBG) console.debug('[streams] fullscreen exception:', e); 
+      }
+      
       if (!ok) {
+        if (DBG) console.debug('[streams] fallback to pseudo-fullscreen');
         // Псевдо-фуллскрин: фиксируем контейнер на весь вьюпорт
-        try { const paneEl = pane; paneEl.classList.add('fs-mode'); document.body.classList.add('allow-landscape'); } catch(_) {}
+        try { 
+          pane.classList.add('fs-mode'); 
+          document.body.classList.add('allow-landscape'); 
+          if (DBG) console.debug('[streams] pseudo-fullscreen enabled');
+        } catch(e) { 
+          if (DBG) console.debug('[streams] pseudo-fullscreen failed:', e); 
+        }
       }
     };
-    const exitPseudo = () => { try { pane.classList.remove('fs-mode'); } catch(_) {} };
+    
+    const exitPseudo = () => { 
+      try { 
+        pane.classList.remove('fs-mode'); 
+        if (DBG) console.debug('[streams] pseudo-fullscreen disabled');
+      } catch(e) { 
+        if (DBG) console.debug('[streams] exit pseudo failed:', e); 
+      } 
+    };
+    
     fsBtn.addEventListener('click', (e)=>{ 
       e.preventDefault(); 
+      e.stopPropagation();
+      if (DBG) console.debug('[streams] fullscreen button clicked');
+      
       try {
-        if (document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement) {
+        // Проверяем, уже в фуллскрине ли мы
+        const isFullscreen = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement;
+        if (isFullscreen) {
+          if (DBG) console.debug('[streams] exiting fullscreen');
           if (document.exitFullscreen) document.exitFullscreen();
           else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
           else if (document.mozCancelFullScreen) document.mozCancelFullScreen();
           return;
         }
-      } catch(_) {}
-      if (pane.classList?.contains('fs-mode')) exitPseudo(); else enterFs();
+      } catch(e) { 
+        if (DBG) console.debug('[streams] exit fullscreen failed:', e); 
+      }
+      
+      // Переключаем псевдо-фуллскрин
+      if (pane.classList?.contains('fs-mode')) {
+        exitPseudo(); 
+      } else {
+        enterFs();
+      }
     });
-    document.addEventListener('fullscreenchange', ()=>{
+    
+    // Слушаем события изменения фуллскрина для очистки псевдо-режима
+    const handleFullscreenChange = () => {
       try {
         const fs = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement;
-        if (!fs) exitPseudo();
-      } catch(_) {}
-    });
+        if (!fs && pane.classList?.contains('fs-mode')) {
+          if (DBG) console.debug('[streams] fullscreen ended, keeping pseudo mode');
+        } else if (!fs) {
+          exitPseudo();
+        }
+      } catch(e) { 
+        if (DBG) console.debug('[streams] fullscreen change handler error:', e); 
+      }
+    };
+    
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
 
     ratio.appendChild(ifr); host.appendChild(ratio); host.appendChild(fsBtn);
   pane.innerHTML='';

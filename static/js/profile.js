@@ -2557,9 +2557,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach((x)=>x.classList.remove('active'));
                 btn.classList.add('active');
                 const key = btn.getAttribute('data-mdtab');
+                
                 // Всегда скрываем панель трансляции при переходе на другие вкладки и запрещаем landscape
-                try { const spForce = document.getElementById('md-pane-stream'); if (spForce) spForce.style.display = 'none'; } catch(_) {}
-                try { document.body.classList.remove('allow-landscape'); } catch(_) {}
+                try { const spForce = document.getElementById('md-pane-stream'); if (spForce && key !== 'stream') spForce.style.display = 'none'; } catch(_) {}
+                if (key !== 'stream') {
+                    try { document.body.classList.remove('allow-landscape'); } catch(_) {}
+                }
+                
     if (key === 'home') { homePane.style.display = ''; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; statsPane.style.display = 'none'; }
     else if (key === 'away') { homePane.style.display = 'none'; awayPane.style.display = ''; specialsPane.style.display = 'none'; statsPane.style.display = 'none'; }
                 else if (key === 'specials') {
@@ -2597,17 +2601,20 @@ document.addEventListener('DOMContentLoaded', () => {
             if (subtabs && !subtabs.__streamDelegated) {
                 subtabs.__streamDelegated = true;
                 subtabs.addEventListener('click', (e) => {
+                    const streamBtn = e.target.closest('.subtab-item[data-mdtab="stream"]');
+                    
                     // Если клик не по вкладке stream — принудительно прячем панель
-                    if (!e.target.closest('.subtab-item[data-mdtab="stream"]')) {
+                    if (!streamBtn) {
                         try { const spLeak = document.getElementById('md-pane-stream'); if (spLeak) spLeak.style.display='none'; } catch(_) {}
                         try { document.body.classList.remove('allow-landscape'); } catch(_) {}
                         return;
                     }
-                    const btn = e.target.closest('.subtab-item[data-mdtab="stream"]');
+                    
+                    // Обработка клика по вкладке stream
                     e.preventDefault();
                     // Имитация логики обработки клика по вкладке «stream»
                     mdPane.querySelectorAll('.modal-subtabs .subtab-item').forEach((x)=>x.classList.remove('active'));
-                    btn.classList.add('active');
+                    streamBtn.classList.add('active');
                     homePane.style.display = 'none'; awayPane.style.display = 'none'; specialsPane.style.display = 'none'; statsPane.style.display = 'none';
                     let sp = document.getElementById('md-pane-stream');
                     if (!sp && window.Streams && typeof window.Streams.setupMatchStream === 'function') {
