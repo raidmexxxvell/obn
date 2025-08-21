@@ -194,14 +194,28 @@ class DatabaseManager:
             
         if not self.database_url:
             raise ValueError("DATABASE_URL not configured")
+
+        # Нормализация URL: postgres:// -> postgresql+psycopg:// и добавление драйвера при отсутствии
+        url = self.database_url.strip()
+        if url.startswith('postgres://'):
+            url = 'postgresql://' + url[len('postgres://') :]
+        # Заменяем старый драйвер psycopg2 на современный psycopg (psycopg3)
+        if url.startswith('postgresql+psycopg2://'):
+            url = 'postgresql+psycopg://' + url[len('postgresql+psycopg2://') :]
+        if url.startswith('postgresql://') and '+psycopg' not in url and '+psycopg2' not in url:
+            url = 'postgresql+psycopg://' + url[len('postgresql://') :]
+        self.database_url = url
             
         try:
-            self.engine = create_engine(self.database_url, 
-                                       pool_size=10, 
-                                       max_overflow=20, 
-                                       pool_pre_ping=True)
+            self.engine = create_engine(
+                self.database_url,
+                pool_size=10,
+                max_overflow=20,
+                pool_pre_ping=True,
+            )
             self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
             self._initialized = True
+            print(f"[INFO] DatabaseManager initialized with URL driver psycopg: {self.database_url.split('@')[0]}")
         except Exception as e:
             raise RuntimeError(f"Failed to initialize database: {e}")
     

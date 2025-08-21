@@ -166,7 +166,11 @@ def _normalize_db_url(url: str) -> str:
     # Render/Heroku style postgres:// -> postgresql://
     if url.startswith('postgres://'):
         url = 'postgresql://' + url[len('postgres://'):]
-    # If driver not specified, force psycopg (psycopg3)
+    # Force psycopg3 driver:
+    # 1) If legacy psycopg2 driver explicitly specified – rewrite to psycopg
+    if url.startswith('postgresql+psycopg2://'):
+        url = 'postgresql+psycopg://' + url[len('postgresql+psycopg2://'):]
+    # 2) If no driver specified – add psycopg
     if url.startswith('postgresql://') and '+psycopg' not in url and '+psycopg2' not in url:
         url = 'postgresql+psycopg://' + url[len('postgresql://'):]
     return url
