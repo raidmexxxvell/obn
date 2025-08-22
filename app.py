@@ -226,6 +226,9 @@ STATS_TABLE_TTL = 30  # сек
 MATCH_DETAILS_CACHE = {}
 MATCH_DETAILS_TTL = 30  # сек
 
+# Глобальный кэш таблицы бомбардиров
+SCORERS_CACHE = {'ts': 0, 'items': []}
+
 # Ranks cache for odds models (avoid frequent Sheets reads)
 RANKS_CACHE = {'data': None, 'ts': 0}
 
@@ -848,6 +851,131 @@ class MatchPlayerEvent(Base):
     type = Column(String(16), nullable=False)  # 'goal'|'assist'|'yellow'|'red'
     note = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+class MatchLineupPlayer(Base):
+    __tablename__ = 'match_lineups'
+    __table_args__ = (
+        Index('idx_lineup_match_team_player', 'home', 'away', 'team', 'player'),
+        Index('idx_lineup_match_team_jersey', 'home', 'away', 'team', 'jersey_number'),
+    )
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    home = Column(Text, nullable=False)
+    away = Column(Text, nullable=False)
+    team = Column(String(8), nullable=False)  # 'home' | 'away'
+    player = Column(Text, nullable=False)
+    jersey_number = Column(Integer, nullable=True)
+    position = Column(String(32), nullable=False, default='starting_eleven')  # starting_eleven | substitute
+    is_captain = Column(Integer, default=0)  # 1|0
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+class TeamPlayerStats(Base):
+    __tablename__ = 'team_player_stats'
+    __table_args__ = (
+        Index('idx_team_player_unique', 'team', 'player', unique=True),
+        Index('idx_team_player_team', 'team'),
+    )
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    team = Column(Text, nullable=False)
+    player = Column(Text, nullable=False)
+    games = Column(Integer, default=0)
+    goals = Column(Integer, default=0)
+    assists = Column(Integer, default=0)
+    yellows = Column(Integer, default=0)
+    reds = Column(Integer, default=0)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+class MatchStatsAggregationState(Base):
+    __tablename__ = 'match_stats_agg_state'
+    __table_args__ = (
+        Index('idx_match_agg_state_match', 'home', 'away', unique=True),
+    )
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    home = Column(Text, nullable=False)
+    away = Column(Text, nullable=False)
+    lineup_counted = Column(Integer, default=0)  # 0/1
+    events_applied = Column(Integer, default=0)  # 0/1
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+# --- Расширение: мост к продвинутой модели статистики (database_models.py) ---
+try:
+    from database.database_models import db_manager as adv_db_manager, Player as AdvPlayer, PlayerStatistics as AdvPlayerStatistics, DatabaseOperations as AdvDatabaseOperations
+    from sqlalchemy import func as _sql_func
+    # Ленивая инициализация (если DATABASE_URL настроен)
+    try:
+        adv_db_manager._ensure_initialized()
+    except Exception as _adv_init_err:  # noqa: F841
+        adv_db_manager = None  # недоступно
+    _adv_ops = AdvDatabaseOperations(adv_db_manager) if adv_db_manager and getattr(adv_db_manager, 'SessionLocal', None) else None
+except Exception:  # библиотека/файл может отсутствовать в деплое
+    adv_db_manager = None
+    _adv_ops = None
+
+def _split_player_name(full_name: str):
+    parts = [p for p in full_name.strip().split() if p]
+    if not parts:
+        return ('Unknown', '')
+    if len(parts) == 1:
+        return (parts[0][:100], '')
+    return (parts[0][:100], ' '.join(parts[1:])[:100])
+
+def _ensure_adv_player(session, full_name: str):
+    """Найти или создать игрока в расширенной схеме по имени (упрощённо)."""
+    first, last = _split_player_name(full_name)
+    q = session.query(AdvPlayer).filter(AdvPlayer.first_name==first, (AdvPlayer.last_name==last) | (AdvPlayer.last_name.is_(None) if not last else False))
+    obj = q.first()
+    if obj:
+        return obj
+    obj = AdvPlayer(first_name=first, last_name=(last or None))
+    session.add(obj)
+    session.flush()  # получить id
+    return obj
+
+def _update_player_statistics(session, player_obj, event_type: str, tournament_id: int):
+    if tournament_id is None:
+        return
+    stats = session.query(AdvPlayerStatistics).filter(AdvPlayerStatistics.player_id==player_obj.id, AdvPlayerStatistics.tournament_id==tournament_id).first()
+    if not stats:
+        stats = AdvPlayerStatistics(player_id=player_obj.id, tournament_id=tournament_id, matches_played=0)
+        session.add(stats)
+    # Инкремент в зависимости от типа события
+    if event_type == 'goal':
+        stats.goals_scored = (stats.goals_scored or 0) + 1
+    elif event_type == 'assist':
+        stats.assists = (stats.assists or 0) + 1
+    elif event_type == 'yellow':
+        stats.yellow_cards = (stats.yellow_cards or 0) + 1
+    elif event_type == 'red':
+        stats.red_cards = (stats.red_cards or 0) + 1
+    stats.last_updated = _sql_func.current_timestamp()
+
+def _maybe_sync_event_to_adv_schema(home: str, away: str, player_name: str, event_type: str):
+    """Пытаемся синхронизировать событие в расширенную схему.
+    Предположение: существует или создаётся глобальный матч/tournament через простые эвристики.
+    Пока упрощённо: используем один турнир (ENV DEFAULT_TOURNAMENT_ID) без привязки к реальному Match.
+    """
+    if not _adv_ops or not adv_db_manager or not getattr(adv_db_manager, 'SessionLocal', None):
+        return
+    default_tour = os.environ.get('DEFAULT_TOURNAMENT_ID')
+    try:
+        tournament_id = int(default_tour) if default_tour else None
+    except Exception:
+        tournament_id = None
+    if tournament_id is None:
+        return
+    try:
+        session = adv_db_manager.get_session()
+        try:
+            player_obj = _ensure_adv_player(session, player_name)
+            _update_player_statistics(session, player_obj, event_type, tournament_id)
+            session.commit()
+        finally:
+            session.close()
+    except Exception as sync_err:  # noqa: F841
+        # Логируем мягко; не ломаем основной поток
+        try:
+            app.logger.warning(f"adv_sync_failed: {sync_err}")
+        except Exception:
+            pass
 
 # Итоговая статистика матча (основные метрики)
 class MatchStats(Base):
@@ -5954,11 +6082,48 @@ def api_match_details():
                     dbx.close()
             except Exception:
                 events = {'home': [], 'away': []}
-        payload_core = {
-            'teams': {'home': home_data['team'], 'away': away_data['team']},
-            'rosters': {'home': home_data['players'], 'away': away_data['players']},
-            'events': events
-        }
+        # Попробуем заменить составы на данные из таблицы match_lineups если есть
+        extended_lineups = None
+        if SessionLocal is not None:
+            try:
+                dbx = get_db()
+                try:
+                    lrows = dbx.query(MatchLineupPlayer).filter(MatchLineupPlayer.home==home, MatchLineupPlayer.away==away).all()
+                    if lrows:
+                        ext = { 'home': {'starting_eleven': [], 'substitutes': []}, 'away': {'starting_eleven': [], 'substitutes': []} }
+                        for r in lrows:
+                            side = 'home' if (r.team or 'home')=='home' else 'away'
+                            bucket = 'starting_eleven' if r.position=='starting_eleven' else 'substitutes'
+                            ext[side][bucket].append({
+                                'player': r.player,
+                                'jersey_number': r.jersey_number,
+                                'is_captain': bool(r.is_captain)
+                            })
+                        # Отсортируем по номеру внутри категорий
+                        for s in ('home','away'):
+                            for b in ('starting_eleven','substitutes'):
+                                ext[s][b].sort(key=lambda x: (999 if x['jersey_number'] is None else x['jersey_number'], (x['player'] or '').lower()))
+                        extended_lineups = ext
+                finally:
+                    dbx.close()
+            except Exception:
+                extended_lineups = None
+        if extended_lineups:
+            # Используем расширенный формат + плоские списки для обратной совместимости
+            flat_home = [p['player'] for p in extended_lineups['home']['starting_eleven']] + [p['player'] for p in extended_lineups['home']['substitutes']]
+            flat_away = [p['player'] for p in extended_lineups['away']['starting_eleven']] + [p['player'] for p in extended_lineups['away']['substitutes']]
+            payload_core = {
+                'teams': {'home': home_data['team'], 'away': away_data['team']},
+                'rosters': {'home': flat_home, 'away': flat_away},
+                'lineups': extended_lineups,
+                'events': events
+            }
+        else:
+            payload_core = {
+                'teams': {'home': home_data['team'], 'away': away_data['team']},
+                'rosters': {'home': home_data['players'], 'away': away_data['players']},
+                'events': events
+            }
         etag = hashlib.md5(_json.dumps(payload_core, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
         # Если обе команды пустые, залогируем доступные ключи для отладки
         if not home_data['players'] and not away_data['players']:
@@ -6008,6 +6173,8 @@ def api_match_events_add():
             row = MatchPlayerEvent(home=home, away=away, team=team, minute=minute, player=player, type=etype, note=(note or None))
             db.add(row)
             db.commit()
+            # Попытка синхронизации в расширенную схему (не критично при ошибке)
+            _maybe_sync_event_to_adv_schema(home, away, player, etype)
             return jsonify({'status': 'ok', 'id': int(row.id)})
         finally:
             db.close()
@@ -6088,6 +6255,73 @@ def api_match_events_list():
             db.close()
     except Exception as e:
         app.logger.error(f"Ошибка events/list: {e}")
+
+@app.route('/api/players/scorers', methods=['GET'])
+def api_players_scorers():
+    """Таблица бомбардиров.
+    Параметры (опционально): tournament_id (если расширенная схема), limit.
+    Порядок сортировки: (голы+ассисты) desc, матчи asc, голы desc.
+    Fallback: если расширенная схема недоступна, агрегируем по legacy событиям (MatchPlayerEvent type in goal/assist).
+    """
+    try:
+        limit_param = request.args.get('limit')
+        try:
+            limit = int(limit_param) if limit_param else None
+        except Exception:
+            limit = None
+        tournament_id = request.args.get('tournament_id')
+        # Путь 1: расширенная схема
+        if _adv_ops and adv_db_manager and getattr(adv_db_manager, 'SessionLocal', None) and tournament_id:
+            try:
+                tid = int(tournament_id)
+            except Exception:
+                tid = None
+            if tid is not None:
+                try:
+                    rankings = _adv_ops.get_player_rankings(tid, limit=limit)
+                    return jsonify({'items': rankings, 'mode': 'advanced'})
+                except Exception as adv_err:  # noqa: F841
+                    app.logger.warning(f"scorers_advanced_failed: {adv_err}")
+        # Fallback: legacy
+        if SessionLocal is None:
+            return jsonify({'items': [], 'mode': 'legacy', 'error': 'db_unavailable'})
+        db: Session = get_db()
+        try:
+            from collections import defaultdict
+            stats = defaultdict(lambda: {'player': '', 'goals': 0, 'assists': 0})
+            rows = db.query(MatchPlayerEvent).filter(MatchPlayerEvent.type.in_(['goal','assist'])).all()
+            for r in rows:
+                key = r.player.strip()
+                if not key:
+                    continue
+                rec = stats[key]
+                rec['player'] = key
+                if r.type == 'goal':
+                    rec['goals'] += 1
+                elif r.type == 'assist':
+                    rec['assists'] += 1
+            scored = []
+            for rec in stats.values():
+                total_points = rec['goals'] + rec['assists']
+                scored.append({
+                    'player': rec['player'],
+                    'goals': rec['goals'],
+                    'assists': rec['assists'],
+                    'total_points': total_points,
+                    'matches_played': None  # неизвестно из legacy
+                })
+            scored.sort(key=lambda x: (-x['total_points'], x['matches_played'] or 0, -x['goals']))
+            if limit:
+                scored = scored[:limit]
+            # добавим rank
+            for i, item in enumerate(scored, 1):
+                item['rank'] = i
+            return jsonify({'items': scored, 'mode': 'legacy'})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"Ошибка scorers: {e}")
+        return jsonify({'error': 'internal'}), 500
         return jsonify({'items': {'home': [], 'away': []}})
 
 @app.route('/api/league-table/refresh', methods=['POST'])
@@ -7583,12 +7817,160 @@ def api_match_settle():
                     mirror_match_score_to_schedule(home, away, int(ms.score_home), int(ms.score_away))
             except Exception:
                 pass
+            # --- Агрегация статистики игроков ---
+            try:
+                # 1. Получаем составы из MatchLineupPlayer (для игр)
+                lineup_rows = db.query(MatchLineupPlayer).filter(MatchLineupPlayer.home==home, MatchLineupPlayer.away==away).all()
+                # 2. Получаем события (goal/assist/yellow/red)
+                event_rows = db.query(MatchPlayerEvent).filter(MatchPlayerEvent.home==home, MatchPlayerEvent.away==away).all()
+                # 3. Обновляем games для всех игроков из составов обеих команд (старт + запасные считаются как сыгравшие, по требованиям)
+                from collections import defaultdict
+                team_players_games = defaultdict(set)  # team -> set(player)
+                for r in lineup_rows:
+                    team_players_games[r.team].add(r.player.strip())
+                def upsert_player(team, player):
+                    pl = db.query(TeamPlayerStats).filter(TeamPlayerStats.team==team, TeamPlayerStats.player==player).first()
+                    if not pl:
+                        pl = TeamPlayerStats(team=team, player=player)
+                        db.add(pl)
+                    return pl
+                for team_side, players_set in team_players_games.items():
+                    for p in players_set:
+                        if not p:
+                            continue
+                        entry = upsert_player(team_side, p)
+                        entry.games = (entry.games or 0) + 1  # инкрементируем; защита от повторного вызова ниже
+                        entry.updated_at = datetime.now(timezone.utc)
+                # 4. Применяем события. Чтобы избежать двойного подсчёта при повторном settle, проверим state.
+                state = db.query(MatchStatsAggregationState).filter(MatchStatsAggregationState.home==home, MatchStatsAggregationState.away==away).first()
+                if not state:
+                    state = MatchStatsAggregationState(home=home, away=away, lineup_counted=1, events_applied=0)
+                    db.add(state)
+                    db.flush()
+                else:
+                    # Если lineup уже считался ранее — откатим games инкремент чтобы не удваивать
+                    if state.lineup_counted == 1:
+                        # Мы уже когда-то добавляли games. Поэтому теперь откатим предыдущее добавление и пересчитаем games корректно.
+                        # Для простоты: пересчитаем games заново — установим games = games (без +1) (т.к. удвоения).
+                        # NOTE: Для предотвращения двукратного увеличения можно пропустить инкремент, если уже counted.
+                        for team_side, players_set in team_players_games.items():
+                            for p in players_set:
+                                pl = db.query(TeamPlayerStats).filter(TeamPlayerStats.team==team_side, TeamPlayerStats.player==p).first()
+                                if pl and pl.games>0:
+                                    pl.games -= 1  # откат предыдущего добавления
+                        # Не инкрементируем второй раз
+                    else:
+                        state.lineup_counted = 1
+                # После нормализации: гарантированно games +=1 один раз
+                if state and state.lineup_counted == 0:
+                    for team_side, players_set in team_players_games.items():
+                        for p in players_set:
+                            pl = db.query(TeamPlayerStats).filter(TeamPlayerStats.team==team_side, TeamPlayerStats.player==p).first()
+                            if pl:
+                                pl.games = (pl.games or 0) + 1
+                # Обновляем события если ещё не применены
+                if state.events_applied == 0:
+                    for ev in event_rows:
+                        player = (ev.player or '').strip()
+                        if not player:
+                            continue
+                        team_side = ev.team or 'home'
+                        pl = upsert_player(team_side, player)
+                        if ev.type == 'goal':
+                            pl.goals = (pl.goals or 0) + 1
+                        elif ev.type == 'assist':
+                            pl.assists = (pl.assists or 0) + 1
+                        elif ev.type == 'yellow':
+                            pl.yellows = (pl.yellows or 0) + 1
+                        elif ev.type == 'red':
+                            pl.reds = (pl.reds or 0) + 1
+                        pl.updated_at = datetime.now(timezone.utc)
+                    state.events_applied = 1
+                    state.updated_at = datetime.now(timezone.utc)
+                db.commit()
+                # 5. Перестраиваем глобальный кэш бомбардиров (по всем командам)
+                try:
+                    all_rows = db.query(TeamPlayerStats).all()
+                    scorers = []
+                    for r in all_rows:
+                        total = (r.goals or 0) + (r.assists or 0)
+                        scorers.append({
+                            'player': r.player,
+                            'team': r.team,
+                            'games': r.games or 0,
+                            'goals': r.goals or 0,
+                            'assists': r.assists or 0,
+                            'yellows': r.yells if hasattr(r,'yells') else (r.yellows or 0),
+                            'reds': r.reds or 0,
+                            'total_points': total
+                        })
+                    scorers.sort(key=lambda x: (-x['total_points'], x['games'], -x['goals']))
+                    for i,s in enumerate(scorers, start=1):
+                        s['rank'] = i
+                    # Сохраняем в простой глобальный кэш
+                    global SCORERS_CACHE
+                    SCORERS_CACHE = { 'ts': time.time(), 'items': scorers }
+                except Exception:
+                    pass
+            except Exception as agg_err:  # noqa: F841
+                try: app.logger.error(f"player stats aggregation failed: {agg_err}")
+                except Exception: pass
             return jsonify({'status':'ok', 'changed': changed, 'won': won_cnt, 'lost': lost_cnt})
         finally:
             db.close()
     except Exception as e:
         app.logger.error(f"Ошибка match/settle: {e}")
         return jsonify({'error': 'Не удалось выполнить расчёт матча'}), 500
+
+# ----------- SCORERS (GLOBAL) API -----------
+@app.route('/api/scorers', methods=['GET'])
+def api_scorers():
+    """Таблица бомбардиров по агрегированной статистике (TeamPlayerStats).
+    Параметры: limit? (int)
+    Источник: кэш после settle; если кэш устарел (>10 мин), достраивается on-demand.
+    Сортировка: (гол+пас desc, игры asc, голы desc).
+    """
+    try:
+        limit_param = request.args.get('limit')
+        try:
+            limit = int(limit_param) if limit_param else None
+        except Exception:
+            limit = None
+        max_age = 600  # 10 минут
+        age = time.time() - (SCORERS_CACHE.get('ts') or 0)
+        if age > max_age:
+            # перестраиваем из БД, если есть
+            if SessionLocal is not None:
+                db = get_db()
+                try:
+                    rows = db.query(TeamPlayerStats).all()
+                    scorers = []
+                    for r in rows:
+                        total = (r.goals or 0) + (r.assists or 0)
+                        scorers.append({
+                            'player': r.player,
+                            'team': r.team,
+                            'games': r.games or 0,
+                            'goals': r.goals or 0,
+                            'assists': r.assists or 0,
+                            'yellows': r.yells if hasattr(r,'yells') else (r.yellows or 0),
+                            'reds': r.reds or 0,
+                            'total_points': total
+                        })
+                    scorers.sort(key=lambda x: (-x['total_points'], x['games'], -x['goals']))
+                    for i,s in enumerate(scorers, start=1):
+                        s['rank'] = i
+                    global SCORERS_CACHE
+                    SCORERS_CACHE = { 'ts': time.time(), 'items': scorers }
+                finally:
+                    db.close()
+        items = list(SCORERS_CACHE.get('items') or [])
+        if limit:
+            items = items[:limit]
+        return jsonify({'items': items, 'updated_at': SCORERS_CACHE.get('ts')})
+    except Exception as e:
+        app.logger.error(f"Ошибка scorers api: {e}")
+        return jsonify({'error': 'internal'}), 500
 
 # ----------- MATCH STATS API -----------
 @app.route('/api/match/stats/get', methods=['GET'])
@@ -7679,6 +8061,231 @@ def api_match_stats_set():
     except Exception as e:
         app.logger.error(f"Ошибка match/stats/set: {e}")
         return jsonify({'error': 'Не удалось сохранить статистику'}), 500
+
+# ----------- LINEUPS API -----------
+@app.route('/api/lineup/add', methods=['POST'])
+def api_lineup_add():
+    """Добавить игрока в состав: поля initData, home, away, team(home|away), player, jersey_number?, position? (starting_eleven|substitute), is_captain? (0/1)"""
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+        home = (request.form.get('home') or '').strip()
+        away = (request.form.get('away') or '').strip()
+        team = (request.form.get('team') or 'home').strip().lower()
+        player = (request.form.get('player') or '').strip()
+        jersey = request.form.get('jersey_number')
+        position = (request.form.get('position') or 'starting_eleven').strip().lower()
+        is_captain = 1 if (request.form.get('is_captain') in ('1','true','yes','on')) else 0
+        try:
+            jersey_number = int(jersey) if jersey not in (None, '') else None
+        except Exception:
+            jersey_number = None
+        if team not in ('home','away'):
+            team = 'home'
+        if position not in ('starting_eleven','substitute'):
+            position = 'starting_eleven'
+        if not home or not away or not player:
+            return jsonify({'error': 'Некорректные данные'}), 400
+        if SessionLocal is None:
+            return jsonify({'error': 'БД недоступна'}), 500
+        db: Session = get_db()
+        try:
+            # Проверим дубликат по (home, away, team, player)
+            exists = db.query(MatchLineupPlayer).filter(MatchLineupPlayer.home==home, MatchLineupPlayer.away==away, MatchLineupPlayer.team==team, MatchLineupPlayer.player==player).first()
+            if exists:
+                # Обновим номер/позицию/капитана
+                changed = False
+                if jersey_number is not None and exists.jersey_number != jersey_number:
+                    exists.jersey_number = jersey_number; changed = True
+                if exists.position != position:
+                    exists.position = position; changed = True
+                if exists.is_captain != is_captain:
+                    exists.is_captain = is_captain; changed = True
+                if changed:
+                    db.commit()
+                return jsonify({'status': 'ok', 'id': int(exists.id), 'updated': bool(changed)})
+            row = MatchLineupPlayer(home=home, away=away, team=team, player=player, jersey_number=jersey_number, position=position, is_captain=is_captain)
+            db.add(row)
+            db.commit()
+            return jsonify({'status': 'ok', 'id': int(row.id), 'created': True})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"Ошибка lineup/add: {e}")
+        return jsonify({'error': 'Не удалось сохранить состав'}), 500
+
+@app.route('/api/lineup/remove', methods=['POST'])
+def api_lineup_remove():
+    """Удалить игрока из состава: initData, home, away, team, player"""
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+        home = (request.form.get('home') or '').strip()
+        away = (request.form.get('away') or '').strip()
+        team = (request.form.get('team') or 'home').strip().lower()
+        player = (request.form.get('player') or '').strip()
+        if team not in ('home','away'):
+            team = 'home'
+        if not home or not away or not player:
+            return jsonify({'error': 'Некорректные данные'}), 400
+        if SessionLocal is None:
+            return jsonify({'error': 'БД недоступна'}), 500
+        db: Session = get_db()
+        try:
+            row = db.query(MatchLineupPlayer).filter(MatchLineupPlayer.home==home, MatchLineupPlayer.away==away, MatchLineupPlayer.team==team, MatchLineupPlayer.player==player).first()
+            if not row:
+                return jsonify({'status': 'ok', 'removed': 0})
+            db.delete(row)
+            db.commit()
+            return jsonify({'status': 'ok', 'removed': 1})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"Ошибка lineup/remove: {e}")
+        return jsonify({'error': 'Не удалось удалить игрока из состава'}), 500
+
+@app.route('/api/lineup/list', methods=['GET'])
+def api_lineup_list():
+    """Получить составы: параметры home, away. Ответ: {'home': {'starting_eleven':[], 'substitutes':[]}, 'away': {...}}"""
+    try:
+        home = (request.args.get('home') or '').strip()
+        away = (request.args.get('away') or '').strip()
+        if not home or not away:
+            return jsonify({'home': {'starting_eleven': [], 'substitutes': []}, 'away': {'starting_eleven': [], 'substitutes': []}})
+        if SessionLocal is None:
+            return jsonify({'home': {'starting_eleven': [], 'substitutes': []}, 'away': {'starting_eleven': [], 'substitutes': []}})
+        db: Session = get_db()
+        try:
+            rows = db.query(MatchLineupPlayer).filter(MatchLineupPlayer.home==home, MatchLineupPlayer.away==away).order_by(MatchLineupPlayer.team.asc(), MatchLineupPlayer.position.desc(), MatchLineupPlayer.jersey_number.asc().nulls_last()).all()
+            out = {
+                'home': {'starting_eleven': [], 'substitutes': []},
+                'away': {'starting_eleven': [], 'substitutes': []}
+            }
+            for r in rows:
+                side = 'home' if (r.team or 'home') == 'home' else 'away'
+                bucket = 'starting_eleven' if r.position == 'starting_eleven' else 'substitutes'
+                out[side][bucket].append({
+                    'player': r.player,
+                    'jersey_number': r.jersey_number,
+                    'position': r.position,
+                    'is_captain': bool(r.is_captain)
+                })
+            return jsonify(out)
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"Ошибка lineup/list: {e}")
+        return jsonify({'error': 'Не удалось получить составы'}), 500
+
+@app.route('/api/lineup/bulk_set', methods=['POST'])
+def api_lineup_bulk_set():
+    """Массовая загрузка составов.
+    Поля:
+      initData, home, away
+      roster_home (многострочный) опц.
+      roster_away (многострочный) опц.
+      mode=replace|append (default replace)
+      first11_policy=first11_starting (по умолчанию первые 11 строк -> основа)
+    Формат строки: "10 Иванов Иван (C)" либо "7. Петров" либо "#8 Сидоров". Номер опционален.
+    Капитан помечается (C) или * в конце.
+    """
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+        home = (request.form.get('home') or '').strip()
+        away = (request.form.get('away') or '').strip()
+        roster_home_raw = request.form.get('roster_home') or ''
+        roster_away_raw = request.form.get('roster_away') or ''
+        mode = (request.form.get('mode') or 'replace').strip().lower()
+        if not home or not away:
+            return jsonify({'error': 'home/away обязательны'}), 400
+        if SessionLocal is None:
+            return jsonify({'error': 'БД недоступна'}), 500
+        def parse_lines(raw: str):
+            out = []
+            for line in raw.splitlines():
+                ln = line.strip()
+                if not ln:
+                    continue
+                jersey_number = None
+                is_captain = 0
+                # Капитан маркеры
+                if ln.lower().endswith('(c)') or ln.endswith('*'):
+                    is_captain = 1
+                    ln = ln.rstrip('*').rstrip()
+                    if ln.lower().endswith('(c)'):
+                        ln = ln[:-3].rstrip()
+                # Извлечение номера в начале
+                import re as _re
+                m = _re.match(r'^(?:#)?(\d{1,2})[\).\- ]+(.*)$', ln)
+                if m:
+                    try:
+                        jersey_number = int(m.group(1))
+                    except Exception:
+                        jersey_number = None
+                    name_part = m.group(2).strip()
+                else:
+                    # Альтернативно номер слитно перед пробелом
+                    m2 = _re.match(r'^(\d{1,2})\s+(.*)$', ln)
+                    if m2:
+                        try:
+                            jersey_number = int(m2.group(1))
+                        except Exception:
+                            jersey_number = None
+                        name_part = m2.group(2).strip()
+                    else:
+                        name_part = ln
+                # Очистка повторных пробелов
+                name_part = ' '.join([p for p in name_part.split() if p])
+                if not name_part:
+                    continue
+                out.append({'player': name_part, 'jersey_number': jersey_number, 'is_captain': is_captain})
+            return out
+        home_items = parse_lines(roster_home_raw)
+        away_items = parse_lines(roster_away_raw)
+        # Ограничение
+        if len(home_items) > 40 or len(away_items) > 40:
+            return jsonify({'error': 'Слишком много строк'}), 400
+        db: Session = get_db()
+        added = {'home': 0, 'away': 0}
+        replaced = {'home': 0, 'away': 0}
+        try:
+            for side, items in (('home', home_items), ('away', away_items)):
+                if not items:
+                    continue
+                # replace: удаляем старые строки этой стороны
+                if mode == 'replace':
+                    q = db.query(MatchLineupPlayer).filter(MatchLineupPlayer.home==home, MatchLineupPlayer.away==away, MatchLineupPlayer.team==side)
+                    replaced[side] = q.count()
+                    q.delete()
+                # Создаём
+                for idx, it in enumerate(items):
+                    position = 'starting_eleven' if idx < 11 else 'substitute'
+                    row = MatchLineupPlayer(home=home, away=away, team=side, player=it['player'], jersey_number=it['jersey_number'], position=position, is_captain=1 if it['is_captain'] else 0)
+                    db.add(row)
+                    added[side] += 1
+            db.commit()
+            return jsonify({'status': 'ok', 'added': added, 'replaced': replaced, 'mode': mode})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"Ошибка lineup/bulk_set: {e}")
+        return jsonify({'error': 'Не удалось выполнить массовый импорт'}), 500
 
 if __name__ == '__main__':
     # Стартуем фоновой синхронизатор при локальном запуске

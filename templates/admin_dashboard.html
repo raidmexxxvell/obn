@@ -380,6 +380,36 @@
                 <button class="btn btn-secondary" onclick="loadAllData()">Обновить данные</button>
             </div>
         </div>
+
+        <!-- Массовый импорт составов -->
+        <div class="admin-section">
+            <h2>Массовый импорт составов</h2>
+            <div class="form-group">
+                <label for="bulk-lineup-match">Матч:</label>
+                <select id="bulk-lineup-match"></select>
+            </div>
+            <div class="form-row">
+                <div class="form-group" style="flex:1;">
+                    <label for="bulk-home">Состав (дом) – по одному игроку в строке (номер + имя, капитан: (C) или *):</label>
+                    <textarea id="bulk-home" placeholder="1 Иванов Иван (C)&#10;10 Петров&#10;7 Сидоров *" style="min-height:160px;"></textarea>
+                </div>
+                <div class="form-group" style="flex:1;">
+                    <label for="bulk-away">Состав (гости):</label>
+                    <textarea id="bulk-away" placeholder="9 Смирнов&#10;5 Орлов&#10;11 Кузнецов" style="min-height:160px;"></textarea>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="bulk-mode">Режим:</label>
+                    <select id="bulk-mode">
+                        <option value="replace">Заменить существующий</option>
+                        <option value="append">Добавить (без удаления)</option>
+                    </select>
+                </div>
+            </div>
+            <button onclick="bulkSetLineups()">Импортировать составы</button>
+            <small>Первые 11 строк каждой стороны будут отмечены как "Основа" автоматически.</small>
+        </div>
     </div>
 
     <script>
@@ -519,70 +549,102 @@
         }
         
         // Загрузка составов команд
-        function loadTeamLineups(match) {
-            // Здесь будет загрузка реальных составов из БД
-            // Пока показываем пустые составы
-            document.getElementById('home-starting-eleven').innerHTML = '<p>Состав не заполнен</p>';
-            document.getElementById('home-substitutes').innerHTML = '<p>Запасные не добавлены</p>';
-            document.getElementById('away-starting-eleven').innerHTML = '<p>Состав не заполнен</p>';
-            document.getElementById('away-substitutes').innerHTML = '<p>Запасные не добавлены</p>';
+        async function loadTeamLineups(match) {
+            try {
+                const params = new URLSearchParams({home: match.home_team_name, away: match.away_team_name});
+                const resp = await fetch('/api/lineup/list?' + params.toString());
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const data = await resp.json();
+                renderLineupSide('home', data.home);
+                renderLineupSide('away', data.away);
+            } catch (e) {
+                console.error('loadTeamLineups error', e);
+                document.getElementById('home-starting-eleven').innerHTML = '<p>Ошибка загрузки</p>';
+                document.getElementById('home-substitutes').innerHTML = '<p>Ошибка</p>';
+                document.getElementById('away-starting-eleven').innerHTML = '<p>Ошибка загрузки</p>';
+                document.getElementById('away-substitutes').innerHTML = '<p>Ошибка</p>';
+            }
         }
-        
-        // Добавление игрока в состав
-        function addPlayerToLineup(team) {
+        function renderLineupSide(side, payload){
+            const starters = document.getElementById(side+'-starting-eleven');
+            const subs = document.getElementById(side+'-substitutes');
+            starters.innerHTML = '';
+            subs.innerHTML = '';
+            if(!payload || !Array.isArray(payload.starting_eleven) || payload.starting_eleven.length===0){
+                starters.innerHTML = '<p>Состав не заполнен</p>';
+            } else {
+                payload.starting_eleven.forEach(p => starters.appendChild(buildLineupPlayerElement(side,p)));
+            }
+            if(!payload || !Array.isArray(payload.substitutes) || payload.substitutes.length===0){
+                subs.innerHTML = '<p>Запасные не добавлены</p>';
+            } else {
+                payload.substitutes.forEach(p => subs.appendChild(buildLineupPlayerElement(side,p)));
+            }
+        }
+        function buildLineupPlayerElement(side, rec){
+            const el = document.createElement('div');
+            el.className = 'lineup-player' + (rec.is_captain ? ' captain' : '');
+            el.dataset.player = rec.player;
+            el.innerHTML = `
+                <div class="player-info">
+                    <div class="jersey-number">${rec.jersey_number || ''}</div>
+                    <div><strong>${rec.player}</strong><br><small>${rec.position === 'starting_eleven' ? 'Основа' : 'Запасной'}</small></div>
+                </div>
+                <button class="remove-player-btn" onclick="removePlayerFromLineupAPI('${side}', '${rec.player.replace(/'/g,"&#39;")}')">Убрать</button>`;
+            return el;
+        }
+        async function addPlayerToLineup(team) {
+            const matchId = document.getElementById('lineup-match-select').value;
+            if(!matchId){ showAlert('Выберите матч', 'error'); return; }
+            const match = allMatches.find(m => m.id === matchId);
             const playerSelect = document.getElementById(`add-${team}-player`);
             const jerseyInput = document.getElementById(`add-${team}-jersey`);
             const positionSelect = document.getElementById(`add-${team}-position`);
-            
             const playerId = playerSelect.value;
             const jersey = jerseyInput.value;
             const position = positionSelect.value;
-            
-            if (!playerId || !jersey) {
-                showAlert('Выберите игрока и укажите номер', 'error');
-                return;
-            }
-            
-            const player = allPlayers.find(p => p.id == playerId);
-            if (!player) return;
-            
-            const containerSelector = position === 'starting_eleven' ? 
-                `${team}-starting-eleven` : `${team}-substitutes`;
-            const container = document.getElementById(containerSelector);
-            
-            // Проверяем, есть ли уже содержимое-заглушка
-            if (container.querySelector('p')) {
-                container.innerHTML = '';
-            }
-            
-            const playerElement = document.createElement('div');
-            playerElement.className = 'lineup-player';
-            playerElement.innerHTML = `
-                <div class="player-info">
-                    <div class="jersey-number">${jersey}</div>
-                    <div>
-                        <strong>${player.first_name} ${player.last_name || ''}</strong>
-                        <br><small>${player.position || 'Не указана'}</small>
-                    </div>
-                </div>
-                <button class="remove-player-btn" onclick="removePlayerFromLineup(this)">Убрать</button>
-            `;
-            
-            container.appendChild(playerElement);
-            
-            // Очищаем форму
-            playerSelect.value = '';
-            jerseyInput.value = '';
-            
-            showAlert('Игрок добавлен в состав', 'success');
+            if (!playerId || !jersey){ showAlert('Выберите игрока и укажите номер', 'error'); return; }
+            const player = allPlayers.find(p=>p.id==playerId);
+            if(!player){ showAlert('Игрок не найден', 'error'); return; }
+            try {
+                const fd = new FormData();
+                fd.append('home', match.home_team_name);
+                fd.append('away', match.away_team_name);
+                fd.append('team', team);
+                fd.append('player', `${player.first_name} ${player.last_name || ''}`.trim());
+                fd.append('jersey_number', jersey);
+                fd.append('position', position);
+                const resp = await fetch('/api/lineup/add', {method:'POST', body: fd});
+                if(!resp.ok){ throw new Error('HTTP '+resp.status); }
+                const js = await resp.json();
+                if(js.error){ throw new Error(js.error); }
+                showAlert('Игрок добавлен', 'success');
+                playerSelect.value=''; jerseyInput.value='';
+                loadTeamLineups(match);
+            }catch(e){ console.error(e); showAlert('Ошибка добавления: '+e.message,'error'); }
         }
-        
-        // Удаление игрока из состава
-        function removePlayerFromLineup(button) {
-            button.parentElement.remove();
-            showAlert('Игрок удален из состава', 'success');
+        async function removePlayerFromLineupAPI(side, playerName){
+            const matchId = document.getElementById('lineup-match-select').value;
+            if(!matchId){ return; }
+            const match = allMatches.find(m => m.id === matchId);
+            try {
+                const fd = new FormData();
+                fd.append('home', match.home_team_name);
+                fd.append('away', match.away_team_name);
+                fd.append('team', side);
+                fd.append('player', playerName);
+                const resp = await fetch('/api/lineup/remove', {method:'POST', body: fd});
+                if(!resp.ok) throw new Error('HTTP '+resp.status);
+                const js = await resp.json();
+                if(js.error){ throw new Error(js.error); }
+                showAlert('Игрок удалён', 'success');
+                loadTeamLineups(match);
+            }catch(e){ console.error(e); showAlert('Ошибка удаления: '+e.message,'error'); }
         }
-        
+        // Переопределяем removePlayerFromLineup чтобы не ломать
+        function removePlayerFromLineup(btn){
+            // legacy stub
+        }
         // Заполнение списков игроков
         function populatePlayerSelects() {
             const playerSelect = document.getElementById('event-player');
@@ -715,7 +777,7 @@
                 formData.append('type', eventType);
                 formData.append('note', description);
                 
-                const response = await fetch('/api/match/event/add', {
+                const response = await fetch('/api/match/events/add', {
                     method: 'POST',
                     body: formData
                 });
@@ -799,6 +861,46 @@
             }, 5000);
         }
         
+        // Пополняем селект матчей для bulk блока после загрузки
+        const _origPopulateMatchSelect = populateMatchSelect;
+        populateMatchSelect = function(){
+            _origPopulateMatchSelect();
+            const bulkSelect = document.getElementById('bulk-lineup-match');
+            if (!bulkSelect) return;
+            bulkSelect.innerHTML = document.getElementById('match-select').innerHTML;
+        };
+        async function bulkSetLineups(){
+            const sel = document.getElementById('bulk-lineup-match');
+            const val = sel.value;
+            if(!val){ showAlert('Выберите матч', 'error'); return; }
+            const match = allMatches.find(m=>m.id===val);
+            if(!match){ showAlert('Матч не найден', 'error'); return; }
+            const homeTxt = document.getElementById('bulk-home').value.trim();
+            const awayTxt = document.getElementById('bulk-away').value.trim();
+            if(!homeTxt && !awayTxt){ showAlert('Нет данных для импорта', 'error'); return; }
+            const mode = document.getElementById('bulk-mode').value;
+            try {
+                const fd = new FormData();
+                fd.append('home', match.home_team_name);
+                fd.append('away', match.away_team_name);
+                fd.append('mode', mode);
+                if(homeTxt) fd.append('roster_home', homeTxt);
+                if(awayTxt) fd.append('roster_away', awayTxt);
+                const resp = await fetch('/api/lineup/bulk_set', {method:'POST', body: fd});
+                if(!resp.ok) throw new Error('HTTP '+resp.status);
+                const js = await resp.json();
+                if(js.error) throw new Error(js.error);
+                showAlert('Импорт выполнен: добавлено дом '+js.added.home+', гост '+js.added.away, 'success');
+                // Если открыт блок составов для этого матча — обновим
+                const curMatchLineup = document.getElementById('lineup-match-select').value;
+                if(curMatchLineup === val){
+                    loadTeamLineups(match);
+                }
+            } catch(e){
+                console.error(e);
+                showAlert('Ошибка импорта: '+e.message, 'error');
+            }
+        }
         // Помечаем что это админ
         window.isAdmin = true;
     </script>
