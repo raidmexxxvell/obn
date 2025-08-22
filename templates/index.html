@@ -135,14 +135,15 @@
         <!-- Вкладка НЛО -->
     <div id="tab-ufo" style="display:none;">
             <!-- Подвкладки основной лиги НЛО -->
-            <div class="subtabs" id="ufo-subtabs" style="display:none;">
+            <div class="subtabs" id="ufo-subtabs">
                 <div class="subtab-item active" data-subtab="table">Таблица</div>
                 <div class="subtab-item" data-subtab="stats">Статистика</div>
                 <div class="subtab-item" data-subtab="schedule">Расписание</div>
                 <div class="subtab-item" data-subtab="results">Результаты</div>
             </div>
-            <div class="ufo-content" id="ufo-content" style="display:none;">
+            <div class="ufo-content" id="ufo-content">
                 <div id="ufo-table" class="ufo-pane">
+                    <div style="padding:8px; color: var(--gray); font-size:12px;">Загрузка таблицы...</div>
                     <div class="league-table-wrap">
                         <table class="league-table" id="league-table">
                             <tbody>
@@ -158,6 +159,7 @@
                     </div>
                 </div>
                 <div id="ufo-stats" class="ufo-pane" style="display:none;">
+                    <div style="padding:8px; color: var(--gray); font-size:12px;">Загрузка статистики...</div>
                     <div class="league-table-wrap">
                         <table class="league-table" id="stats-table">
                             <tbody>
@@ -167,8 +169,8 @@
                         <div class="table-updated" id="stats-table-updated"></div>
                     </div>
                 </div>
-                <div id="ufo-schedule" class="ufo-pane" style="display:none;">Здесь будет Расписание.</div>
-                <div id="ufo-results" class="ufo-pane" style="display:none;">Здесь будут Результаты.</div>
+                <div id="ufo-schedule" class="ufo-pane" style="display:none;">Загрузка расписания...</div>
+                <div id="ufo-results" class="ufo-pane" style="display:none;">Загрузка результатов...</div>
                 <!-- Детальный экран матча (вместо модалки) -->
                 <div id="ufo-match-details" class="ufo-pane" style="display:none;">
                     <div class="match-details-topbar">

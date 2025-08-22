@@ -1768,5 +1768,9 @@ if(!window.openMatchScreen){
     try { window.__NAV_INITIALIZED__ = true; } catch(_) {}
     try { window.Shop?.updateCartBadge?.(); } catch(_) {}
 
+    // Форсируем первичную отрисовку UFO таблицы и лидеров (если пользователь сразу переключится)
+    try { loadLeagueTable(); } catch(_) {}
+    try { ensureLeaderboardInit?.(); } catch(_) {}
+
     // LIVE notifications перенесены в profile-live.js
 })();
