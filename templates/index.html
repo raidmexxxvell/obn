@@ -9,12 +9,10 @@
     <title>Лига Обнинска</title>
     <!-- ИСПРАВЛЕНО: Убраны лишние пробелы в URL Telegram WebApp SDK -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <!-- Socket.IO для real-time обновлений -->
-    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-    <script>
-        // Флаг наличия серверной поддержки WebSocket (можно прокинуть динамически при необходимости)
-        window.__WEBSOCKETS_ENABLED__ = true; // при необходимости заменить серверной логикой
-    </script>
+    <!-- WebSocket отключён (можно вернуть, раскомментировав) -->
+    <!-- <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script> -->
+    <script>window.__WEBSOCKETS_ENABLED__ = false; // отключено для диагностики мобильной загрузки</script>
+    <script src="/static/js/error-overlay.js"></script>
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="stylesheet" href="/static/css/splash.css">
     <link rel="stylesheet" href="/static/css/blb.css">
