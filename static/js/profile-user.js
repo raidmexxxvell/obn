@@ -85,9 +85,25 @@
     const formData = new FormData(); formData.append('initData', tg.initData || '');
     return fetch('/api/user',{ method:'POST', body: formData })
       .then(res => { if(res.status===401){ window.showAlert?.('Ошибка авторизации','error'); throw new Error('Unauthorized'); } return res.json(); })
-      .then(async data => { renderUserProfile(data); await initFavoriteTeamUI(data); return data; })
+      .then(async data => { renderUserProfile(data); await initFavoriteTeamUI(data); try { ensureAdminUI(); } catch(_) {}; return data; })
       .catch(err => { console.error('fetchUserData', err); window.showAlert?.('Не удалось загрузить данные','error'); throw err; });
   }
   function getLastUser(){ return _lastUser; }
+  // Отображение админ-пункта меню (если ID совпадает). Повторные вызовы безопасны.
+  function ensureAdminUI(){
+    try {
+      const adminId = document.body.getAttribute('data-admin');
+      const currentId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : '';
+      if (!adminId || !currentId || String(adminId) !== currentId) return; // не админ
+      const navItem = document.getElementById('nav-admin');
+      if (navItem && navItem.style.display === 'none') navItem.style.display = '';
+      // Кнопка обновления таблиц (если уже прогружено содержимое)
+      const refreshBtn = document.getElementById('league-refresh-btn');
+      if (refreshBtn && refreshBtn.style.display === 'none') refreshBtn.style.display='';
+    } catch(_) {}
+  }
+  // Попытка периодического отображения (на случай поздней инициализации Telegram SDK)
+  let _adminTries = 0; const _adminTimer = setInterval(()=>{ try { ensureAdminUI(); } catch(_) {} if(++_adminTries>=10) clearInterval(_adminTimer); }, 800);
   window.ProfileUser = { fetchUserData, renderUserProfile, initFavoriteTeamUI, withTeamCount, getLastUser };
+  try { window.ensureAdminUI = ensureAdminUI; } catch(_) {}
 })();

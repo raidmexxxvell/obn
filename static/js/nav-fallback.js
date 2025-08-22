@@ -6,6 +6,15 @@
     const items = document.querySelectorAll('.nav-item');
     if(!items.length) return; // ничего не делать пока не появятся
     window.__NAV_FALLBACK_RAN__ = true;
+    // Показать админ-пункт, если пользователь админ (fallback сценарий — может не вызваться основная логика)
+    try {
+      const adminId = document.body.getAttribute('data-admin');
+      const currentId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id ? String(window.Telegram.WebApp.initDataUnsafe.user.id) : '';
+      if (adminId && currentId && String(adminId) === currentId){
+        const navAdmin = document.getElementById('nav-admin'); if(navAdmin) navAdmin.style.display='';
+        const refreshBtn = document.getElementById('league-refresh-btn'); if(refreshBtn) refreshBtn.style.display='';
+      }
+    } catch(_) {}
     items.forEach(it => {
       if(it.__fbBound) return; it.__fbBound = true;
       it.addEventListener('click', () => {

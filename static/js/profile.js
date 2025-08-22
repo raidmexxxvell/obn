@@ -106,6 +106,7 @@
             // На НЛО отключаем троттлинг, иначе двойной тап не сработает
             if (tab === 'ufo') item.setAttribute('data-throttle', '0'); else item.setAttribute('data-throttle', '600');
             item.addEventListener('click', () => {
+                try { console.log('[nav-click]', tab); } catch(_) {}
                 const tab = item.getAttribute('data-tab');
                 // Если открыт экран деталей матча — закрываем его при любом переходе по нижнему меню
                 try {
@@ -234,6 +235,7 @@
         subtabItems.forEach(btn => {
             btn.setAttribute('data-throttle', '600');
             btn.addEventListener('click', () => {
+                try { console.log('[ufo-subtab-click]', btn.getAttribute('data-subtab')); } catch(_) {}
                 // При переключении подвкладок — убеждаемся, что экран деталей скрыт
                 try {
                     const mdPane = document.getElementById('ufo-match-details');
@@ -1761,6 +1763,10 @@ if(!window.openMatchScreen){
     }
 
     // старт
+    // В некоторых рефакторингах старая initApp была удалена. Создадим лёгкую заглушку, если не определена.
+    if (typeof initApp !== 'function') {
+        try { window.initApp = function(){ try { updateNavLeagueIcon(); } catch(_) {}; }; } catch(_) {}
+    }
     initApp();
     // Стартовая предзагрузка UFO-данных во время заставки
     preloadUfoData();
@@ -1771,6 +1777,9 @@ if(!window.openMatchScreen){
     // Форсируем первичную отрисовку UFO таблицы и лидеров (если пользователь сразу переключится)
     try { loadLeagueTable(); } catch(_) {}
     try { ensureLeaderboardInit?.(); } catch(_) {}
+    // Если активна по умолчанию подвкладка таблицы — инициируем остальные ленивые прогревы в фоне
+    try { setTimeout(()=>{ try { loadStatsTable(); } catch(_) {} try { loadSchedule(); } catch(_) {} try { loadResults(); } catch(_) {}; }, 400); } catch(_) {}
+    try { window.ensureAdminUI?.(); } catch(_) {}
 
     // LIVE notifications перенесены в profile-live.js
 })();
