@@ -4946,11 +4946,8 @@ def daily_checkin():
 def get_achievements():
     """Получает достижения пользователя"""
     try:
-        # Короткоживущий кэш (30с) на пользователя
         global ACHIEVEMENTS_CACHE
-        try:
-            ACHIEVEMENTS_CACHE
-        except NameError:
+        if 'ACHIEVEMENTS_CACHE' not in globals():
             ACHIEVEMENTS_CACHE = {}
         parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
         if not parsed or not parsed.get('user'):
@@ -4962,7 +4959,7 @@ def get_achievements():
         if ce and (now_ts - ce.get('ts',0) < 30):
             return jsonify(ce['data'])
 
-        # Получаем пользователя из БД либо (fallback) из листа
+        # User fetch (DB or Sheets)
         if SessionLocal is None:
             row_num = find_user_row(user_id)
             if not row_num:
@@ -4971,18 +4968,10 @@ def get_achievements():
             row = sheet.row_values(row_num)
             row = list(row) + [''] * (12 - len(row))
             user = {
-                'user_id': _to_int(row[0]),
-                'display_name': row[1],
-                'tg_username': row[2],
-                'credits': _to_int(row[3]),
-                'xp': _to_int(row[4]),
-                'level': _to_int(row[5], 1),
-                'consecutive_days': _to_int(row[6]),
-                'last_checkin_date': row[7],
-                'badge_tier': _to_int(row[8]),
+                'user_id': _to_int(row[0]), 'display_name': row[1], 'tg_username': row[2], 'credits': _to_int(row[3]), 'xp': _to_int(row[4]), 'level': _to_int(row[5],1), 'consecutive_days': _to_int(row[6]), 'last_checkin_date': row[7], 'badge_tier': _to_int(row[8])
             }
         else:
-            db: Session = get_db()
+            db = get_db();
             try:
                 db_user = db.get(User, int(user_id))
                 if not db_user:
@@ -4990,159 +4979,88 @@ def get_achievements():
                 user = serialize_user(db_user)
             finally:
                 db.close()
-        # Списки целей и пороги из констант
-        streak_targets = ACHIEVEMENT_TARGETS['streak']
-        credits_targets = ACHIEVEMENT_TARGETS['credits']
-        level_targets = ACHIEVEMENT_TARGETS['level']
-        invited_targets = ACHIEVEMENT_TARGETS['invited']
-        betcount_targets = ACHIEVEMENT_TARGETS['betcount']
-        betwins_targets = ACHIEVEMENT_TARGETS['betwins']
-        bigodds_targets = ACHIEVEMENT_TARGETS['bigodds']
-        markets_targets = ACHIEVEMENT_TARGETS['markets']
-        weeks_targets = ACHIEVEMENT_TARGETS['weeks']
 
-        streak_thresholds = _thresholds_from_targets(streak_targets)
-        credits_thresholds = _thresholds_from_targets(credits_targets)
-        level_thresholds = _thresholds_from_targets(level_targets)
-        invited_thresholds = _thresholds_from_targets(invited_targets)
-        betcount_thresholds = _thresholds_from_targets(betcount_targets)
-        betwins_thresholds = _thresholds_from_targets(betwins_targets)
-        bigodds_thresholds = _thresholds_from_targets(bigodds_targets)
-        markets_thresholds = _thresholds_from_targets(markets_targets)
-        weeks_thresholds = _thresholds_from_targets(weeks_targets)
+        # Targets & thresholds
+        groups = ['streak','credits','level','invited','betcount','betwins','bigodds','markets','weeks']
+        streak_targets = ACHIEVEMENT_TARGETS['streak']; credits_targets = ACHIEVEMENT_TARGETS['credits']; level_targets = ACHIEVEMENT_TARGETS['level']; invited_targets = ACHIEVEMENT_TARGETS['invited']; betcount_targets = ACHIEVEMENT_TARGETS['betcount']; betwins_targets = ACHIEVEMENT_TARGETS['betwins']; bigodds_targets = ACHIEVEMENT_TARGETS['bigodds']; markets_targets = ACHIEVEMENT_TARGETS['markets']; weeks_targets = ACHIEVEMENT_TARGETS['weeks']
+        streak_thresholds = _thresholds_from_targets(streak_targets); credits_thresholds=_thresholds_from_targets(credits_targets); level_thresholds=_thresholds_from_targets(level_targets); invited_thresholds=_thresholds_from_targets(invited_targets); betcount_thresholds=_thresholds_from_targets(betcount_targets); betwins_thresholds=_thresholds_from_targets(betwins_targets); bigodds_thresholds=_thresholds_from_targets(bigodds_targets); markets_thresholds=_thresholds_from_targets(markets_targets); weeks_thresholds=_thresholds_from_targets(weeks_targets)
 
-        # Вспомогательная функция для вычисления следующей цели (next_target) по текущему тиру
-        def _make_next_target_fn(thresholds: list[tuple]):
-            # thresholds в виде [(target, tier), ...]
-            mp = {int(tier): target for (target, tier) in thresholds}
-            # Гарантируем наличие по убыванию/возрастанию
-            return lambda current_tier: (mp.get(current_tier + 1) if (current_tier or 0) < 3 else None) or (mp.get(1) if (current_tier or 0) <= 0 else None)
-
-        next_streak = _make_next_target_fn(streak_thresholds)
-        next_credits = _make_next_target_fn(credits_thresholds)
-        next_level = _make_next_target_fn(level_thresholds)
-        next_invited = _make_next_target_fn(invited_thresholds)
-        next_betcount = _make_next_target_fn(betcount_thresholds)
-        next_betwins = _make_next_target_fn(betwins_thresholds)
-        next_bigodds = _make_next_target_fn(bigodds_thresholds)
-        next_markets = _make_next_target_fn(markets_thresholds)
-        next_weeks = _make_next_target_fn(weeks_thresholds)
-
-        # Универсальная функция: следующая цель по текущему значению
         def _next_target_by_value(value, targets_list):
-            try:
-                for t in targets_list:
-                    if value < t:
-                        return t
-                return None
-            except Exception:
-                return None
+            for t in targets_list:
+                if value < t:
+                    return t
+            return None
 
-        # Вычисляем текущие тиры
         streak_tier = compute_tier(user['consecutive_days'], streak_thresholds)
         credits_tier = compute_tier(user['credits'], credits_thresholds)
         level_tier = compute_tier(user['level'], level_thresholds)
-        # Считаем приглашённых (засчитываются только с уровнем >=2)
         invited_count = 0
         if SessionLocal is not None:
-            db: Session = get_db()
+            db = get_db();
             try:
-                invited_count = db.query(func.count(Referral.user_id)) \
-                    .join(User, User.user_id == Referral.user_id) \
-                    .filter(Referral.referrer_id == int(user_id), (User.level >= 2)) \
-                    .scalar() or 0
+                invited_count = db.query(func.count(Referral.user_id)).join(User, User.user_id==Referral.user_id).filter(Referral.referrer_id==int(user_id),(User.level>=2)).scalar() or 0
             finally:
                 db.close()
         invited_tier = compute_tier(invited_count, invited_thresholds)
 
-        # Считаем ставки пользователя
-        bet_stats = {
-            'total': 0,
-            'won': 0,
-            'max_win_odds': 0.0,
-            'markets_used': set(),
-            'weeks_active': set(),
-        }
+        bet_stats = {'total':0,'won':0,'max_win_odds':0.0,'markets_used':set(),'weeks_active':set()}
         if SessionLocal is not None:
-            db: Session = get_db()
+            db = get_db();
             try:
-                qs = db.query(Bet).filter(Bet.user_id == int(user_id))
-                for b in qs.all():
+                for b in db.query(Bet).filter(Bet.user_id==int(user_id)).all():
                     bet_stats['total'] += 1
                     try:
-                        if (b.status or '').lower() == 'won':
+                        if (b.status or '').lower()=='won':
                             bet_stats['won'] += 1
-                            k = float((b.odds or '0').replace(',', '.'))
-                            if k > bet_stats['max_win_odds']:
-                                bet_stats['max_win_odds'] = k
-                    except Exception:
-                        pass
-                    mk = (b.market or '1x2').lower()
-                    # нормализуем specials: penalty/redcard считаем как 'specials'
-                    if mk in ('penalty', 'redcard'):
-                        mk = 'specials'
+                            k=float((b.odds or '0').replace(',','.'))
+                            if k>bet_stats['max_win_odds']: bet_stats['max_win_odds']=k
+                    except Exception: pass
+                    mk=(b.market or '1x2').lower();
+                    if mk in ('penalty','redcard'): mk='specials'
                     bet_stats['markets_used'].add(mk)
-                    # неделя по МСК-округлению (используем период лидерборда)
                     if b.placed_at:
                         try:
-                            # старт недели МСК для даты b.placed_at и в корзину week_key (UTC iso)
-                            start = _week_period_start_msk_to_utc(b.placed_at.astimezone(timezone.utc))
+                            start=_week_period_start_msk_to_utc(b.placed_at.astimezone(timezone.utc))
                             bet_stats['weeks_active'].add(start.date().isoformat())
-                        except Exception:
-                            pass
+                        except Exception: pass
             finally:
                 db.close()
+        betcount_tier=compute_tier(bet_stats['total'], betcount_thresholds); betwins_tier=compute_tier(bet_stats['won'], betwins_thresholds); bigodds_tier=compute_tier(bet_stats['max_win_odds'], bigodds_thresholds); markets_tier=compute_tier(len(bet_stats['markets_used']), markets_thresholds); weeks_tier=compute_tier(len(bet_stats['weeks_active']), weeks_thresholds)
 
-        betcount_tier = compute_tier(bet_stats['total'], betcount_thresholds)
-        betwins_tier = compute_tier(bet_stats['won'], betwins_thresholds)
-        bigodds_tier = compute_tier(bet_stats['max_win_odds'], bigodds_thresholds)
-        markets_tier = compute_tier(len(bet_stats['markets_used']), markets_thresholds)
-        weeks_tier = compute_tier(len(bet_stats['weeks_active']), weeks_thresholds)
+        ach_row, ach = get_user_achievements_row(user_id); updates=[]; now_iso=datetime.now(timezone.utc).isoformat()
+        def upd(cond, rng_val_pairs):
+            if cond:
+                for rng,val in rng_val_pairs: updates.append({'range': rng, 'values': [[val]]})
+        upd(credits_tier>ach['credits_tier'], [(f'B{ach_row}', str(credits_tier)), (f'C{ach_row}', now_iso)])
+        upd(level_tier>ach['level_tier'], [(f'D{ach_row}', str(level_tier)), (f'E{ach_row}', now_iso)])
+        upd(streak_tier>ach['streak_tier'], [(f'F{ach_row}', str(streak_tier)), (f'G{ach_row}', now_iso)])
+        upd(invited_tier>ach.get('invited_tier',0), [(f'H{ach_row}', str(invited_tier)), (f'I{ach_row}', now_iso)])
+        upd(betcount_tier>ach.get('betcount_tier',0), [(f'J{ach_row}', str(betcount_tier)), (f'K{ach_row}', now_iso)])
+        upd(betwins_tier>ach.get('betwins_tier',0), [(f'L{ach_row}', str(betwins_tier)), (f'M{ach_row}', now_iso)])
+        upd(bigodds_tier>ach.get('bigodds_tier',0), [(f'N{ach_row}', str(bigodds_tier)), (f'O{ach_row}', now_iso)])
+        upd(markets_tier>ach.get('markets_tier',0), [(f'P{ach_row}', str(markets_tier)), (f'Q{ach_row}', now_iso)])
+        upd(weeks_tier>ach.get('weeks_tier',0), [(f'R{ach_row}', str(weeks_tier)), (f'S{ach_row}', now_iso)])
+        if updates: get_achievements_sheet().batch_update(updates)
 
-        # Обновляем прогресс в отдельной таблице (фиксируем время первого получения каждого тира)
-        ach_row, ach = get_user_achievements_row(user_id)
-        updates = []
-        now_iso = datetime.now(timezone.utc).isoformat()
-        if credits_tier > ach['credits_tier']:
-            updates.append({'range': f'B{ach_row}', 'values': [[str(credits_tier)]]})
-            updates.append({'range': f'C{ach_row}', 'values': [[now_iso]]})
-        if level_tier > ach['level_tier']:
-            updates.append({'range': f'D{ach_row}', 'values': [[str(level_tier)]]})
-            updates.append({'range': f'E{ach_row}', 'values': [[now_iso]]})
-        if streak_tier > ach['streak_tier']:
-            updates.append({'range': f'F{ach_row}', 'values': [[str(streak_tier)]]})
-            updates.append({'range': f'G{ach_row}', 'values': [[now_iso]]})
-        if invited_tier > ach.get('invited_tier', 0):
-            updates.append({'range': f'H{ach_row}', 'values': [[str(invited_tier)]]})
-            updates.append({'range': f'I{ach_row}', 'values': [[now_iso]]})
-        # Новые группы: фиксируем апгрейд тиров
-        if betcount_tier > ach.get('betcount_tier', 0):
-            updates.append({'range': f'J{ach_row}', 'values': [[str(betcount_tier)]]})
-            updates.append({'range': f'K{ach_row}', 'values': [[now_iso]]})
-        if betwins_tier > ach.get('betwins_tier', 0):
-            updates.append({'range': f'L{ach_row}', 'values': [[str(betwins_tier)]]})
-            updates.append({'range': f'M{ach_row}', 'values': [[now_iso]]})
-        if bigodds_tier > ach.get('bigodds_tier', 0):
-            updates.append({'range': f'N{ach_row}', 'values': [[str(bigodds_tier)]]})
-            updates.append({'range': f'O{ach_row}', 'values': [[now_iso]]})
-        if markets_tier > ach.get('markets_tier', 0):
-            updates.append({'range': f'P{ach_row}', 'values': [[str(markets_tier)]]})
-            updates.append({'range': f'Q{ach_row}', 'values': [[now_iso]]})
-        if weeks_tier > ach.get('weeks_tier', 0):
-            updates.append({'range': f'R{ach_row}', 'values': [[str(weeks_tier)]]})
-            updates.append({'range': f'S{ach_row}', 'values': [[now_iso]]})
-
-        if updates:
-            get_achievements_sheet().batch_update(updates)
-
-        # Собираем карточки достижений
-        achievements = []
-
-        # Серия дней (как было)
-        if streak_tier:
-            achievements.append({ 'group': 'streak', 'tier': streak_tier, 'name': {1:'Бронза',2:'Серебро',3:'Золото'}[streak_tier], 'value': user['consecutive_days'], 'target': {1:7,2:30,3:120}[streak_tier], 'next_target': _next_target_by_value(user['consecutive_days'], streak_targets), 'all_targets': streak_targets, 'icon': {1:'bronze',2:'silver',3:'gold'}[streak_tier], 'unlocked': True })
-        else:
-            achievements.append({ 'group': 'streak', 'tier': 1, 'name': 'Бронза', 'value': user['consecutive_days'], 'target': 7, 'next_target': _next_target_by_value(user['consecutive_days'], streak_targets), 'all_targets': streak_targets, 'icon': 'bronze', 'unlocked': False })
+        achievements=[]
+        def add(group, tier, name_map, value, targets, icon_map, unlocked):
+            if unlocked:
+                achievements.append({'group':group,'tier':tier,'name':name_map[tier],'value':value,'target':{1:targets[0],2:targets[1],3:targets[2]}[tier],'next_target':_next_target_by_value(value, targets),'all_targets':targets,'icon':icon_map[tier],'unlocked':True})
+            else:
+                achievements.append({'group':group,'tier':1,'name':list(name_map.values())[0],'value':value,'target':targets[0],'next_target':_next_target_by_value(value, targets),'all_targets':targets,'icon':icon_map[1],'unlocked':False})
+        add('streak', streak_tier, {1:'Бронза',2:'Серебро',3:'Золото'}, user['consecutive_days'], streak_targets, {1:'bronze',2:'silver',3:'gold'}, bool(streak_tier))
+        add('credits', credits_tier, {1:'Бедолага',2:'Мажор',3:'Олигарх'}, user['credits'], credits_targets, {1:'bronze',2:'silver',3:'gold'}, bool(credits_tier))
+        add('level', level_tier, {1:'Новобранец',2:'Ветеран',3:'Легенда'}, user['level'], level_targets, {1:'bronze',2:'silver',3:'gold'}, bool(level_tier))
+        add('invited', invited_tier, {1:'Рекрутер',2:'Посол',3:'Легенда'}, invited_count, invited_targets, {1:'bronze',2:'silver',3:'gold'}, bool(invited_tier))
+        add('betcount', betcount_tier, {1:'Новичок ставок',2:'Профи ставок',3:'Марафонец'}, bet_stats['total'], betcount_targets, {1:'bronze',2:'silver',3:'gold'}, bool(betcount_tier))
+        add('betwins', betwins_tier, {1:'Счастливчик',2:'Снайпер',3:'Чемпион'}, bet_stats['won'], betwins_targets, {1:'bronze',2:'silver',3:'gold'}, bool(betwins_tier))
+        add('bigodds', bigodds_tier, {1:'Рисковый',2:'Хайроллер',3:'Легенда кэфов'}, bet_stats['max_win_odds'], bigodds_targets, {1:'bronze',2:'silver',3:'gold'}, bool(bigodds_tier))
+        add('markets', markets_tier, {1:'Универсал I',2:'Универсал II',3:'Универсал III'}, len(bet_stats['markets_used']), markets_targets, {1:'bronze',2:'silver',3:'gold'}, bool(markets_tier))
+        add('weeks', weeks_tier, {1:'Регуляр',2:'Постоянный',3:'Железный'}, len(bet_stats['weeks_active']), weeks_targets, {1:'bronze',2:'silver',3:'gold'}, bool(weeks_tier))
+        resp={'achievements':achievements}; ACHIEVEMENTS_CACHE[cache_key]={'ts':now_ts,'data':resp}; return jsonify(resp)
+    except Exception as e:
+        app.logger.error(f"Ошибка получения достижений: {e}")
+        return jsonify({'error':'Внутренняя ошибка сервера'}),500
 
         # Кредиты: 10k/50k/500k
         if credits_tier:
@@ -5191,9 +5109,9 @@ def get_achievements():
             achievements.append({ 'group': 'weeks', 'tier': weeks_tier, 'name': {1:'Регуляр',2:'Постоянный',3:'Железный'}[weeks_tier], 'value': len(bet_stats['weeks_active']), 'target': {1:2,2:5,3:10}[weeks_tier], 'next_target': _next_target_by_value(len(bet_stats['weeks_active']), weeks_targets), 'all_targets': weeks_targets, 'icon': {1:'bronze',2:'silver',3:'gold'}[weeks_tier], 'unlocked': True })
         else:
             achievements.append({ 'group': 'weeks', 'tier': 1, 'name': 'Регуляр', 'value': len(bet_stats['weeks_active']), 'target': 2, 'next_target': _next_target_by_value(len(bet_stats['weeks_active']), weeks_targets), 'all_targets': weeks_targets, 'icon': 'bronze', 'unlocked': False })
-    resp = {'achievements': achievements}
-    ACHIEVEMENTS_CACHE[cache_key] = { 'ts': now_ts, 'data': resp }
-    return jsonify(resp)
+        resp = {'achievements': achievements}
+        ACHIEVEMENTS_CACHE[cache_key] = { 'ts': now_ts, 'data': resp }
+        return jsonify(resp)
 
     except Exception as e:
         app.logger.error(f"Ошибка получения достижений: {str(e)}")
