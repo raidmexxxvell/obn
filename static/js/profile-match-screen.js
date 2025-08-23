@@ -30,7 +30,18 @@
     try { const mkKey=(obj)=>{ const h=(obj?.home||'').toLowerCase().trim(); const a=(obj?.away||'').toLowerCase().trim(); const raw=obj?.date? String(obj.date):(obj?.datetime? String(obj.datetime):''); const d=raw? raw.slice(0,10):''; return `${h}__${a}__${d}`; }; const currentKey = mkKey(match); mdPane.setAttribute('data-match-key', currentKey); const oldTab=subtabs?.querySelector('[data-mdtab="stream"]'); if(oldTab) oldTab.remove(); const oldPane=document.getElementById('md-pane-stream'); if(oldPane) oldPane.remove(); } catch(_) {}
     try { const tabHome=subtabs?.querySelector('[data-mdtab="home"]'); const tabAway=subtabs?.querySelector('[data-mdtab="away"]'); if(tabHome) tabHome.textContent=match.home||'Команда 1'; if(tabAway) tabAway.textContent=match.away||'Команда 2'; } catch(_) {}
     let specialsPane=document.getElementById('md-pane-specials'); if(!specialsPane){ specialsPane=document.createElement('div'); specialsPane.id='md-pane-specials'; specialsPane.className='md-pane'; specialsPane.style.display='none'; mdPane.querySelector('.modal-body')?.appendChild(specialsPane);}    
-    let streamPane=null; try { if(window.Streams && typeof window.Streams.setupMatchStream==='function'){ streamPane = window.Streams.setupMatchStream(mdPane, subtabs, match); } } catch(_) {}
+    let streamPane=null;
+    try {
+      if(window.MatchStream && typeof window.MatchStream.setup==='function') {
+        streamPane = window.MatchStream.setup(mdPane, subtabs, match);
+      }
+    } catch(_) {}
+    try {
+      if(window.Streams && typeof window.Streams.setupMatchStream==='function') {
+        const hasTab = subtabs?.querySelector('[data-mdtab="stream"]');
+        if(!hasTab) streamPane = window.Streams.setupMatchStream(mdPane, subtabs, match) || streamPane;
+      }
+    } catch(_) {}
     let statsPane=document.getElementById('md-pane-stats'); if(!statsPane){ statsPane=document.createElement('div'); statsPane.id='md-pane-stats'; statsPane.className='md-pane'; statsPane.style.display='none'; mdPane.querySelector('.modal-body')?.appendChild(statsPane);} if(!subtabs.querySelector('[data-mdtab="stats"]')) { const st=document.createElement('div'); st.className='subtab-item'; st.setAttribute('data-mdtab','stats'); st.textContent='Статистика'; subtabs.appendChild(st);}    
     mdPane.querySelector('.modal-subtabs .subtab-item[data-mdtab="home"]').classList.add('active');
     homePane.style.display=''; awayPane.style.display='none'; specialsPane.style.display='none'; if(streamPane) streamPane.style.display='none'; statsPane.style.display='none';

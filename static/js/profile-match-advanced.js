@@ -34,8 +34,18 @@
   // Интеграция трансляции через legacy Streams (если MatchStream модуль отсутствует)
   let streamPane=null;
   try {
-    if (!window.MatchStream && window.Streams && typeof window.Streams.setupMatchStream==='function') {
-      streamPane = window.Streams.setupMatchStream(mdPane, subtabs, match);
+    // Сначала новый модуль, создаёт пустую панель (без вкладки)
+    if (window.MatchStream && typeof window.MatchStream.setup==='function') {
+      streamPane = window.MatchStream.setup(mdPane, subtabs, match);
+    }
+  } catch(_) {}
+  try {
+    // Затем всегда пытаемся создать вкладку/скелет через Streams (он добавляет subtab)
+    if (window.Streams && typeof window.Streams.setupMatchStream==='function') {
+      const hasTab = subtabs?.querySelector('[data-mdtab="stream"]');
+      if (!hasTab) {
+        streamPane = window.Streams.setupMatchStream(mdPane, subtabs, match) || streamPane;
+      }
     }
   } catch(_) {}
   let statsPane=document.getElementById('md-pane-stats'); if(!statsPane){ statsPane=document.createElement('div'); statsPane.id='md-pane-stats'; statsPane.className='md-pane'; statsPane.style.display='none'; mdPane.querySelector('.modal-body')?.appendChild(statsPane); }
@@ -57,13 +67,9 @@
       else if(key==='stream'){
         homePane.style.display='none'; awayPane.style.display='none'; specialsPane.style.display='none'; statsPane.style.display='none';
         // Если есть новый модуль MatchStream
-        if(!streamPane && window.MatchStream?.setup){
-          try { streamPane = window.MatchStream.setup(mdPane, subtabs, match); } catch(_){}
-        }
-        // Иначе используем Streams
-        if(!streamPane && window.Streams && typeof window.Streams.setupMatchStream==='function'){
-          try { streamPane = window.Streams.setupMatchStream(mdPane, subtabs, match); } catch(_){}
-        }
+  // Обновляем (на случай ленивой загрузки) и MatchStream, и Streams
+  if(window.MatchStream?.setup){ try { streamPane = window.MatchStream.setup(mdPane, subtabs, match) || streamPane; } catch(_){} }
+  if(window.Streams?.setupMatchStream){ try { const hadTab = !!subtabs.querySelector('[data-mdtab="stream"]'); streamPane = window.Streams.setupMatchStream(mdPane, subtabs, match) || streamPane; if(!hadTab) {/* tab now created */} } catch(_){} }
         if(streamPane){
           try {
             if(window.MatchStream && typeof window.MatchStream.activate==='function'){
