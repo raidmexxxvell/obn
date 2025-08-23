@@ -33,6 +33,23 @@
   function isLiveNow(m, opts={}){
     const { windowMinutes = 120, nowTs = Date.now() } = opts;
     try {
+      // Проверяем finStore (завершенные матчи)
+      const finStore = window.__FINISHED_MATCHES || {};
+      const key = matchKey(m);
+      if (finStore[key]) return false;
+      
+      // Проверяем результаты в кэше
+      try {
+        const resultsCache = JSON.parse(localStorage.getItem('results') || 'null');
+        if (resultsCache?.data?.results) {
+          const found = resultsCache.data.results.find(r => 
+            r.home === m.home && r.away === m.away);
+          if (found && (found.score_home !== undefined && found.score_away !== undefined)) {
+            return false; // матч завершен
+          }
+        }
+      } catch(_) {}
+      
       const start = parseDateTime(m);
       if (!start) return false;
       const endTs = start.getTime() + windowMinutes*60*1000;

@@ -5924,8 +5924,15 @@ def _get_match_total_goals(home: str, away: str):
                     h = _parse_score(m.get('score_home',''))
                     a = _parse_score(m.get('score_away',''))
                     if h is None or a is None:
+                        try:
+                            app.logger.warning(f"_get_match_total_goals: Found match {home} vs {away} in results snapshot but invalid scores: {m.get('score_home','')} - {m.get('score_away','')}")
+                        except: pass
                         return None
-                    return h + a
+                    total = h + a
+                    try:
+                        app.logger.info(f"_get_match_total_goals: Found {home} vs {away} in results snapshot: {h}+{a}={total}")
+                    except: pass
+                    return total
         finally:
             db.close()
     # 2) Fallback to sheet
@@ -5936,8 +5943,18 @@ def _get_match_total_goals(home: str, away: str):
                 h = _parse_score(m.get('score_home',''))
                 a = _parse_score(m.get('score_away',''))
                 if h is None or a is None:
+                    try:
+                        app.logger.warning(f"_get_match_total_goals: Found match {home} vs {away} in sheet but invalid scores: {m.get('score_home','')} - {m.get('score_away','')}")
+                    except: pass
                     return None
-                return h + a
+                total = h + a
+                try:
+                    app.logger.info(f"_get_match_total_goals: Found {home} vs {away} in sheet: {h}+{a}={total}")
+                except: pass
+                return total
+    try:
+        app.logger.warning(f"_get_match_total_goals: No match found for {home} vs {away}")
+    except: pass
     return None
 
 @app.route('/api/match/score/get', methods=['GET'])
@@ -8139,22 +8156,42 @@ def api_match_settle():
         db: Session = get_db()
         try:
             now = datetime.now()
-            # Если в снапшоте results нет финального счёта, а админ правил live-скоры — запишем результаты в снапшот
-            try:
-                # читаем текущий snapshot results
+            # Принудительно записываем результат в снапшот results после settle
+            ms = db.query(MatchScore).filter(MatchScore.home==home, MatchScore.away==away).first()
+            if ms and (ms.score_home is not None) and (ms.score_away is not None):
+                # Читаем снапшот
                 snap = _snapshot_get(db, 'results') if SessionLocal is not None else None
                 payload = (snap and snap.get('payload')) or {'results': [], 'updated_at': datetime.now(timezone.utc).isoformat()}
                 results = payload.get('results') or []
-                exists = any((r.get('home')==home and r.get('away')==away) for r in results)
-                if not exists:
-                    ms = db.query(MatchScore).filter(MatchScore.home==home, MatchScore.away==away).first()
-                    if ms and (ms.score_home is not None) and (ms.score_away is not None):
-                        results.append({'home': home, 'away': away, 'score_home': int(ms.score_home), 'score_away': int(ms.score_away)})
-                        payload['results'] = results
-                        payload['updated_at'] = datetime.now(timezone.utc).isoformat()
-                        _snapshot_set(db, 'results', payload)
-            except Exception:
-                pass
+                
+                # Ищем существующий результат
+                found_idx = None
+                for i, r in enumerate(results):
+                    if r.get('home') == home and r.get('away') == away:
+                        found_idx = i
+                        break
+                
+                # Обновляем или добавляем
+                result_entry = {
+                    'home': home, 
+                    'away': away, 
+                    'score_home': int(ms.score_home), 
+                    'score_away': int(ms.score_away)
+                }
+                if found_idx is not None:
+                    results[found_idx] = result_entry
+                else:
+                    results.append(result_entry)
+                
+                payload['results'] = results
+                payload['updated_at'] = datetime.now(timezone.utc).isoformat()
+                _snapshot_set(db, 'results', payload)
+                
+                # Также записываем в Google Sheets
+                try:
+                    mirror_match_score_to_schedule(home, away, int(ms.score_home), int(ms.score_away))
+                except Exception:
+                    pass
             # Автоматически зафиксируем спецрынки как 'Нет', если админ их не установил
             try:
                 spec_row = db.query(MatchSpecials).filter(MatchSpecials.home==home, MatchSpecials.away==away).first()
@@ -8216,12 +8253,21 @@ def api_match_settle():
                             try: line=float(ln)
                             except Exception: line=None
                     if side not in ('over','under') or line is None:
+                        try:
+                            app.logger.warning(f"Totals bet {b.id}: invalid selection '{sel_raw}' - side={side}, line={line}")
+                        except: pass
                         continue
                     total = _get_match_total_goals(b.home, b.away)
                     if total is None:
+                        try:
+                            app.logger.warning(f"Totals bet {b.id}: no total goals found for {b.home} vs {b.away}")
+                        except: pass
                         continue
                     res_known = True
                     won = (total > line) if side == 'over' else (total < line)
+                    try:
+                        app.logger.info(f"Totals bet {b.id}: {sel_raw} vs total {total} -> {'WON' if won else 'LOST'}")
+                    except: pass
                 elif b.market in ('penalty','redcard'):
                     # Спецрынки: если админ уже зафиксировал и рассчитал раньше — их ставки уже не open
                     res = _get_special_result(b.home, b.away, b.market)
@@ -8400,6 +8446,18 @@ def api_match_settle():
             except Exception as inc_err:  # noqa: F841
                 try: app.logger.warning(f"league-table games increment failed: {inc_err}")
                 except Exception: pass
+            
+            # --- Обновляем снапшот расписания чтобы удалить завершённые матчи ---
+            try:
+                schedule_payload = _build_schedule_payload_from_sheet()
+                _snapshot_set(db, 'schedule', schedule_payload)
+                try:
+                    app.logger.info(f"Schedule snapshot updated after match settle: {home} vs {away}")
+                except: pass
+            except Exception as schedule_err:
+                try: app.logger.warning(f"schedule snapshot update failed: {schedule_err}")
+                except Exception: pass
+            
             return jsonify({'status':'ok', 'changed': changed, 'won': won_cnt, 'lost': lost_cnt, 'total_bets': total_bets_cnt, 'open_before': open_before_cnt})
         finally:
             db.close()

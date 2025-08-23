@@ -20,8 +20,8 @@
 body.blb-theme {
     --bg: #0a1128;
     --card: #1e2a47;
-    --muted: #8ba1c9;
-    --accent1: linear-gradient(135deg, #3b82f6, #1e40af);
+    --muted: #c9c08b;
+    --accent1: linear-gradient(135deg, #7a5f26, #eebb11);
     --glass: rgba(59, 130, 246, 0.05);
     --primary: #eebb11;
     --primary-dark: #af8e21;
@@ -29,7 +29,7 @@ body.blb-theme {
     --success: #10b981;
     --danger: #ef4444;
     --light: #f8fafc;
-    --gray: #8ba1c9;
+    --gray: #c9be8b;
     --border-radius: 8px;
     --transition: all 0.3s ease;
 }
