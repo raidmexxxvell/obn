@@ -856,17 +856,26 @@ def api_betting_place():
             selection_to_store = sel
             market_to_store = '1x2'
         elif market == 'totals':
-            # totals требует line
+            # totals: поддерживаем over/under по линиям, при этом короткий код для старой схемы (VARCHAR(8))
             try:
                 line = float((request.form.get('line') or '').replace(',', '.'))
             except Exception:
                 line = None
-            if line not in (3.5, 4.5, 5.5):
+            allowed_lines = (3.5, 4.5, 5.5)
+            if line not in allowed_lines:
                 return jsonify({'error': 'Неверная линия тотала'}), 400
+            if sel not in ('over','under'):
+                return jsonify({'error': 'Неверный выбор тотала'}), 400
             odds_map = _compute_totals_odds(home, away, line)
             k = odds_map.get(sel) or 2.00
-            selection_to_store = f"{sel}_{line}"
+            # Короткое кодирование: O35 / U35, O45 / U45, O55 / U55
+            line_token = str(line).replace('.5','5').replace('.','')  # 3.5 -> 35
+            base_code = ('O' if sel=='over' else 'U') + line_token  # например O35
+            selection_to_store = base_code
             market_to_store = 'totals'
+            # safety: если всё же длиннее 8, обрежем (старый столбец может быть VARCHAR(8))
+            if len(selection_to_store) > 8:
+                selection_to_store = selection_to_store[:8]
         else:
             # спецрынки: пенальти/красная. Простая модель вероятности с поправкой по силам.
             odds_map = _compute_specials_odds(home, away, market)
@@ -898,6 +907,22 @@ def api_betting_place():
             mirror_user_to_sheets(db_user)
         except Exception as e:
             app.logger.warning(f"Mirror after bet failed: {e}")
+        def _present_selection(market, sel_val):
+            if market=='totals' and sel_val and '_' not in sel_val:
+                # O35/U35 -> Over 3.5 / Under 3.5
+                if sel_val[0] in ('O','U') and sel_val[1:] in ('35','45','55'):
+                    side = 'Over' if sel_val[0]=='O' else 'Under'
+                    line = sel_val[1][0] if len(sel_val)>=3 else sel_val[1]
+                    # проще напрямую по первой цифре
+                    mapping={'35':'3.5','45':'4.5','55':'5.5'}
+                    return f"{side} {mapping.get(sel_val[1:], sel_val[1:])}"
+            if market=='totals' and '_' in (sel_val or ''):
+                try:
+                    s,l = sel_val.split('_',1)
+                    return f"{'Over' if s=='over' else 'Under'} {l}"
+                except Exception:
+                    return sel_val
+            return sel_val
         return jsonify({
             'status': 'success',
             'balance': int(db_user.credits or 0),
@@ -908,7 +933,7 @@ def api_betting_place():
                 'away': bet.away,
                 'datetime': (bet.match_datetime.isoformat() if bet.match_datetime else ''),
                 'market': bet.market,
-                'selection': bet.selection,
+                'selection': _present_selection(bet.market, bet.selection),
                 'odds': bet.odds,
                 'stake': bet.stake,
                 'status': bet.status
@@ -5945,6 +5970,18 @@ def api_betting_my_bets():
         try:
             rows = db.query(Bet).filter(Bet.user_id == user_id).order_by(Bet.placed_at.desc()).limit(50).all()
             data = []
+            def _present_selection(market, sel_val):
+                if market=='totals' and sel_val:
+                    if '_' in sel_val:  # старый формат
+                        try:
+                            s,l = sel_val.split('_',1)
+                            return f"{'Over' if s=='over' else 'Under'} {l}"
+                        except Exception:
+                            return sel_val
+                    if sel_val[0] in ('O','U') and sel_val[1:] in ('35','45','55'):
+                        mapping={'35':'3.5','45':'4.5','55':'5.5'}
+                        return f"{'Over' if sel_val[0]=='O' else 'Under'} {mapping.get(sel_val[1:], sel_val[1:])}"
+                return sel_val
             for b in rows:
                 data.append({
                     'id': b.id,
@@ -5953,7 +5990,7 @@ def api_betting_my_bets():
                     'away': b.away,
                     'datetime': (b.match_datetime.isoformat() if b.match_datetime else ''),
                     'market': b.market,
-                    'selection': b.selection,
+                    'selection': _present_selection(b.market, b.selection),
                     'odds': b.odds,
                     'stake': b.stake,
                     'status': b.status,
@@ -6182,14 +6219,27 @@ def _settle_open_bets():
                     continue
                 won = (res == b.selection)
             elif b.market == 'totals':
-                # selection вид: 'over_3.5' или 'under_4.5'
-                parts = (b.selection or '').split('_', 1)
-                if len(parts) != 2:
-                    continue
-                side, line_str = parts[0], parts[1]
-                try:
-                    line = float(line_str)
-                except Exception:
+                sel_raw = (b.selection or '').strip()
+                side = None; line = None
+                if '_' in sel_raw:  # старый формат over_3.5
+                    parts = sel_raw.split('_', 1)
+                    if len(parts)==2:
+                        side, line_str = parts[0], parts[1]
+                        try:
+                            line = float(line_str)
+                        except Exception:
+                            line = None
+                else:  # новый код O35 / U45 / O55
+                    if len(sel_raw) in (3,4) and sel_raw[0] in ('O','U'):
+                        side = 'over' if sel_raw[0]=='O' else 'under'
+                        num_part = sel_raw[1:]
+                        # ожидаем '35','45','55'
+                        if num_part in ('35','45','55'):
+                            try:
+                                line = float(num_part[0]+'.5')  # '35' -> 3.5
+                            except Exception:
+                                line = None
+                if side not in ('over','under') or line is None:
                     continue
                 total = _get_match_total_goals(b.home, b.away)
                 if total is None:
