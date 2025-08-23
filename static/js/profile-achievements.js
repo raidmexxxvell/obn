@@ -53,7 +53,7 @@
     };
     achievements.forEach(a => {
       const card = document.createElement('div'); card.className='achievement-card';
-      card.classList.add(a.unlocked? '':'locked');
+      card.classList.add(a.unlocked ? '' : 'locked');
       const img=document.createElement('img'); img.alt=a.name||''; setAchievementIcon(img,a);
       const name=document.createElement('div'); name.className='badge-name'; name.textContent=a.name||'';
       const req=document.createElement('div'); req.className='badge-requirements'; req.textContent=descFor(a);
@@ -63,7 +63,15 @@
 
   function fetchAchievements(){
     if(_loadedOnce) return Promise.resolve([]);
-    if(!tg || !tg.initDataUnsafe?.user){ renderAchievements([]); return Promise.resolve([]); }
+    // Разрешаем принудительную загрузку даже без Telegram (dev режим)
+    if(!tg || !tg.initDataUnsafe?.user){
+      const fd = new FormData();
+      fd.append('initData', tg?.initData || '');
+      return fetch('/api/achievements',{ method:'POST', body: fd })
+        .then(r=>r.json())
+        .then(data => { _loadedOnce = true; renderAchievements(data.achievements||[]); return data.achievements||[]; })
+        .catch(err => { console.error('achievements load error (no tg user)', err); renderAchievements([]); return []; });
+    }
     const fd = new FormData(); fd.append('initData', tg.initData || '');
     return fetch('/api/achievements',{ method:'POST', body: fd })
       .then(r=>r.json())

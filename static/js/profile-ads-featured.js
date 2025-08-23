@@ -24,14 +24,18 @@
         slide.addEventListener('click', () => {
           try {
             if (s.action === 'BLB') {
-              window.__ACTIVE_LEAGUE__ = 'BLB';
-              if (window.setActiveLeague) { try { window.setActiveLeague('BLB'); } catch(_) {} }
-              // Switch to UFO tab if needed (mirroring legacy logic)
-              document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-              const navUfo = document.querySelector('.nav-item[data-tab="ufo"]');
-              if (navUfo) navUfo.classList.add('active');
-              ['tab-home','tab-ufo','tab-predictions','tab-leaderboard','tab-shop','tab-admin']
-                .forEach(id => { const el = document.getElementById(id); if (el) el.style.display = (id==='tab-ufo'?'':'none'); });
+              // Используем анимацию перехода лиг, если доступна
+              if (window.selectBLBLeague) {
+                window.selectBLBLeague(true);
+              } else {
+                window.__ACTIVE_LEAGUE__ = 'BLB';
+                if (window.setActiveLeague) { try { window.setActiveLeague('BLB'); } catch(_) {} }
+                document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+                const navUfo = document.querySelector('.nav-item[data-tab="ufo"]');
+                if (navUfo) navUfo.classList.add('active');
+                ['tab-home','tab-ufo','tab-predictions','tab-leaderboard','tab-shop','tab-admin']
+                  .forEach(id => { const el = document.getElementById(id); if (el) el.style.display = (id==='tab-ufo'?'':'none'); });
+              }
             }
           } catch(_) {}
         });

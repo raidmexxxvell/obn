@@ -34,10 +34,19 @@
     try { imgEl.loading='lazy'; imgEl.decoding='async'; } catch(_) {}
     if (name){
       const norm = normalizeTeamName(name);
-      if (norm) candidates.push(LOGO_BASE + encodeURIComponent(norm + '.png'));
+      if (norm) {
+        // Основной нормализованный вариант
+        candidates.push(LOGO_BASE + encodeURIComponent(norm + '.png'));
+        // Вариант с приставкой "фк" (в директории сейчас файлы вида фкобнинск.png, фкsetka4real.png)
+        if (!norm.startsWith('фк')) candidates.push(LOGO_BASE + encodeURIComponent('фк' + norm + '.png'));
+      }
     }
     candidates.push(LOGO_BASE + 'default.png');
-    let i=0; const next=()=>{ if(i>=candidates.length) return; imgEl.onerror=()=>{ i++; next(); }; imgEl.src=candidates[i]; }; next();
+    // Удаляем дубликаты (на случай совпадений)
+    const uniq = [];
+    const seen = new Set();
+    candidates.forEach(c=>{ if(!seen.has(c)){ seen.add(c); uniq.push(c); }});
+    let i=0; const next=()=>{ if(i>=uniq.length) return; imgEl.onerror=()=>{ i++; next(); }; imgEl.src=uniq[i]; }; next();
   }
   function createTeamWithLogo(teamName, options={}){
     const { showLogo=true, logoSize='20px', className='team-with-logo', textClassName='team-name', logoClassName='team-logo'} = options;
