@@ -464,3 +464,193 @@ Styles for new database-driven components
         --danger-color: #fc8181;
     }
 }
+
+/* Admin Panel Styles */
+.admin-pane {
+    padding: 16px;
+}
+
+.admin-section {
+    background: var(--card-bg, #ffffff);
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.admin-section h3 {
+    margin: 0 0 16px 0;
+    color: var(--text-primary, #1a1a1a);
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.action-btn {
+    background: var(--primary-color, #007aff);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 12px 24px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    margin-right: 12px;
+    margin-bottom: 8px;
+}
+
+.action-btn:hover:not(:disabled) {
+    background: var(--primary-color-dark, #0056b3);
+    transform: translateY(-1px);
+}
+
+.action-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.help-text {
+    font-size: 14px;
+    color: var(--text-secondary, #666);
+    margin: 8px 0 0 0;
+    line-height: 1.4;
+}
+
+.status-text {
+    font-size: 14px;
+    color: var(--text-secondary, #666);
+    margin-top: 12px;
+    padding: 12px;
+    background: var(--bg-secondary, #f8f9fa);
+    border-radius: 8px;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+}
+
+.stats-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-top: 16px;
+}
+
+.stat-item {
+    background: var(--bg-secondary, #f8f9fa);
+    padding: 16px;
+    border-radius: 8px;
+    text-align: center;
+}
+
+.stat-label {
+    display: block;
+    font-size: 14px;
+    color: var(--text-secondary, #666);
+    margin-bottom: 8px;
+}
+
+.stat-value {
+    display: block;
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--primary-color, #007aff);
+}
+
+.table-container {
+    overflow-x: auto;
+    margin-top: 16px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color, #e0e0e0);
+}
+
+.admin-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--card-bg, #ffffff);
+}
+
+.admin-table th,
+.admin-table td {
+    padding: 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color, #e0e0e0);
+}
+
+.admin-table th {
+    background: var(--bg-secondary, #f8f9fa);
+    font-weight: 600;
+    color: var(--text-primary, #1a1a1a);
+    font-size: 14px;
+}
+
+.admin-table td {
+    font-size: 14px;
+    color: var(--text-primary, #1a1a1a);
+}
+
+.admin-table tr:hover {
+    background: var(--bg-hover, #f5f5f5);
+}
+
+.updated-info {
+    font-size: 12px;
+    color: var(--text-secondary, #666);
+    margin-bottom: 12px;
+    font-style: italic;
+}
+
+.stream-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+
+.stream-controls label {
+    font-size: 14px;
+    color: var(--text-primary, #1a1a1a);
+    font-weight: 500;
+}
+
+.stream-controls input {
+    padding: 8px 12px;
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 6px;
+    font-size: 14px;
+    width: 80px;
+}
+
+.streams-list {
+    margin-top: 16px;
+}
+
+/* Dark theme adjustments for admin */
+.dark-theme .admin-section {
+    background: var(--card-bg-dark, #2d2d2d);
+    border-color: var(--border-color-dark, #404040);
+}
+
+.dark-theme .stat-item,
+.dark-theme .status-text,
+.dark-theme .admin-table th {
+    background: var(--bg-secondary-dark, #3a3a3a);
+}
+
+.dark-theme .admin-table {
+    background: var(--card-bg-dark, #2d2d2d);
+}
+
+.dark-theme .admin-table td,
+.dark-theme .admin-table th {
+    border-bottom-color: var(--border-color-dark, #404040);
+}
+
+.dark-theme .admin-table tr:hover {
+    background: var(--bg-hover-dark, #3a3a3a);
+}
+
+.dark-theme .stream-controls input {
+    background: var(--card-bg-dark, #2d2d2d);
+    border-color: var(--border-color-dark, #404040);
+    color: var(--text-primary-dark, #f7fafc);
+}

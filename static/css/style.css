@@ -1,4 +1,5 @@
  :root {
+    /* UFO League Theme (default) */
     --bg:#0f1720;
     --card:#111827;
     --muted:#9aa4b2;
@@ -12,6 +13,24 @@
     --light: #f1f5f9;
     --gray: #9aa4b2;
     --border-radius: 12px;
+    --transition: all 0.3s ease;
+}
+
+/* BLB League Theme */
+body.blb-theme {
+    --bg: #0a1128;
+    --card: #1e2a47;
+    --muted: #8ba1c9;
+    --accent1: linear-gradient(135deg, #3b82f6, #1e40af);
+    --glass: rgba(59, 130, 246, 0.05);
+    --primary: #3b82f6;
+    --primary-dark: #1e40af;
+    --secondary: #60a5fa;
+    --success: #10b981;
+    --danger: #ef4444;
+    --light: #f8fafc;
+    --gray: #8ba1c9;
+    --border-radius: 8px;
     --transition: all 0.3s ease;
 }
 
@@ -341,12 +360,19 @@ body.allow-landscape #md-pane-stream.fs-mode * {
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+.profile-info {
+    display: flex; 
+    flex-direction: column; 
+    gap: 6px; 
+    flex: 1;
+}
+
 .profile-avatar {
     width: 96px;
     height: 96px;
     border-radius: 50%;
     overflow: hidden;
-    margin-right: 20px;
+    margin-left: 20px;
     border: 2px solid var(--primary);
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
 }

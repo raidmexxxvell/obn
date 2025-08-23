@@ -1120,6 +1120,12 @@
         window.__ACTIVE_LEAGUE__ = code;
         try { sessionStorage.setItem('activeLeague', code || 'UFO'); } catch(_) {}
         try { updateNavLeagueIcon(); } catch(_) {}
+        // Apply theme based on league
+        if (code === 'BLB') {
+            document.body.classList.add('blb-theme');
+        } else {
+            document.body.classList.remove('blb-theme');
+        }
     }
     function renderLeagueOverlay() {
         const overlay = document.getElementById('league-overlay');
@@ -1201,6 +1207,8 @@
         const blbBlock = document.getElementById('blb-block');
         if (!ufoTabs || !ufoContent || !blbBlock) return;
     setActiveLeague('UFO');
+        // Apply UFO theme
+        document.body.classList.remove('blb-theme');
         if (overlay) overlay.style.display = 'none';
         blbBlock.style.display = 'none';
         ufoTabs.style.display = '';
@@ -1236,6 +1244,8 @@
         const blbBlock = document.getElementById('blb-block');
         if (!ufoTabs || !ufoContent || !blbBlock) return;
         setActiveLeague('BLB');
+        // Apply BLB theme
+        document.body.classList.add('blb-theme');
         if (overlay) overlay.style.display = 'none';
         ufoTabs.style.display = 'none';
         ufoContent.style.display = 'none';
@@ -1780,6 +1790,11 @@ if(!window.openMatchScreen){
     // Если активна по умолчанию подвкладка таблицы — инициируем остальные ленивые прогревы в фоне
     try { setTimeout(()=>{ try { loadStatsTable(); } catch(_) {} try { loadSchedule(); } catch(_) {} try { loadResults(); } catch(_) {}; }, 400); } catch(_) {}
     try { window.ensureAdminUI?.(); } catch(_) {}
+
+    // Экспорт функций
+    window.selectBLBLeague = selectBLBLeague;
+    window.selectUFOLeague = selectUFOLeague;
+    window.setActiveLeague = setActiveLeague;
 
     // LIVE notifications перенесены в profile-live.js
 })();

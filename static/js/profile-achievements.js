@@ -40,14 +40,13 @@
     };
     const descFor = (a) => {
       try {
-        const tgt=a.target; const all=Array.isArray(a.all_targets)?a.all_targets:null;
         switch(a.group){
-          case 'streak': return `Ежедневные чекины подряд. Цели: ${(all||[7,30,120]).join(' / ')}.`;
-          case 'credits': return `Накопите кредиты.${all? ' Цели: '+all.join(' / ')+'.':''}`;
-          case 'level': return `Достигайте уровни.${all? ' Цели: '+all.join(' / ')+'.':''}`;
-          case 'invited': return `Приглашайте друзей.${all? ' Цели: '+all.join(' / ')+'.':''}`;
-          case 'betcount': return `Сделайте ставки.${all? ' Цели: '+all.join(' / ')+'.':''}`;
-          case 'betwins': return `Выигрывайте ставки.${all? ' Цели: '+all.join(' / ')+'.':''}`;
+          case 'streak': return `Ежедневные чекины подряд`;
+          case 'credits': return `Накопление кредитов`;
+          case 'level': return `Повышение уровня`;
+          case 'invited': return `Приглашение друзей`;
+          case 'betcount': return `Количество ставок`;
+          case 'betwins': return `Выигранные ставки`;
           default: return a.description || a.desc || '';
         }
       } catch(_) { return a.description || ''; }
@@ -57,23 +56,77 @@
       if(!a.unlocked) card.classList.add('locked');
       const img=document.createElement('img'); img.alt=a.name||''; setAchievementIcon(img,a);
       const name=document.createElement('div'); name.className='badge-name'; name.textContent=a.name||'';
-      const req=document.createElement('div'); req.className='badge-requirements'; req.textContent=descFor(a);
+      const req=document.createElement('div'); req.className='badge-requirements'; 
       
-      // Добавляем прогресс-бар
-      if(a.value !== undefined && a.target !== undefined) {
+      // Улучшенное отображение прогресса и требований
+      if(a.value !== undefined && (a.target !== undefined || a.next_target !== undefined)) {
+        const currentValue = a.value || 0;
+        const currentTarget = a.target || 0;
+        const nextTarget = a.next_target;
+        
+        // Определяем какую цель показывать
+        let displayTarget = currentTarget;
+        let progressValue = currentValue;
+        let isCompleted = false;
+        
+        if (currentValue >= currentTarget && nextTarget && nextTarget > currentTarget) {
+          // Достигли текущую цель, есть следующая - показываем прогресс к следующей
+          displayTarget = nextTarget;
+          // Прогресс показываем от текущей цели до следующей
+          progressValue = currentValue - currentTarget;
+          const progressMax = nextTarget - currentTarget;
+          isCompleted = false;
+        } else if (currentValue >= currentTarget && !nextTarget) {
+          // Достигли финальную цель
+          displayTarget = currentTarget;
+          progressValue = currentTarget;
+          isCompleted = true;
+        } else {
+          // Ещё не достигли текущую цель
+          displayTarget = currentTarget;
+          progressValue = currentValue;
+          isCompleted = false;
+        }
+        
+        // Текст с прогрессом
+        const baseDesc = descFor(a);
+        if (isCompleted) {
+          req.textContent = `${baseDesc} ✅ Завершено (${currentValue}/${displayTarget})`;
+        } else if (currentValue >= currentTarget && nextTarget) {
+          req.textContent = `${baseDesc} Прогресс: ${progressValue}/${nextTarget - currentTarget} до следующего уровня`;
+        } else {
+          req.textContent = `${baseDesc} Прогресс: ${progressValue}/${displayTarget}`;
+        }
+        
+        // Прогресс-бар
         const progressContainer = document.createElement('div'); progressContainer.className='achv-progress-container';
         const progressBar = document.createElement('div'); progressBar.className='achv-progress-bar';
-        const progress = Math.min(100, Math.max(0, (a.value / a.target) * 100));
-        progressBar.style.width = progress + '%';
+        
+        let progressPercent = 0;
+        if (isCompleted) {
+          progressPercent = 100;
+        } else if (currentValue >= currentTarget && nextTarget) {
+          // Прогресс до следующей цели
+          const rangeSize = nextTarget - currentTarget;
+          const progressInRange = Math.max(0, currentValue - currentTarget);
+          progressPercent = Math.min(100, (progressInRange / rangeSize) * 100);
+        } else {
+          // Прогресс до текущей цели
+          progressPercent = Math.min(100, (currentValue / currentTarget) * 100);
+        }
+        
+        progressBar.style.width = progressPercent + '%';
         progressContainer.appendChild(progressBar);
         card.append(img,name,req,progressContainer);
       } else {
+        req.textContent = descFor(a);
         card.append(img,name,req);
       }
       
       badgesContainer.appendChild(card);
     });
   }
+  
   function fetchAchievements(){
     if(_loadedOnce) return Promise.resolve([]);
     const send=(init)=> fetch('/api/achievements',{ method:'POST', body: init }).then(r=>r.json()).then(data=>{ console.debug('achievements data',data); _loadedOnce=true; renderAchievements(data.achievements||[]); return data.achievements||[]; });

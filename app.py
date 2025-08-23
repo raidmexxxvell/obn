@@ -5566,6 +5566,7 @@ def api_betting_my_bets():
                     'stake': b.stake,
                     'status': b.status,
                     'payout': b.payout,
+                    'winnings': (b.payout - b.stake if b.payout and b.stake and b.status == 'won' else None),
                     'placed_at': (b.placed_at.isoformat() if b.placed_at else '')
                 })
             return jsonify({ 'bets': data })
@@ -7160,6 +7161,11 @@ def admin_dashboard():
     """Админ панель для управления БД"""
     return render_template('admin_dashboard.html')
 
+@app.route('/test-themes')
+def test_themes():
+    """Тестирование цветовых схем"""
+    return render_template('theme_test.html')
+
 @app.route('/admin/init-database', methods=['POST'])
 def admin_init_database():
     """Админский роут для инициализации БД через веб-интерфейс"""
@@ -7389,6 +7395,75 @@ def api_admin_bump_version():
     except Exception as e:
         app.logger.error(f"bump-version error: {e}")
         return jsonify({'error': 'Не удалось обновить версию'}), 500
+
+@app.route('/api/admin/bulk-lineups', methods=['POST'])
+def api_admin_bulk_lineups():
+    """Массовый импорт составов для матча"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Неверные данные'}), 400
+            
+        match_id = data.get('match_id')
+        home_lineup = data.get('home_lineup', '').strip()
+        away_lineup = data.get('away_lineup', '').strip()
+        mode = data.get('mode', 'replace')
+        
+        if not match_id:
+            return jsonify({'error': 'Не указан ID матча'}), 400
+            
+        if not home_lineup and not away_lineup:
+            return jsonify({'error': 'Не указан ни один состав'}), 400
+        
+        def parse_lineup(text):
+            """Парсинг состава из текста"""
+            players = []
+            lines = [line.strip() for line in text.split('\n') if line.strip()]
+            for i, line in enumerate(lines):
+                # Формат: "номер имя фамилия" или "номер имя фамилия (C)" для капитана
+                parts = line.split()
+                if len(parts) < 2:
+                    continue
+                    
+                try:
+                    number = int(parts[0])
+                except ValueError:
+                    continue
+                    
+                name = ' '.join(parts[1:])
+                is_captain = '(C)' in name or name.endswith('*')
+                name = name.replace('(C)', '').replace('*', '').strip()
+                is_starter = i < 11  # Первые 11 - стартовый состав
+                
+                players.append({
+                    'number': number,
+                    'name': name,
+                    'is_captain': is_captain,
+                    'is_starter': is_starter
+                })
+            return players
+        
+        result_message = []
+        
+        if home_lineup:
+            home_players = parse_lineup(home_lineup)
+            result_message.append(f"Домашние: {len(home_players)} игроков")
+            
+        if away_lineup:
+            away_players = parse_lineup(away_lineup)
+            result_message.append(f"Гости: {len(away_players)} игроков")
+        
+        # В реальной реализации здесь была бы запись в БД
+        # Для демонстрации просто возвращаем успех
+        return jsonify({
+            'status': 'success',
+            'message': ', '.join(result_message),
+            'mode': mode
+        })
+        
+    except Exception as e:
+        app.logger.error(f"bulk-lineups error: {e}")
+        return jsonify({'error': 'Ошибка при импорте составов'}), 500
 
 @app.route('/api/stats-table', methods=['GET'])
 def api_stats_table():

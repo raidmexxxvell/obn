@@ -2,11 +2,9 @@
 (function(){
   const tg = window.Telegram?.WebApp;
   function initHomeAdsCarousel(){
-    let track = document.getElementById('ads-track');
-    let dots = document.getElementById('ads-dots');
+    const track = document.getElementById('ads-track');
+    const dots = document.getElementById('ads-dots');
     const box = document.getElementById('ads-carousel');
-    if(box && !track){ track=document.createElement('div'); track.id='ads-track'; track.className='ads-track'; box.appendChild(track); }
-    if(box && !dots){ dots=document.createElement('div'); dots.id='ads-dots'; dots.className='ads-dots'; box.appendChild(dots); }
     if (!track || !dots || !box) return;
     let slides = Array.isArray(window.__HOME_ADS__) ? window.__HOME_ADS__.slice() : null;
     if (!slides || slides.length === 0) {
@@ -30,13 +28,29 @@
               if (window.selectBLBLeague) {
                 window.selectBLBLeague(true);
               } else {
+                // Фолбэк: прямое переключение на БЛБ лигу
                 window.__ACTIVE_LEAGUE__ = 'BLB';
                 if (window.setActiveLeague) { try { window.setActiveLeague('BLB'); } catch(_) {} }
+                
+                // Переключаемся на правильную вкладку (ufo, но показываем БЛБ контент)
                 document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
                 const navUfo = document.querySelector('.nav-item[data-tab="ufo"]');
                 if (navUfo) navUfo.classList.add('active');
+                
+                // Скрываем все вкладки кроме ufo
                 ['tab-home','tab-ufo','tab-predictions','tab-leaderboard','tab-shop','tab-admin']
                   .forEach(id => { const el = document.getElementById(id); if (el) el.style.display = (id==='tab-ufo'?'':'none'); });
+                
+                // Показываем БЛБ контент внутри ufo вкладки
+                const ufoTabs = document.getElementById('ufo-subtabs');
+                const ufoContent = document.getElementById('ufo-content'); 
+                const blbBlock = document.getElementById('blb-block');
+                if (ufoTabs) ufoTabs.style.display = 'none';
+                if (ufoContent) ufoContent.style.display = 'none';
+                if (blbBlock) blbBlock.style.display = '';
+                
+                // Инициализируем БЛБ вкладки
+                if (window.initBLBSubtabs) { try { window.initBLBSubtabs(); } catch(_) {} }
               }
             }
           } catch(_) {}

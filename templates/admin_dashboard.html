@@ -2,599 +2,150 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Админ панель - Liga Obninska</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Админ-панель - Лига Обнинска</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="/static/js/error-overlay.js"></script>
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="stylesheet" href="/static/css/database-ui.css">
-    <style>
-        .admin-container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-        
-        .admin-section {
-            background: white;
-            <div class="admin-container">
-                <h1>Массовый импорт составов</h1>
-                <div id="alerts"></div>
-                <div class="admin-section">
-                    <div class="form-group">
-                        <label for="bulk-lineup-match">Матч:</label>
-                        <select id="bulk-lineup-match"><option value="">Загрузка матчей...</option></select>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group" style="flex:1;">
-                            <label for="bulk-home">Состав (дом) – по одному игроку в строке (номер + имя, капитан: (C) или *):</label>
-                            <textarea id="bulk-home" placeholder="1 Иванов Иван (C)&#10;10 Петров&#10;7 Сидоров *" style="min-height:160px;"></textarea>
-                        </div>
-                        <div class="form-group" style="flex:1;">
-                            <label for="bulk-away">Состав (гости):</label>
-                            <textarea id="bulk-away" placeholder="9 Смирнов&#10;5 Орлов&#10;11 Кузнецов" style="min-height:160px;"></textarea>
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group" style="max-width:260px;">
-                            <label for="bulk-mode">Режим:</label>
-                            <select id="bulk-mode">
-                                <option value="replace">Заменить существующий</option>
-                                <option value="append">Добавить (без удаления)</option>
-                            </select>
-                        </div>
-                    </div>
-                    <button onclick="bulkSetLineups()">Импортировать составы</button>
-                    <small>Первые 11 строк каждой стороны будут отмечены как "Основа" автоматически.</small>
-                </div>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>⚽</text></svg>">
+</head>
+<body class="tg">
+    <div class="app-container">
+        <!-- Header -->
+        <div class="header">
+            <div class="logo-container">
+                <img src="/static/img/logo_liga.png" alt="Лига Обнинска" class="logo">
             </div>
-                    <select id="match-select">
-                        // Минимальная версия: только импорт составов
-                        let allMatches = [];
-                        window.addEventListener('DOMContentLoaded', loadMatchesForBulk);
-                        async function loadMatchesForBulk(){
-                            try {
-                                const resp = await fetch('/api/schedule');
-                                const data = await resp.json();
-                                allMatches = [];
-                                if(data.tours){
-                                    data.tours.forEach(t => (t.matches||[]).forEach(m => {
-                                        allMatches.push({
-                                            id: `${m.home}_${m.away}_${m.date || m.datetime}`,
-                                            home_team_name: m.home,
-                                            away_team_name: m.away,
-                                            match_date: m.datetime || m.date
-                                        });
-                                    }));
-                                }
-                                const sel = document.getElementById('bulk-lineup-match');
-                                sel.innerHTML = '<option value="">Выберите матч</option>' + allMatches.map(m => `<option value="${m.id}">${m.home_team_name} vs ${m.away_team_name} (${formatDate(m.match_date)})</option>`).join('');
-                            } catch(e){
-                                console.error(e); showAlert('Не удалось загрузить матчи','error');
-                            }
-                        }
-                        function formatDate(s){ try { return new Date(s).toLocaleDateString('ru-RU'); } catch(_){ return s; } }
-            
-            <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-                <button class="btn btn-secondary" onclick="refreshStatistics()">Пересчитать статистику</button>
-                <button class="btn btn-secondary" onclick="loadAllData()">Обновить данные</button>
-            </div>
+            <h1 class="app-title">Админ-панель</h1>
         </div>
 
-        <!-- Массовый импорт составов -->
-        <div class="admin-section">
-            <h2>Массовый импорт составов</h2>
-            <div class="form-group">
-                <label for="bulk-lineup-match">Матч:</label>
-                <select id="bulk-lineup-match"></select>
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Admin Subtabs -->
+            <div id="admin-subtabs" class="subtabs">
+                <div class="subtab-item active" data-atab="service">Сервис</div>
+                <div class="subtab-item" data-atab="stats">Статистика</div>
+                <div class="subtab-item" data-atab="orders">Заказы</div>
+                <div class="subtab-item" data-atab="streams">Стримы</div>
             </div>
-            <div class="form-row">
-                <div class="form-group" style="flex:1;">
-                    <label for="bulk-home">Состав (дом) – по одному игроку в строке (номер + имя, капитан: (C) или *):</label>
-                    <textarea id="bulk-home" placeholder="1 Иванов Иван (C)&#10;10 Петров&#10;7 Сидоров *" style="min-height:160px;"></textarea>
+
+            <!-- Service Pane -->
+            <div id="admin-pane-service" class="admin-pane">
+                <div class="admin-section">
+                    <h3>Обновление данных</h3>
+                    <button id="admin-refresh-all" class="action-btn">Обновить все данные</button>
+                    <p class="help-text">Обновляет турнирную таблицу, статистику, расписание, результаты и туры для ставок</p>
                 </div>
-                <div class="form-group" style="flex:1;">
-                    <label for="bulk-away">Состав (гости):</label>
-                    <textarea id="bulk-away" placeholder="9 Смирнов&#10;5 Орлов&#10;11 Кузнецов" style="min-height:160px;"></textarea>
+
+                <div class="admin-section">
+                    <h3>Синхронизация</h3>
+                    <button id="admin-sync-refresh" class="action-btn">Проверить синхронизацию</button>
+                    <div id="admin-sync-summary" class="status-text">Нажмите для проверки статуса синхронизации</div>
+                </div>
+
+                <div class="admin-section">
+                    <h3>Версия</h3>
+                    <button id="admin-bump-version" class="action-btn">Обновить версию кеша</button>
+                    <p class="help-text">Принудительно обновляет версию кеша для всех пользователей</p>
                 </div>
             </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="bulk-mode">Режим:</label>
-                    <select id="bulk-mode">
-                        <option value="replace">Заменить существующий</option>
-                        <option value="append">Добавить (без удаления)</option>
-                    </select>
+
+            <!-- Stats Pane -->
+            <div id="admin-pane-stats" class="admin-pane" style="display: none;">
+                <div class="admin-section">
+                    <h3>Статистика пользователей</h3>
+                    <button id="admin-users-refresh" class="action-btn">Обновить статистику</button>
+                    <div id="admin-users-stats" class="stats-container">
+                        <div class="stat-item">
+                            <span class="stat-label">Всего пользователей:</span>
+                            <span class="stat-value" id="total-users">-</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Активных сегодня:</span>
+                            <span class="stat-value" id="active-today">-</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Активных за неделю:</span>
+                            <span class="stat-value" id="active-week">-</span>
+                        </div>
+                    </div>
                 </div>
             </div>
-            <button onclick="bulkSetLineups()">Импортировать составы</button>
-            <small>Первые 11 строк каждой стороны будут отмечены как "Основа" автоматически.</small>
+
+            <!-- Orders Pane -->
+            <div id="admin-pane-orders" class="admin-pane" style="display: none;">
+                <div class="admin-section">
+                    <h3>Управление заказами</h3>
+                    <button id="admin-orders-refresh" class="action-btn">Обновить заказы</button>
+                    <div id="admin-orders-updated" class="updated-info"></div>
+                    
+                    <div class="table-container">
+                        <table class="admin-table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Пользователь</th>
+                                    <th>Товары</th>
+                                    <th>Кол-во</th>
+                                    <th>Сумма</th>
+                                    <th>Создан</th>
+                                    <th>Статус</th>
+                                    <th>Действия</th>
+                                </tr>
+                            </thead>
+                            <tbody id="admin-orders-table">
+                                <!-- Динамически заполняется -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Streams Pane -->
+            <div id="admin-pane-streams" class="admin-pane" style="display: none;">
+                <div class="admin-section">
+                    <h3>Управление стримами</h3>
+                    <div class="stream-controls">
+                        <label for="admin-streams-window">Окно времени (мин):</label>
+                        <input type="number" id="admin-streams-window" value="360" min="60" max="480">
+                        <button id="admin-streams-refresh" class="action-btn">Обновить список</button>
+                    </div>
+                    
+                    <div id="admin-streams-msg" class="status-text">Загрузка стримов...</div>
+                    <div id="admin-streams-list" class="streams-list">
+                        <!-- Динамически заполняется -->
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
+    <!-- Scripts -->
+    <script src="/static/js/telegram-patch.js"></script>
+    <script src="/static/js/admin.js"></script>
     <script>
-        // Глобальные переменные
-        let currentMatch = null;
-        let allMatches = [];
-        let allPlayers = [];
-        let allTeams = [];
-        
-        // Инициализация страницы
-        window.addEventListener('DOMContentLoaded', async function() {
-            await loadAllData();
+        // Initialize admin dashboard when DOM is loaded
+        document.addEventListener('DOMContentLoaded', function() {
+            if (window.Admin && window.Admin.init) {
+                window.Admin.init();
+            }
+            
+            // Set initial theme based on Telegram
+            if (window.Telegram?.WebApp) {
+                const tg = window.Telegram.WebApp;
+                tg.ready();
+                tg.expand();
+                
+                // Apply theme
+                if (tg.colorScheme === 'dark') {
+                    document.body.classList.add('dark-theme');
+                }
+            }
         });
-        
-        // Загрузка всех данных
-        async function loadAllData() {
-            try {
-                showAlert('Загрузка данных...', 'info');
-                
-                // Загружаем реальные матчи из API
-                const matchesResponse = await fetch('/api/schedule');
-                const scheduleData = await matchesResponse.json();
-                
-                // Преобразуем расписание в список матчей
-                allMatches = [];
-                if (scheduleData.tours) {
-                    scheduleData.tours.forEach(tour => {
-                        if (tour.matches) {
-                            tour.matches.forEach(match => {
-                                allMatches.push({
-                                    id: `${match.home}_${match.away}_${match.date || match.datetime}`,
-                                    home_team_name: match.home,
-                                    away_team_name: match.away,
-                                    match_date: match.datetime || match.date,
-                                    home_score: 0,
-                                    away_score: 0
-                                });
-                            });
-                        }
-                    });
-                }
-                
-                // Загружаем команды из API
-                const teamsResponse = await fetch('/api/teams');
-                const teamsData = await teamsResponse.json();
-                allTeams = teamsData.teams.map((teamName, index) => ({
-                    id: index + 1,
-                    name: teamName
-                }));
-                
-                // Создаем список игроков (заглушка - в реальности нужно API для игроков)
-                allPlayers = [];
-                for (let i = 1; i <= 50; i++) {
-                    allPlayers.push({
-                        id: i,
-                        first_name: `Игрок${i}`,
-                        last_name: `Фамилия${i}`,
-                        username: `player${i}`,
-                        position: ['goalkeeper', 'defender', 'midfielder', 'forward'][i % 4]
-                    });
-                }
-                
-                populateMatchSelect();
-                populatePlayerSelects();
-                populateTeamSelect();
-                
-                showAlert('Данные загружены успешно', 'success');
-                
-            } catch (error) {
-                console.error('Error loading data:', error);
-                showAlert('Ошибка загрузки данных: ' + error.message, 'error');
-            }
-        }
-        
-        // Заполнение списка матчей
-        function populateMatchSelect() {
-            const select = document.getElementById('match-select');
-            const lineupSelect = document.getElementById('lineup-match-select');
-            
-            const options = '<option value="">Выберите матч</option>' + 
-                allMatches.map(match => 
-                    `<option value="${match.id}">${match.home_team_name} vs ${match.away_team_name} (${formatDate(match.match_date)})</option>`
-                ).join('');
-            
-            select.innerHTML = options;
-            lineupSelect.innerHTML = options;
-            
-            select.addEventListener('change', onMatchSelect);
-            lineupSelect.addEventListener('change', onLineupMatchSelect);
-        }
-        
-        // Форматирование даты
-        function formatDate(dateString) {
-            try {
-                const date = new Date(dateString);
-                return date.toLocaleDateString('ru-RU');
-            } catch (e) {
-                return dateString;
-            }
-        }
-        
-        // Выбор матча для составов
-        function onLineupMatchSelect() {
-            const matchId = document.getElementById('lineup-match-select').value;
-            const container = document.getElementById('lineup-container');
-            
-            if (!matchId) {
-                container.style.display = 'none';
-                return;
-            }
-            
-            const match = allMatches.find(m => m.id === matchId);
-            if (match) {
-                document.getElementById('home-team-name').textContent = match.home_team_name;
-                document.getElementById('away-team-name').textContent = match.away_team_name;
-                
-                // Заполняем селекты игроков для составов
-                populateLineupPlayerSelects();
-                loadTeamLineups(match);
-                
-                container.style.display = 'block';
-            }
-        }
-        
-        // Заполнение селектов игроков для составов
-        function populateLineupPlayerSelects() {
-            const homeSelect = document.getElementById('add-home-player');
-            const awaySelect = document.getElementById('add-away-player');
-            
-            const options = '<option value="">Выберите игрока</option>' +
-                allPlayers.map(player => 
-                    `<option value="${player.id}">${player.first_name} ${player.last_name || ''}</option>`
-                ).join('');
-            
-            homeSelect.innerHTML = options;
-            awaySelect.innerHTML = options;
-        }
-        
-        // Загрузка составов команд
-        async function loadTeamLineups(match) {
-            try {
-                const params = new URLSearchParams({home: match.home_team_name, away: match.away_team_name});
-                const resp = await fetch('/api/lineup/list?' + params.toString());
-                if (!resp.ok) throw new Error('HTTP ' + resp.status);
-                const data = await resp.json();
-                renderLineupSide('home', data.home);
-                renderLineupSide('away', data.away);
-            } catch (e) {
-                console.error('loadTeamLineups error', e);
-                document.getElementById('home-starting-eleven').innerHTML = '<p>Ошибка загрузки</p>';
-                document.getElementById('home-substitutes').innerHTML = '<p>Ошибка</p>';
-                document.getElementById('away-starting-eleven').innerHTML = '<p>Ошибка загрузки</p>';
-                document.getElementById('away-substitutes').innerHTML = '<p>Ошибка</p>';
-            }
-        }
-        function renderLineupSide(side, payload){
-            const starters = document.getElementById(side+'-starting-eleven');
-            const subs = document.getElementById(side+'-substitutes');
-            starters.innerHTML = '';
-            subs.innerHTML = '';
-            if(!payload || !Array.isArray(payload.starting_eleven) || payload.starting_eleven.length===0){
-                starters.innerHTML = '<p>Состав не заполнен</p>';
-            } else {
-                payload.starting_eleven.forEach(p => starters.appendChild(buildLineupPlayerElement(side,p)));
-            }
-            if(!payload || !Array.isArray(payload.substitutes) || payload.substitutes.length===0){
-                subs.innerHTML = '<p>Запасные не добавлены</p>';
-            } else {
-                payload.substitutes.forEach(p => subs.appendChild(buildLineupPlayerElement(side,p)));
-            }
-        }
-        function buildLineupPlayerElement(side, rec){
-            const el = document.createElement('div');
-            el.className = 'lineup-player' + (rec.is_captain ? ' captain' : '');
-            el.dataset.player = rec.player;
-            el.innerHTML = `
-                <div class="player-info">
-                    <div class="jersey-number">${rec.jersey_number || ''}</div>
-                    <div><strong>${rec.player}</strong><br><small>${rec.position === 'starting_eleven' ? 'Основа' : 'Запасной'}</small></div>
-                </div>
-                <button class="remove-player-btn" onclick="removePlayerFromLineupAPI('${side}', '${rec.player.replace(/'/g,"&#39;")}')">Убрать</button>`;
-            return el;
-        }
-        async function addPlayerToLineup(team) {
-            const matchId = document.getElementById('lineup-match-select').value;
-            if(!matchId){ showAlert('Выберите матч', 'error'); return; }
-            const match = allMatches.find(m => m.id === matchId);
-            const playerSelect = document.getElementById(`add-${team}-player`);
-            const jerseyInput = document.getElementById(`add-${team}-jersey`);
-            const positionSelect = document.getElementById(`add-${team}-position`);
-            const playerId = playerSelect.value;
-            const jersey = jerseyInput.value;
-            const position = positionSelect.value;
-            if (!playerId || !jersey){ showAlert('Выберите игрока и укажите номер', 'error'); return; }
-            const player = allPlayers.find(p=>p.id==playerId);
-            if(!player){ showAlert('Игрок не найден', 'error'); return; }
-            try {
-                const fd = new FormData();
-                fd.append('home', match.home_team_name);
-                fd.append('away', match.away_team_name);
-                fd.append('team', team);
-                fd.append('player', `${player.first_name} ${player.last_name || ''}`.trim());
-                fd.append('jersey_number', jersey);
-                fd.append('position', position);
-                const resp = await fetch('/api/lineup/add', {method:'POST', body: fd});
-                if(!resp.ok){ throw new Error('HTTP '+resp.status); }
-                const js = await resp.json();
-                if(js.error){ throw new Error(js.error); }
-                showAlert('Игрок добавлен', 'success');
-                playerSelect.value=''; jerseyInput.value='';
-                loadTeamLineups(match);
-            }catch(e){ console.error(e); showAlert('Ошибка добавления: '+e.message,'error'); }
-        }
-        async function removePlayerFromLineupAPI(side, playerName){
-            const matchId = document.getElementById('lineup-match-select').value;
-            if(!matchId){ return; }
-            const match = allMatches.find(m => m.id === matchId);
-            try {
-                const fd = new FormData();
-                fd.append('home', match.home_team_name);
-                fd.append('away', match.away_team_name);
-                fd.append('team', side);
-                fd.append('player', playerName);
-                const resp = await fetch('/api/lineup/remove', {method:'POST', body: fd});
-                if(!resp.ok) throw new Error('HTTP '+resp.status);
-                const js = await resp.json();
-                if(js.error){ throw new Error(js.error); }
-                showAlert('Игрок удалён', 'success');
-                loadTeamLineups(match);
-            }catch(e){ console.error(e); showAlert('Ошибка удаления: '+e.message,'error'); }
-        }
-        // Переопределяем removePlayerFromLineup чтобы не ломать
-        function removePlayerFromLineup(btn){
-            // legacy stub
-        }
-        // Заполнение списков игроков
-        function populatePlayerSelects() {
-            const playerSelect = document.getElementById('event-player');
-            const assistSelect = document.getElementById('event-assist');
-            
-            playerSelect.innerHTML = '<option value="">Выберите игрока</option>';
-            assistSelect.innerHTML = '<option value="">Нет передачи</option>';
-            
-            allPlayers.forEach(player => {
-                const option1 = document.createElement('option');
-                option1.value = player.id;
-                option1.textContent = DataUtils.formatPlayerName(player);
-                playerSelect.appendChild(option1);
-                
-                const option2 = document.createElement('option');
-                option2.value = player.id;
-                option2.textContent = DataUtils.formatPlayerName(player);
-                assistSelect.appendChild(option2);
-            });
-        }
-        
-        // Заполнение списка команд
-        function populateTeamSelect() {
-            const select = document.getElementById('event-team');
-            select.innerHTML = '<option value="">Выберите команду</option>';
-            
-            allTeams.forEach(team => {
-                const option = document.createElement('option');
-                option.value = team.id;
-                option.textContent = team.name;
-                select.appendChild(option);
-            });
-        }
-        
-        // Выбор матча
-        async function onMatchSelect() {
-            const matchId = document.getElementById('match-select').value;
-            if (!matchId) {
-                currentMatch = null;
-                document.getElementById('current-events').innerHTML = '<p>Выберите матч для просмотра событий</p>';
-                return;
-            }
-            
-            currentMatch = allMatches.find(m => m.id == matchId);
-            if (currentMatch) {
-                document.getElementById('home-score').value = currentMatch.home_score;
-                document.getElementById('away-score').value = currentMatch.away_score;
-                
-                await loadMatchEvents(matchId);
-            }
-        }
-        
-        // Загрузка событий матча
-        async function loadMatchEvents(matchId) {
-            try {
-                // Пока показываем заглушку
-                const eventsContainer = document.getElementById('current-events');
-                eventsContainer.innerHTML = '<p>События для выбранного матча пока не загружены</p>';
-                
-            } catch (error) {
-                console.error('Error loading match events:', error);
-                document.getElementById('current-events').innerHTML = '<p class="error">Ошибка загрузки событий</p>';
-            }
-        }
-        
-        // Обновление счета матча
-        async function updateMatchScore() {
-            if (!currentMatch) {
-                showAlert('Выберите матч', 'error');
-                return;
-            }
-            
-            const homeScore = parseInt(document.getElementById('home-score').value);
-            const awayScore = parseInt(document.getElementById('away-score').value);
-            
-            try {
-                // Отправляем обновление счета через API
-                const formData = new FormData();
-                formData.append('home', currentMatch.home_team_name);
-                formData.append('away', currentMatch.away_team_name);
-                formData.append('score_home', homeScore);
-                formData.append('score_away', awayScore);
-                
-                const response = await fetch('/api/match/score/set', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                if (response.ok) {
-                    showAlert('Счет обновлен успешно', 'success');
-                    currentMatch.home_score = homeScore;
-                    currentMatch.away_score = awayScore;
-                } else {
-                    throw new Error('Ошибка обновления счета');
-                }
-                
-            } catch (error) {
-                console.error('Error updating match score:', error);
-                showAlert('Ошибка обновления счета: ' + error.message, 'error');
-            }
-        }
-        
-        // Добавление события матча
-        async function addEvent(eventType) {
-            if (!currentMatch) {
-                showAlert('Выберите матч', 'error');
-                return;
-            }
-            
-            const playerId = document.getElementById('event-player').value;
-            const teamId = document.getElementById('event-team').value;
-            const minute = parseInt(document.getElementById('event-minute').value);
-            const additionalTime = parseInt(document.getElementById('event-additional').value) || 0;
-            const description = document.getElementById('event-description').value;
-            const assistedBy = document.getElementById('event-assist').value || null;
-            
-            if (!playerId || !teamId || minute === '') {
-                showAlert('Заполните все обязательные поля', 'error');
-                return;
-            }
-            
-            try {
-                // Отправляем событие через API
-                const formData = new FormData();
-                formData.append('home', currentMatch.home_team_name);
-                formData.append('away', currentMatch.away_team_name);
-                formData.append('team', teamId === '1' ? 'home' : 'away');
-                formData.append('minute', minute);
-                formData.append('player', document.getElementById('event-player').selectedOptions[0].text);
-                formData.append('type', eventType);
-                formData.append('note', description);
-                
-                const response = await fetch('/api/match/events/add', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                if (response.ok) {
-                    showAlert(`Событие "${eventType}" добавлено успешно`, 'success');
-                    await loadMatchEvents(currentMatch.id);
-                    
-                    // Очищаем форму
-                    document.getElementById('event-description').value = '';
-                    document.getElementById('event-assist').value = '';
-                } else {
-                    throw new Error('Ошибка добавления события');
-                }
-                
-            } catch (error) {
-                console.error('Error adding match event:', error);
-                showAlert('Ошибка добавления события: ' + error.message, 'error');
-            }
-        }
-        
-        // Создание нового игрока
-        async function createPlayer() {
-            const firstName = document.getElementById('player-first-name').value.trim();
-            const lastName = document.getElementById('player-last-name').value.trim();
-            const username = document.getElementById('player-username').value.trim();
-            const position = document.getElementById('player-position').value;
-            const telegramId = document.getElementById('player-telegram-id').value;
-            
-            if (!firstName) {
-                showAlert('Имя обязательно для заполнения', 'error');
-                return;
-            }
-            
-            showAlert('Функция создания игрока будет реализована позже', 'info');
-            
-            // Очищаем форму
-            document.getElementById('player-first-name').value = '';
-            document.getElementById('player-last-name').value = '';
-            document.getElementById('player-username').value = '';
-            document.getElementById('player-position').value = '';
-            document.getElementById('player-telegram-id').value = '';
-        }
-        
-        // Пересчет статистики
-        async function refreshStatistics() {
-            try {
-                showAlert('Пересчет статистики...', 'info');
-                
-                const response = await fetch('/api/stats-table/refresh', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                    },
-                    body: 'refresh=1'
-                });
-                
-                if (response.ok) {
-                    showAlert('Статистика обновлена успешно', 'success');
-                } else {
-                    throw new Error('Ошибка обновления статистики');
-                }
-            } catch (error) {
-                console.error('Error refreshing statistics:', error);
-                showAlert('Ошибка обновления статистики: ' + error.message, 'error');
-            }
-        }
-        
-        // Показ алерта
-        function showAlert(message, type = 'info') {
-            const alertsContainer = document.getElementById('alerts');
-            const alert = document.createElement('div');
-            alert.className = `alert alert-${type === 'info' ? 'success' : type}`;
-            alert.textContent = message;
-            
-            alertsContainer.appendChild(alert);
-            
-            // Автоматически убираем алерт через 5 секунд
-            setTimeout(() => {
-                alert.remove();
-            }, 5000);
-        }
-        
-        // Пополняем селект матчей для bulk блока после загрузки
-        const _origPopulateMatchSelect = populateMatchSelect;
-        populateMatchSelect = function(){
-            _origPopulateMatchSelect();
-            const bulkSelect = document.getElementById('bulk-lineup-match');
-            if (!bulkSelect) return;
-            bulkSelect.innerHTML = document.getElementById('match-select').innerHTML;
-        };
-        async function bulkSetLineups(){
-            const sel = document.getElementById('bulk-lineup-match');
-            const val = sel.value;
-            if(!val){ showAlert('Выберите матч','error'); return; }
-            const match = allMatches.find(m=>m.id===val);
-            if(!match){ showAlert('Матч не найден','error'); return; }
-            const homeTxt = document.getElementById('bulk-home').value.trim();
-            const awayTxt = document.getElementById('bulk-away').value.trim();
-            if(!homeTxt && !awayTxt){ showAlert('Нет данных для импорта','error'); return; }
-            const mode = document.getElementById('bulk-mode').value;
-            try {
-                const fd = new FormData();
-                fd.append('home', match.home_team_name);
-                fd.append('away', match.away_team_name);
-                fd.append('mode', mode);
-                if(homeTxt) fd.append('roster_home', homeTxt);
-                if(awayTxt) fd.append('roster_away', awayTxt);
-                const resp = await fetch('/api/lineup/bulk_set', {method:'POST', body: fd});
-                if(!resp.ok) throw new Error('HTTP '+resp.status);
-                const js = await resp.json();
-                if(js.error) throw new Error(js.error);
-                showAlert('Составы успешно изменены','success');
-            } catch(e){
-                console.error(e);
-                showAlert('Не удалось изменить составы: '+e.message,'error');
-            }
-        }
-        window.isAdmin = true;
     </script>
 </body>
 </html>
