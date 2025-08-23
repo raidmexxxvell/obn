@@ -31,8 +31,13 @@
     try { const tabHome=subtabs?.querySelector('[data-mdtab="home"]'); const tabAway=subtabs?.querySelector('[data-mdtab="away"]'); if(tabHome) tabHome.textContent=(match.home||'Команда 1'); if(tabAway) tabAway.textContent=(match.away||'Команда 2'); } catch(_) {}
     let specialsPane=document.getElementById('md-pane-specials'); if(!specialsPane){ specialsPane=document.createElement('div'); specialsPane.id='md-pane-specials'; specialsPane.className='md-pane'; specialsPane.style.display='none'; mdPane.querySelector('.modal-body')?.appendChild(specialsPane); }
     try { const toursCache=JSON.parse(localStorage.getItem('betting:tours')||'null'); const tours=toursCache?.data?.tours || toursCache?.tours || []; const mkKey=(o)=>{ const h=(o?.home||'').toLowerCase().trim(); const a=(o?.away||'').toLowerCase().trim(); const raw=o?.date?String(o.date):(o?.datetime?String(o.datetime):''); const d=raw?raw.slice(0,10):''; return `${h}__${a}__${d}`; }; const present=new Set(); tours.forEach(t=>(t.matches||[]).forEach(x=>present.add(mkKey(x)))); const thisKey=mkKey(match); const adminId=document.body.getAttribute('data-admin'); const currentId=window.Telegram?.WebApp?.initDataUnsafe?.user?.id?String(window.Telegram.WebApp.initDataUnsafe.user.id):''; const isAdmin=!!(adminId && currentId && String(adminId)===currentId); const existed=subtabs?.querySelector('[data-mdtab="specials"]'); if (present.has(thisKey) && isAdmin){ if(!existed){ const sp=document.createElement('div'); sp.className='subtab-item'; sp.setAttribute('data-mdtab','specials'); sp.textContent='Спецсобытия'; subtabs.appendChild(sp); } } else if (existed){ existed.remove(); } } catch(_) {}
-  // Stream handled by MatchStream module now
+  // Интеграция трансляции через legacy Streams (если MatchStream модуль отсутствует)
   let streamPane=null;
+  try {
+    if (!window.MatchStream && window.Streams && typeof window.Streams.setupMatchStream==='function') {
+      streamPane = window.Streams.setupMatchStream(mdPane, subtabs, match);
+    }
+  } catch(_) {}
   let statsPane=document.getElementById('md-pane-stats'); if(!statsPane){ statsPane=document.createElement('div'); statsPane.id='md-pane-stats'; statsPane.className='md-pane'; statsPane.style.display='none'; mdPane.querySelector('.modal-body')?.appendChild(statsPane); }
   if(!subtabs.querySelector('[data-mdtab="stats"]')){ const st=document.createElement('div'); st.className='subtab-item'; st.setAttribute('data-mdtab','stats'); st.textContent='Статистика'; subtabs.appendChild(st); }
     mdPane.querySelector('.modal-subtabs .subtab-item[data-mdtab="home"]').classList.add('active');
@@ -49,7 +54,31 @@
       if(key==='home'){ homePane.style.display=''; awayPane.style.display='none'; specialsPane.style.display='none'; statsPane.style.display='none'; }
       else if(key==='away'){ homePane.style.display='none'; awayPane.style.display=''; specialsPane.style.display='none'; statsPane.style.display='none'; }
       else if(key==='specials'){ homePane.style.display='none'; awayPane.style.display='none'; specialsPane.style.display=''; try { if(window.MatchSpecials?.render) window.MatchSpecials.render(specialsPane, match); } catch(e){ console.error('specials render err', e); } statsPane.style.display='none'; }
-      else if(key==='stream'){ homePane.style.display='none'; awayPane.style.display='none'; specialsPane.style.display='none'; statsPane.style.display='none'; if(!streamPane && window.MatchStream?.setup){ streamPane=window.MatchStream.setup(mdPane, subtabs, match); } if(streamPane){ try { window.MatchStream.activate(streamPane, match); } catch(_){} } else { btn.classList.remove('active'); const homeTab=mdPane.querySelector('.modal-subtabs .subtab-item[data-mdtab="home"]'); if(homeTab){ homeTab.classList.add('active'); homePane.style.display=''; awayPane.style.display='none'; specialsPane.style.display='none'; statsPane.style.display='none'; } } }
+      else if(key==='stream'){
+        homePane.style.display='none'; awayPane.style.display='none'; specialsPane.style.display='none'; statsPane.style.display='none';
+        // Если есть новый модуль MatchStream
+        if(!streamPane && window.MatchStream?.setup){
+          try { streamPane = window.MatchStream.setup(mdPane, subtabs, match); } catch(_){}
+        }
+        // Иначе используем Streams
+        if(!streamPane && window.Streams && typeof window.Streams.setupMatchStream==='function'){
+          try { streamPane = window.Streams.setupMatchStream(mdPane, subtabs, match); } catch(_){}
+        }
+        if(streamPane){
+          try {
+            if(window.MatchStream && typeof window.MatchStream.activate==='function'){
+              window.MatchStream.activate(streamPane, match);
+            } else if(window.Streams && typeof window.Streams.onStreamTabActivated==='function') {
+              window.Streams.onStreamTabActivated(streamPane, match);
+            }
+          } catch(_){}
+        } else {
+          // Нет панели (ещё не подтянулась ссылка) — откат на вкладку home
+          btn.classList.remove('active');
+          const homeTab=mdPane.querySelector('.modal-subtabs .subtab-item[data-mdtab="home"]');
+          if(homeTab){ homeTab.classList.add('active'); homePane.style.display=''; awayPane.style.display='none'; specialsPane.style.display='none'; statsPane.style.display='none'; }
+        }
+      }
       else if(key==='stats'){ homePane.style.display='none'; awayPane.style.display='none'; specialsPane.style.display='none'; statsPane.style.display=''; try { if(window.MatchStats?.render) window.MatchStats.render(statsPane, match); } catch(e){ console.error('stats render err', e); } }
     }; });
   // Removed legacy subtabs stream delegation (handled above with MatchStream)
