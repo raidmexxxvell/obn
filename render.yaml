@@ -1,30 +1,32 @@
-# Liga Obninska - Render.com Configuration
-
-# Build settings
-build: pip install -r requirements.txt
-start: python app.py
-
-# Environment settings  
-env: python
-python_version: 3.13
-
-# Required environment variables
-environment:
-  FLASK_ENV: production
-  FLASK_DEBUG: false
-  ENABLE_SCHEDULER: 1
-  SYNC_INTERVAL_SEC: 600
-  
-# Optional environment variables (configure in Render dashboard):
-# DATABASE_URL - automatically set when PostgreSQL is connected
-# REDIS_URL - set when Redis is connected (optional)
-# SHEET_ID - Google Sheets ID for match schedule
-# GOOGLE_CREDENTIALS_JSON - Google service account credentials
-# SECRET_KEY - Flask secret key
-# ADMIN_SECRET - Admin panel secret
-
-# Health check
-health_check_path: /ping
-
-# Auto-deploy
 auto_deploy: true
+## Render Blueprint Configuration
+services:
+  - type: web
+    name: liga-obninska
+    env: python
+    pythonVersion: 3.12
+    plan: free
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: gunicorn -k eventlet -w 1 -b 0.0.0.0:$PORT wsgi:app
+    healthCheckPath: /ping
+    autoDeploy: true
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: FLASK_DEBUG
+        value: "false"
+      - key: ENABLE_SCHEDULER
+        value: "1"
+      - key: SYNC_INTERVAL_SEC
+        value: "600"
+      - key: SECRET_KEY
+        generateValue: true
+      # DATABASE_URL (PostgreSQL) и REDIS_URL задаются автоматически сервисами Render при привязке
+      # Добавьте вручную в панели: BOT_TOKEN, ADMIN_USER_ID, SHEET_ID (или SPREADSHEET_ID), GOOGLE_SHEETS_CREDENTIALS (или GOOGLE_CREDENTIALS_B64)
+
+# Быстрый откат на dev сервер (при проблемах с gunicorn):
+#   заменить startCommand на: python app.py
+
+# Примечание:
+#  - Python 3.13 пока может быть не полностью совместим с eventlet; 3.12 стабильнее.
+#  - Масштабирование: увеличьте workers (-w) после тестирования (обычно 1 для eventlet достаточно, он асинхронный).
