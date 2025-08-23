@@ -23,9 +23,9 @@ body.blb-theme {
     --muted: #8ba1c9;
     --accent1: linear-gradient(135deg, #3b82f6, #1e40af);
     --glass: rgba(59, 130, 246, 0.05);
-    --primary: #3b82f6;
-    --primary-dark: #1e40af;
-    --secondary: #60a5fa;
+    --primary: #eebb11;
+    --primary-dark: #af8e21;
+    --secondary: #8d6e2f;
     --success: #10b981;
     --danger: #ef4444;
     --light: #f8fafc;
