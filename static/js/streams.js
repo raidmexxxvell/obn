@@ -11,9 +11,12 @@
     // 'дождь__звезда__2025-08-16': { vkVideoId: '123456789_987654321', autoplay: 0 },
     // 'дождь__звезда__': { vkPostUrl: 'https://vk.com/video-123456_654321', autoplay: 0 },
   };
+  function normName(s){
+    try { return (s||'').toLowerCase().replace(/ё/g,'е').trim(); } catch(_) { return (s||''); }
+  }
   function makeKey(match){
-    const h = (match?.home||'').toLowerCase().trim();
-    const a = (match?.away||'').toLowerCase().trim();
+    const h = normName(match?.home||'');
+    const a = normName(match?.away||'');
     let d = '';
     try{
       const raw = match?.date ? String(match.date) : (match?.datetime ? String(match.datetime) : '');
@@ -323,42 +326,31 @@
   }
 
   function setupMatchStream(mdPane, subtabs, match){
-  // Инициализация вкладки трансляции для указанного матча
-    // Fallback сначала из локального реестра, затем запрос на сервер
-    let streamInfo = findStream(match);
+    // Всегда создаём вкладку и панель сразу (скелет), чтобы пользователь видел «Трансляция».
+    const pane = ensurePane(mdPane, match);
+    const tab = ensureTab(subtabs, match);
+    // Если локальный fallback
+    const streamInfo = findStream(match);
     if (streamInfo) {
-      const pane = ensurePane(mdPane, match);
-      ensureTab(subtabs, match);
       pane.__streamInfo = streamInfo;
-      
       return pane;
     }
-    // Асинхронно проверим у сервера и, если есть, добавим вкладку
+    // Асинхронный запрос к серверу
     const expectedKey = makeKey(match);
-    // Маркируем запрос последовательностью, чтобы игнорировать устаревшие ответы
     mdPane.__streamSetupSeq = (mdPane.__streamSetupSeq || 0) + 1;
     const reqId = mdPane.__streamSetupSeq;
     mdPane.__streamSetupKey = expectedKey;
     fetchServerStream(match).then((ans)=>{
-      if (!ans) return;
-      // Матч всё ещё тот же? (могли уйти на другой экран)
+      if (!ans) return; // оставляем скелет
       const currentKey = mdPane.getAttribute('data-match-key') || expectedKey;
-      if (currentKey !== expectedKey) {  return; }
-      if (mdPane.__streamSetupSeq !== reqId || mdPane.__streamSetupKey !== expectedKey) {  return; }
-      
-      const pane = ensurePane(mdPane, match);
-      const tab = ensureTab(subtabs, match);
+      if (currentKey !== expectedKey) return;
+      if (mdPane.__streamSetupSeq !== reqId || mdPane.__streamSetupKey !== expectedKey) return;
       pane.__streamInfo = ans;
-      // Если пользователь уже на вкладке «Трансляция», инициализируем немедленно
-      try {
-        const isActive = tab?.classList?.contains('active') || pane?.style?.display === '';
-        if (isActive && !pane.__inited) {
-          
-          buildStreamInto(pane, ans, match);
-        }
-      } catch(_) {}
+      if (tab?.classList?.contains('active')) {
+        try { buildStreamInto(pane, ans, match); } catch(_) {}
+      }
     }).catch(()=>{});
-    return null; // пока не знаем — не показываем вкладку
+    return pane;
   }
 
   function onStreamTabActivated(pane, match){

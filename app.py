@@ -7254,7 +7254,10 @@ def api_streams_get():
 
     # --- Входные параметры ---
     def _norm_team(v: str) -> str:
-        return ' '.join(v.strip().split()).lower()
+        try:
+            return ' '.join(v.strip().replace('ё','е').split()).lower()
+        except Exception:
+            return (v or '').strip().lower()
 
     home_raw = (request.args.get('home') or '').strip()
     away_raw = (request.args.get('away') or '').strip()
@@ -7270,30 +7273,30 @@ def api_streams_get():
     from sqlalchemy import func
 
     # --- 1. Немедленный возврат сохранённой ссылки ---
+    force_any = (request.args.get('any') == '1')
     try:
         db = get_db()
         try:
-            q = db.query(MatchStream).filter(
+            base_q = db.query(MatchStream).filter(
                 func.lower(MatchStream.home) == home,
-                func.lower(MatchStream.away) == away,
-                MatchStream.date == (date_str or None)
+                func.lower(MatchStream.away) == away
             )
-            row = q.first()
+            row = base_q.filter(MatchStream.date == (date_str or None)).first()
             if not row:
-                # Последняя по обновлению запись по парам команд (если нет даты или различается)
-                row_latest = db.query(MatchStream).filter(
-                    func.lower(MatchStream.home) == home,
-                    func.lower(MatchStream.away) == away
-                ).order_by(MatchStream.updated_at.desc()).first()
+                # Берём самую свежую вне зависимости от даты
+                row_latest = base_q.order_by(MatchStream.updated_at.desc()).first()
                 if row_latest:
-                    try:
-                        if row_latest.updated_at and (datetime.now(timezone.utc) - row_latest.updated_at) <= timedelta(hours=48):
-                            row = row_latest
-                    except Exception:
+                    if force_any:
                         row = row_latest
+                    else:
+                        try:
+                            if row_latest.updated_at and (datetime.now(timezone.utc) - row_latest.updated_at) <= timedelta(hours=48):
+                                row = row_latest
+                        except Exception:
+                            row = row_latest
             if row and ((row.vk_video_id and row.vk_video_id.strip()) or (row.vk_post_url and row.vk_post_url.strip())):
                 try:
-                    app.logger.info(f"streams/get immediate link id='{row.vk_video_id}' url='{row.vk_post_url}' home='{home}' away='{away}' date='{date_str}'")
+                    app.logger.info(f"streams/get immediate link id='{row.vk_video_id}' url='{row.vk_post_url}' home='{home}' away='{away}' date='{date_str}' force_any={force_any}")
                 except Exception:
                     pass
                 return jsonify({'available': True, 'vkVideoId': row.vk_video_id or '', 'vkPostUrl': row.vk_post_url or ''})
