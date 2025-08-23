@@ -5903,11 +5903,20 @@ def api_betting_tours():
 @rate_limit(max_requests=30, time_window=60)  # 30 запросов за минуту для просмотра ставок
 def api_betting_my_bets():
     """Список ставок пользователя (последние 50)."""
+    import flask
     try:
-        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
-        if not parsed or not parsed.get('user'):
-            return jsonify({'error': 'Недействительные данные'}), 401
-        user_id = int(parsed['user'].get('id'))
+        # Декоратор require_telegram_auth уже сохранил auth_data в flask.g
+        if hasattr(flask.g, 'auth_data') and flask.g.auth_data.get('user'):
+            user_id = int(flask.g.auth_data['user'].get('id'))
+        else:
+            # Fallback: попытка извлечения initData (на случай если маршрут вызван без декоратора в будущем)
+            init_data = (request.form.get('initData') or request.form.get('init_data') or
+                         (request.get_json(silent=True) or {}).get('initData') if request.is_json else None or
+                         request.args.get('initData') or request.headers.get('X-Telegram-Init-Data') or '')
+            parsed = parse_and_verify_telegram_init_data(init_data or '')
+            if not parsed or not parsed.get('user'):
+                return jsonify({'error': 'Недействительные данные'}), 401
+            user_id = int(parsed['user'].get('id'))
         if SessionLocal is None:
             return jsonify({'error': 'БД недоступна'}), 500
         db: Session = get_db()
