@@ -5970,19 +5970,42 @@ def api_betting_my_bets():
         try:
             rows = db.query(Bet).filter(Bet.user_id == user_id).order_by(Bet.placed_at.desc()).limit(50).all()
             data = []
-            def _present_selection(market, sel_val):
-                if market=='totals' and sel_val:
-                    if '_' in sel_val:  # старый формат
-                        try:
-                            s,l = sel_val.split('_',1)
-                            return f"{'Over' if s=='over' else 'Under'} {l}"
-                        except Exception:
-                            return sel_val
-                    if sel_val[0] in ('O','U') and sel_val[1:] in ('35','45','55'):
-                        mapping={'35':'3.5','45':'4.5','55':'5.5'}
-                        return f"{'Over' if sel_val[0]=='O' else 'Under'} {mapping.get(sel_val[1:], sel_val[1:])}"
-                return sel_val
+
+            def _decode_totals(sel_val: str):
+                if not sel_val:
+                    return None, None
+                # Возможные форматы: over_3.5 / under_4.5 или O35 / U45
+                if '_' in sel_val:
+                    try:
+                        side, line_str = sel_val.split('_', 1)
+                        return side, line_str
+                    except Exception:
+                        return None, None
+                if sel_val[0] in ('O','U') and sel_val[1:].isdigit():
+                    mapping = {'35': '3.5', '45': '4.5', '55': '5.5'}
+                    return ('over' if sel_val[0]=='O' else 'under'), mapping.get(sel_val[1:], sel_val[1:])
+                return None, None
+
+            def _present(market, selection):
+                market_display = {
+                    '1x2': 'Победа/Ничья',
+                    'totals': 'Тотал',
+                    'penalty': 'Пенальти',
+                    'redcard': 'Красная карточка'
+                }.get(market, market)
+                selection_display = selection
+                if market == '1x2':
+                    selection_display = {'home':'П1','draw':'Х','away':'П2'}.get(selection, selection)
+                elif market == 'totals':
+                    side, line = _decode_totals(selection)
+                    if side and line:
+                        selection_display = f"Больше {line}" if side=='over' else f"Меньше {line}"
+                elif market in ('penalty','redcard'):
+                    selection_display = {'yes':'Да','no':'Нет'}.get(selection, selection)
+                return market_display, selection_display
+
             for b in rows:
+                mdisp, sdisp = _present(b.market, b.selection)
                 data.append({
                     'id': b.id,
                     'tour': b.tour,
@@ -5990,7 +6013,9 @@ def api_betting_my_bets():
                     'away': b.away,
                     'datetime': (b.match_datetime.isoformat() if b.match_datetime else ''),
                     'market': b.market,
-                    'selection': _present_selection(b.market, b.selection),
+                    'market_display': mdisp,
+                    'selection': b.selection,  # сырое значение (для обратной совместимости)
+                    'selection_display': sdisp,
                     'odds': b.odds,
                     'stake': b.stake,
                     'status': b.status,
@@ -6731,14 +6756,22 @@ def api_players_scorers():
         db: Session = get_db()
         try:
             from collections import defaultdict
-            stats = defaultdict(lambda: {'player': '', 'goals': 0, 'assists': 0})
+            stats = defaultdict(lambda: {'player': '', 'goals': 0, 'assists': 0, 'matches': set()})
             rows = db.query(MatchPlayerEvent).filter(MatchPlayerEvent.type.in_(['goal','assist'])).all()
             for r in rows:
-                key = r.player.strip()
+                key = (r.player or '').strip()
                 if not key:
                     continue
                 rec = stats[key]
                 rec['player'] = key
+                # match key для подсчёта сыгранных матчей
+                try:
+                    dkey = ''
+                    # попытка извлечь дату/время матча из расписания (не храним тут напрямую) опускается — используем home+away
+                    dkey = f"{(r.home or '').lower().strip()}__{(r.away or '').lower().strip()}"
+                except Exception:
+                    dkey = f"{(r.home or '')}__{(r.away or '')}"
+                rec['matches'].add(dkey)
                 if r.type == 'goal':
                     rec['goals'] += 1
                 elif r.type == 'assist':
@@ -6751,9 +6784,9 @@ def api_players_scorers():
                     'goals': rec['goals'],
                     'assists': rec['assists'],
                     'total_points': total_points,
-                    'matches_played': None  # неизвестно из legacy
+                    'matches_played': len(rec['matches'])
                 })
-            scored.sort(key=lambda x: (-x['total_points'], x['matches_played'] or 0, -x['goals']))
+            scored.sort(key=lambda x: (-x['total_points'], x['matches_played'], -x['goals']))
             if limit:
                 scored = scored[:limit]
             # добавим rank
@@ -8288,6 +8321,32 @@ def api_match_settle():
                         _snapshot_set(db, 'results', payload)
             except Exception:
                 pass
+            # Автоматически зафиксируем спецрынки как 'Нет', если админ их не установил
+            try:
+                spec_row = db.query(MatchSpecials).filter(MatchSpecials.home==home, MatchSpecials.away==away).first()
+                auto_fixed = False
+                if not spec_row:
+                    spec_row = MatchSpecials(home=home, away=away)
+                    db.add(spec_row)
+                    # оба None => выставим 0 (нет события)
+                    spec_row.penalty_yes = 0
+                    spec_row.redcard_yes = 0
+                    auto_fixed = True
+                else:
+                    # Если отдельный расчёт не производился (поля None) — устанавливаем 0
+                    if spec_row.penalty_yes is None:
+                        spec_row.penalty_yes = 0
+                        auto_fixed = True
+                    if spec_row.redcard_yes is None:
+                        spec_row.redcard_yes = 0
+                        auto_fixed = True
+                if auto_fixed:
+                    spec_row.updated_at = datetime.now(timezone.utc)
+                    db.flush()
+            except Exception as _spec_auto_err:
+                try: app.logger.warning(f"auto specials fix failed: {_spec_auto_err}")
+                except Exception: pass
+
             open_bets = db.query(Bet).filter(Bet.status=='open', Bet.home==home, Bet.away==away).all()
             changed = 0
             won_cnt = 0

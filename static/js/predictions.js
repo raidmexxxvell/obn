@@ -60,8 +60,10 @@
             const header = document.createElement('div'); header.className = 'match-header';
             const dtText = formatDateTime(m.date, m.time);
             const span = document.createElement('span'); span.textContent = dtText; header.appendChild(span);
-            // LIVE badge
-            if (isLiveNow(m)) {
+            // LIVE badge (не показываем если матч помечен завершённым локально)
+            const finStore = (window.__FINISHED_MATCHES = window.__FINISHED_MATCHES || {});
+            const mkKey = (mm)=>{ try { return `${(mm.home||'').toLowerCase().trim()}__${(mm.away||'').toLowerCase().trim()}__${(mm.date||mm.datetime||'').toString().slice(0,10)}`; } catch(_) { return `${(mm.home||'')}__${(mm.away||'')}`; } };
+            if (isLiveNow(m) && !finStore[mkKey(m)]) {
               const live = document.createElement('span'); live.className = 'live-badge';
               const dot = document.createElement('span'); dot.className = 'live-dot';
               const lbl = document.createElement('span'); lbl.textContent = 'Матч идет';
@@ -233,7 +235,11 @@
     }
 
     function openStakeModal(tour, m, selection, market='1x2', line=null) {
-      const stake = prompt(`Ставка на ${m.home} vs ${m.away}. Исход: ${selection.toUpperCase()}. Введите сумму:`,'100');
+      let selText = selection;
+      if(market==='1x2') selText = {'home':'П1','draw':'Х','away':'П2'}[selection]||selection;
+      else if(market==='totals') selText = (selection.startsWith('over')||selection.startsWith('under')) ? (selection.startsWith('over')?`Больше ${selection.split('_')[1]}`:`Меньше ${selection.split('_')[1]}`) : selText;
+      else if(market==='penalty' || market==='redcard') selText = {'yes':'Да','no':'Нет'}[selection]||selection;
+      const stake = prompt(`Ставка на ${m.home} vs ${m.away}. Исход: ${selText}. Введите сумму:`,'100');
       if (!stake) return Promise.resolve();
       const amt = parseInt(String(stake).replace(/[^0-9]/g,''), 10) || 0;
       if (amt <= 0) return Promise.resolve();
@@ -279,7 +285,10 @@
           const title = document.createElement('div'); title.className = 'bet-title'; title.textContent = `${b.home} vs ${b.away}`;
           const when = document.createElement('div'); when.className = 'bet-when'; when.textContent = b.datetime ? formatDateTime(b.datetime) : '';
           top.append(title, when);
-          const mid = document.createElement('div'); mid.className = 'bet-mid'; mid.textContent = `Исход: ${b.selection.toUpperCase()} | Кф: ${b.odds || '-'} | Ставка: ${b.stake}`;
+          // Локализованный вывод исхода
+          const selDisp = b.selection_display || b.selection;
+          const marketDisp = b.market_display || 'Исход';
+          const mid = document.createElement('div'); mid.className = 'bet-mid'; mid.textContent = `${marketDisp}: ${selDisp} | Кф: ${b.odds || '-'} | Ставка: ${b.stake}`;
           const st = document.createElement('div'); 
           st.className = `bet-status ${b.status}`;
           

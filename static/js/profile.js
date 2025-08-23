@@ -648,6 +648,15 @@
     // - обновляет текст только если новый ts >= текущего
     function setUpdatedLabelSafely(labelEl, newIso) { try { window.League?.setUpdatedLabelSafely?.(labelEl, newIso); } catch(_) {} }
 
+    // Автообновление таблицы и расписания после завершения матча
+    try {
+        document.addEventListener('app:match-finished', () => {
+            try { window.loadLeagueTable?.(); } catch(_) {}
+            try { window.loadSchedule?.(); } catch(_) {}
+            try { window.loadResults?.(); } catch(_) {}
+        });
+    } catch(_) {}
+
     let _statsLoading = false;
     function loadStatsTable() {
         if (_statsLoading) return;

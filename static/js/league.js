@@ -193,7 +193,9 @@
   let isLive = false;
   try { if (window.MatchUtils) { isLive = window.MatchUtils.isLiveNow(m); } } catch(_) {}
       const headerText = document.createElement('span'); headerText.textContent = `${dateStr}${timeStr ? ' ' + timeStr : ''}`; header.appendChild(headerText);
-  if (isLive) { const live = document.createElement('span'); live.className='live-badge'; const dot=document.createElement('span'); dot.className='live-dot'; const lbl=document.createElement('span'); lbl.textContent='Матч идет'; live.append(dot,lbl); header.appendChild(live); }
+  const finStore=(window.__FINISHED_MATCHES=window.__FINISHED_MATCHES||{});
+  const mkKey=(mm)=>{ try { return `${(mm.home||'').toLowerCase().trim()}__${(mm.away||'').toLowerCase().trim()}__${(mm.date||mm.datetime||'').toString().slice(0,10)}`; } catch(_) { return `${(mm.home||'')}__${(mm.away||'')}`; } };
+  if (isLive && !finStore[mkKey(m)]) { const live = document.createElement('span'); live.className='live-badge'; const dot=document.createElement('span'); dot.className='live-dot'; const lbl=document.createElement('span'); lbl.textContent='Матч идет'; live.append(dot,lbl); header.appendChild(live); }
       card.appendChild(header);
 
       const center = document.createElement('div'); center.className='match-center';
@@ -211,7 +213,7 @@
 
       // Если лайв — подгрузим текущий счёт
       try {
-        if (isLive) {
+        if (isLive && !finStore[mkKey(m)]) {
           score.textContent = '0 : 0';
           const fetchScore = async () => {
             try {
@@ -221,6 +223,9 @@
             } catch(_) {}
           };
           fetchScore();
+        } else if (finStore[mkKey(m)]) {
+          // Попробуем сразу показать финальный счёт (однократный fetch)
+          (async()=>{ try { const r=await fetch(`/api/match/score/get?home=${encodeURIComponent(m.home||'')}&away=${encodeURIComponent(m.away||'')}`); const d=await r.json(); if (typeof d?.score_home==='number' && typeof d?.score_away==='number') score.textContent=`${Number(d.score_home)} : ${Number(d.score_away)}`; } catch(_){} })();
         }
       } catch(_) {}
 
