@@ -24,18 +24,11 @@
         slide.addEventListener('click', () => {
           try {
             if (s.action === 'BLB') {
-              // Используем анимацию перехода лиг, если доступна
-              if (window.selectBLBLeague) {
-                window.selectBLBLeague(true);
-              } else {
-                window.__ACTIVE_LEAGUE__ = 'BLB';
-                if (window.setActiveLeague) { try { window.setActiveLeague('BLB'); } catch(_) {} }
-                document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-                const navUfo = document.querySelector('.nav-item[data-tab="ufo"]');
-                if (navUfo) navUfo.classList.add('active');
-                ['tab-home','tab-ufo','tab-predictions','tab-leaderboard','tab-shop','tab-admin']
-                  .forEach(id => { const el = document.getElementById(id); if (el) el.style.display = (id==='tab-ufo'?'':'none'); });
-              }
+              try {
+                if (window.selectBLBLeague) { window.selectBLBLeague(true); }
+                else if (window.playLeagueTransition) { window.playLeagueTransition('BLB'); }
+                else { if (window.setActiveLeague) window.setActiveLeague('BLB'); }
+              } catch(_){ }
             }
           } catch(_) {}
         });

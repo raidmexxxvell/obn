@@ -1127,7 +1127,7 @@
         const act = getActiveLeague();
         const other = act === 'BLB' ? 'UFO' : 'BLB';
         const ico = other === 'UFO' ? '🛸' : '❔';
-        const title = other === 'UFO' ? 'НЛО' : 'БЛБ';
+        const title = other === 'UFO' ? 'НЛО' : 'ВАША ЛИГА';
         // Рендерим одну иконку как продолжение нижнего меню
         overlay.innerHTML = `
             <div class="league-icons" style="display:flex; align-items:center; justify-content:center; background: rgba(10,18,40,0.96); padding:6px 0; border-radius: 10px 10px 0 0; box-shadow: 0 6px 18px rgba(0,0,0,0.4);">
@@ -1293,7 +1293,7 @@
                 }, 1000);
             } else {
                 img.src = '/static/img/logo.png';
-                title.textContent = 'ОБНИНСКСКАЯ ЛИГА';
+                title.textContent = 'ОБНИНСКАЯ ЛИГА';
                 layer.style.display = 'flex';
                 // Используем палитру стартовой заставки (splash): var(--dark)->var(--darker)
                 // Берём переменные с :root (а не body), чтобы не подмешивалась тема BLB
@@ -1358,7 +1358,7 @@
         };
         inner.append(
             mkTile('UFO', '🛸', 'НЛО'),
-            mkTile('BLB', '❔', 'БЛБ')
+            mkTile('BLB', '❔', 'ВАША ЛИГА')
         );
         shelf.appendChild(inner);
         document.body.appendChild(shelf);

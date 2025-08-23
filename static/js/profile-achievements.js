@@ -58,7 +58,11 @@
       const img=document.createElement('img'); img.alt=a.name||''; setAchievementIcon(img,a);
       const name=document.createElement('div'); name.className='badge-name'; name.textContent=a.name||'';
       const req=document.createElement('div'); req.className='badge-requirements'; req.textContent=descFor(a);
-      card.append(img,name,req); badgesContainer.appendChild(card);
+      // Прогресс
+      const cur = Number(a.value||0); const target = Number(a.target||0)|| (a.next_target||0) || 0; const pct = target? Math.min(100, Math.round(cur*100/target)) : 0;
+      const prog=document.createElement('div'); prog.className='achievement-progress'; const inner=document.createElement('div'); inner.className='achievement-progress-inner'; inner.style.width=pct+'%'; prog.appendChild(inner);
+      const meta=document.createElement('div'); meta.className='badge-meta'; meta.textContent = target? `${cur} / ${target}${a.next_target? ' (следующая цель: '+a.next_target+')':''}` : `${cur}`;
+      card.append(img,name,req,prog,meta); badgesContainer.appendChild(card);
     });
   }
   function fetchAchievements(){

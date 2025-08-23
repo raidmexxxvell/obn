@@ -37,11 +37,15 @@ body.theme-ufo .profile-header-card { background: var(--ufo-card); }
 .profile-header-card .profile-avatar { margin:0; width:72px; height:72px; box-shadow:none; border:2px solid rgba(255,255,255,0.15); }
 .profile-mini-stats { display:flex; gap:10px; margin-top:8px; }
 .profile-mini-stats .stat-card { flex:1; padding:10px 8px; }
-/* Скрываем старую раскладку */
-.profile-header { display:none !important; }
-.profile-stats { display:none !important; }
+/* Удаляем скрытие старой раскладки (возврат) */
+/* .profile-header { display:none !important; } */
+/* .profile-stats { display:none !important; } */
 
-/* splash-стили перенесены в splash.css */
+/* Кнопки темы UFO */
+body.theme-ufo .details-btn, body.theme-ufo .bet-btn, body.theme-ufo .share-btn, body.theme-ufo .refresh-btn, body.theme-ufo .checkin-button, body.theme-ufo .back-btn, body.theme-ufo .btn-primary { background: var(--ufo-accent1); border:none; color:#fff; }
+body.theme-ufo .details-btn:hover, body.theme-ufo .bet-btn:hover, body.theme-ufo .share-btn:hover, body.theme-ufo .refresh-btn:hover, body.theme-ufo .checkin-button:hover, body.theme-ufo .back-btn:hover { filter: brightness(1.05); }
+body.theme-ufo .subtab-item { background: var(--ufo-card); }
+body.theme-ufo .subtab-item.active { color:#fff; }
 
 /* --- ОСНОВНОЕ ПРИЛОЖЕНИЕ --- */
 body {
@@ -1143,3 +1147,8 @@ body.theme-blb .share-btn {
     border-radius: 999px;
     font-size: 12px;
 }
+
+/* Прогресс достижений */
+.achievement-progress { width:100%; height:6px; background:rgba(255,255,255,0.08); border-radius:4px; margin-top:6px; overflow:hidden; }
+.achievement-progress-inner { height:100%; background:var(--ufo-accent1); width:0; transition:width .6s ease; }
+.badge-meta { font-size:10px; color:var(--ufo-muted); margin-top:4px; }

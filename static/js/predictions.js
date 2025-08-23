@@ -280,7 +280,13 @@
           const when = document.createElement('div'); when.className = 'bet-when'; when.textContent = b.datetime ? formatDateTime(b.datetime) : '';
           top.append(title, when);
           const mid = document.createElement('div'); mid.className = 'bet-mid'; mid.textContent = `Исход: ${b.selection.toUpperCase()} | Кф: ${b.odds || '-'} | Ставка: ${b.stake}`;
-          const st = document.createElement('div'); st.className = `bet-status ${b.status}`; st.textContent = b.status;
+          const st = document.createElement('div'); st.className = `bet-status ${b.status}`;
+          const map = { open: 'Открыта', won: 'Выигрыш', lost: 'Проигрыш', refunded: 'Возврат' };
+          let label = map[b.status] || b.status;
+          if (b.status === 'won' && b.stake && b.odds) {
+            try { const gain = Math.round(Number(b.stake) * Number(b.odds)); label += ` +${gain}`; } catch(_) {}
+          }
+          st.textContent = label;
           card.append(top, mid, st);
           list.appendChild(card);
         });
