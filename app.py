@@ -157,39 +157,37 @@ app = Flask(__name__, static_folder='static', template_folder='templates')
 # Инициализация системы безопасности и мониторинга (Фаза 3)
 if SECURITY_SYSTEM_AVAILABLE:
     try:
-        # Загружаем конфигурацию
+        # Конфигурация
         app.config.from_object(Config)
-        
-        # Инициализация компонентов безопасности
+
+        # Компоненты безопасности
         input_validator = InputValidator()
-        telegram_security = TelegramSecurity(app.config.get('BOT_TOKEN', ''))
+        telegram_security = TelegramSecurity()
         rate_limiter = RateLimiter()
         sql_protection = SQLInjectionPrevention()
-        
-        # Инициализация системы мониторинга
+
+        # Мониторинг
         performance_metrics = PerformanceMetrics()
         health_check = HealthCheck()
-        
-        # Регистрация middleware
+
+        # Middleware
         SecurityMiddleware(app, input_validator, telegram_security, sql_protection)
         PerformanceMiddleware(app, performance_metrics)
         ErrorHandlingMiddleware(app)
-        
-        # Регистрация blueprint для мониторинга
+
+        # Blueprints
         app.register_blueprint(monitoring_bp, url_prefix='/api/monitoring')
-        
-        # Регистрация blueprint для тестирования безопасности
         app.register_blueprint(security_test_bp, url_prefix='/api/security-test')
-        
-        # Сохраняем ссылки на компоненты в конфигурации приложения
-        app.config['input_validator'] = input_validator
-        app.config['telegram_security'] = telegram_security
-        app.config['rate_limiter'] = rate_limiter
-        app.config['performance_metrics'] = performance_metrics
-        app.config['health_check'] = health_check
-        
+
+        # Ссылки в конфиге
+        app.config.update(
+            input_validator=input_validator,
+            telegram_security=telegram_security,
+            rate_limiter=rate_limiter,
+            performance_metrics=performance_metrics,
+            health_check=health_check,
+        )
         print("[INFO] Phase 3: Security and monitoring middleware activated")
-        
     except Exception as e:
         print(f"[ERROR] Failed to initialize Phase 3 security system: {e}")
         SECURITY_SYSTEM_AVAILABLE = False
@@ -723,7 +721,15 @@ def _pseudo_user_id() -> int:
 @app.route('/api/betting/place', methods=['POST'])
 @require_telegram_auth
 @rate_limit(max_requests=5, time_window=60)  # 5 ставок за минуту
-@validate_input(['initData', 'tour', 'home', 'away', 'market', 'selection', 'stake'])
+@validate_input(
+    initData={'type':'string','required':True,'min_length':1},
+    tour={'type':'string','required':True,'min_length':1},
+    home={'type':'team_name','required':True},
+    away={'type':'team_name','required':True},
+    market={'type':'string','required':True,'min_length':1},
+    selection={'type':'string','required':True,'min_length':1},
+    stake='int'
+)
 def api_betting_place():
     """Размещает ставку. Маркеты: 
     - 1X2: selection in ['home','draw','away']
@@ -1292,7 +1298,10 @@ def _normalize_order_items(raw_items) -> list[dict]:
 @app.route('/api/shop/checkout', methods=['POST'])
 @require_telegram_auth
 @rate_limit(max_requests=10, time_window=300)  # 10 покупок за 5 минут
-@validate_input(['initData', 'items'])
+@validate_input(
+    initData={'type':'string','required':True,'min_length':1},
+    items={'type':'string','required':True,'min_length':1}
+)
 def api_shop_checkout():
     """
     Оформление заказа в магазине. Поля: initData (Telegram), items (JSON-массив [{id|code, qty}]).
@@ -1437,7 +1446,7 @@ def api_shop_checkout():
 @app.route('/api/admin/orders/<int:order_id>/status', methods=['POST'])
 @require_admin
 @rate_limit(max_requests=20, time_window=60)
-@validate_input(['status'])
+@validate_input(status={'type':'string','required':True,'min_length':1})
 def api_admin_order_set_status(order_id: int):
     """Админ: смена статуса заказа. Поля: initData, status in ['new','accepted','done','cancelled'].
     При переводе в 'cancelled' делаем возврат кредитов, если ранее не был отменен.
@@ -7539,7 +7548,7 @@ def test_themes():
 @app.route('/admin/init-database', methods=['POST'])
 @require_admin
 @rate_limit(max_requests=5, time_window=300)  # Строгое ограничение для опасных операций
-@validate_input(['action'])
+@validate_input(action={'type':'string','required':True,'min_length':1})
 def admin_init_database():
     """Админский роут для инициализации БД через веб-интерфейс"""
     try:
@@ -8766,10 +8775,13 @@ if __name__ == '__main__':
             print(f"[WARN] Self-ping thread not started: {_e}")
     port = int(os.environ.get('PORT', 5000))
     debug_mode = os.environ.get('FLASK_DEBUG', '').lower() in ('1', 'true', 'yes')
-    # Предпочтительно использовать socketio.run с eventlet, если установлен
-    try:
-        import eventlet  # noqa: F401
-        from flask_socketio import SocketIO  # noqa: F401
-        socketio.run(app, host='0.0.0.0', port=port, debug=debug_mode)
-    except Exception:
+    # Если есть socketio объект – используем его, иначе стандартный Flask
+    _socketio = globals().get('socketio')
+    if _socketio is not None:
+        try:
+            _socketio.run(app, host='0.0.0.0', port=port, debug=debug_mode)
+        except Exception as _e:
+            print(f"[WARN] socketio.run failed, fallback to app.run: {_e}")
+            app.run(host='0.0.0.0', port=port, debug=debug_mode)
+    else:
         app.run(host='0.0.0.0', port=port, debug=debug_mode)
