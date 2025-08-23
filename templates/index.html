@@ -12,7 +12,37 @@
     <!-- WebSocket отключён (можно вернуть, раскомментировав) -->
     <!-- <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script> -->
     <script>window.__WEBSOCKETS_ENABLED__ = false; // отключено для диагностики мобильной загрузки</script>
-    <script src="/static/js/error-overlay.js"></script>
+        {# Подключаем оверлей ошибок только администратору #}
+        {% if admin_user_id %}
+        <script>
+            (function(){
+                const ADMIN_ID = '{{ admin_user_id }}';
+                // Попытка взять user id из Telegram WebApp initData (доступно после загрузки sdk)
+                function loadOverlay(){
+                    try {
+                        const tg = window.Telegram && window.Telegram.WebApp;
+                        let uid = null;
+                        if (tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id){
+                            uid = String(tg.initDataUnsafe.user.id);
+                        }
+                        // Дополнительный fallback: атрибут body data-user-id (если позже добавите)
+                        if (!uid){
+                            try { uid = document.body.getAttribute('data-user-id'); } catch(_){ uid=null; }
+                        }
+                        if (uid && ADMIN_ID && uid === ADMIN_ID){
+                            var s=document.createElement('script');
+                            s.src='/static/js/error-overlay.js?v={{ static_version }}';
+                            document.head.appendChild(s);
+                        }
+                    } catch(_){ /* silent */ }
+                }
+                // Telegram SDK может загрузиться чуть позже — пробуем несколько попыток
+                let tries=0; const timer=setInterval(()=>{ tries++; loadOverlay(); if(tries>20) clearInterval(timer); }, 300);
+                // Также пробуем сразу
+                loadOverlay();
+            })();
+        </script>
+        {% endif %}
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="stylesheet" href="/static/css/splash.css">
     <link rel="stylesheet" href="/static/css/blb.css">
