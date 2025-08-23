@@ -15,365 +15,63 @@
         
         .admin-section {
             background: white;
-            border-radius: 12px;
-            padding: 24px;
-            margin-bottom: 24px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-        }
-        
-        .admin-section h2 {
-            margin: 0 0 20px 0;
-            color: #333;
-            border-bottom: 2px solid #1976d2;
-            padding-bottom: 8px;
-        }
-        
-        .form-group {
-            margin-bottom: 16px;
-        }
-        
-        .form-group label {
-            display: block;
-            margin-bottom: 6px;
-            font-weight: 600;
-            color: #333;
-        }
-        
-        .form-group input, .form-group select, .form-group textarea {
-            width: 100%;
-            padding: 10px 12px;
-            border: 1px solid #ddd;
-            border-radius: 6px;
-            font-size: 14px;
-        }
-        
-        .form-group textarea {
-            resize: vertical;
-            min-height: 80px;
-        }
-        
-        .form-row {
-            display: flex;
-            gap: 16px;
-        }
-        
-        .form-row .form-group {
-            flex: 1;
-        }
-        
-        .event-buttons {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-        
-        .event-btn {
-            padding: 8px 16px;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-weight: 500;
-            transition: all 0.2s ease;
-        }
-        
-        .event-btn.goal { background: #4caf50; color: white; }
-        .event-btn.assist { background: #2196f3; color: white; }
-        .event-btn.yellow { background: #ff9800; color: white; }
-        .event-btn.red { background: #f44336; color: white; }
-        
-        .current-events {
-            max-height: 300px;
-            overflow-y: auto;
-            border: 1px solid #ddd;
-            border-radius: 6px;
-            padding: 12px;
-            background: #f8f9fa;
-        }
-        
-        .alert {
-            padding: 12px 16px;
-            border-radius: 6px;
-            margin-bottom: 16px;
-        }
-        
-        .alert-success {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-        
-        .alert-error {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-        
-        .lineup-section {
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            padding: 16px;
-            margin-bottom: 16px;
-        }
-        
-        .lineup-player {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 8px 12px;
-            margin-bottom: 6px;
-            background: #f8f9fa;
-            border-radius: 6px;
-            border-left: 4px solid #1976d2;
-        }
-        
-        .lineup-player.captain {
-            border-left-color: #ff9800;
-        }
-        
-        .player-info {
-            display: flex;
-            gap: 12px;
-            align-items: center;
-        }
-        
-        .jersey-number {
-            background: #1976d2;
-            color: white;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-weight: bold;
-            min-width: 30px;
-            text-align: center;
-        }
-        
-        .add-player-form {
-            display: flex;
-            gap: 8px;
-            align-items: center;
-            padding: 12px;
-            background: #f1f3f4;
-            border-radius: 6px;
-            margin-top: 12px;
-        }
-        
-        .add-player-form select,
-        .add-player-form input {
-            flex: 1;
-            min-width: 120px;
-        }
-        
-        .remove-player-btn {
-            background: #f44336;
-            color: white;
-            border: none;
-            padding: 4px 8px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 12px;
-        }
-    </style>
-</head>
-<body>
-    <div class="admin-container">
-        <h1>Админ панель - Liga Obninska</h1>
-        
-        <!-- Алерты -->
-        <div id="alerts"></div>
-        
-        <!-- Управление составами команд -->
-        <div class="admin-section">
-            <h2>Составы команд на матч</h2>
-            
-            <div class="form-group">
-                <label for="lineup-match-select">Выберите матч для составов:</label>
-                <select id="lineup-match-select">
-                    <option value="">Загрузка матчей...</option>
-                </select>
-            </div>
-            
-            <div id="lineup-container" style="display: none;">
-                <div class="form-row">
+            <div class="admin-container">
+                <h1>Массовый импорт составов</h1>
+                <div id="alerts"></div>
+                <div class="admin-section">
                     <div class="form-group">
-                        <h3 id="home-team-name">Команда дома</h3>
-                        <div class="lineup-section">
-                            <h4>Основной состав</h4>
-                            <div id="home-starting-eleven">
-                                <!-- Основной состав дома -->
-                            </div>
-                            <h4>Запасные</h4>
-                            <div id="home-substitutes">
-                                <!-- Запасные дома -->
-                            </div>
-                            <div class="add-player-form">
-                                <select id="add-home-player">
-                                    <option value="">Добавить игрока</option>
-                                </select>
-                                <input type="number" id="add-home-jersey" placeholder="Номер" min="1" max="99">
-                                <select id="add-home-position">
-                                    <option value="starting_eleven">Основа</option>
-                                    <option value="substitute">Запасной</option>
-                                </select>
-                                <button onclick="addPlayerToLineup('home')">Добавить</button>
-                            </div>
+                        <label for="bulk-lineup-match">Матч:</label>
+                        <select id="bulk-lineup-match"><option value="">Загрузка матчей...</option></select>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group" style="flex:1;">
+                            <label for="bulk-home">Состав (дом) – по одному игроку в строке (номер + имя, капитан: (C) или *):</label>
+                            <textarea id="bulk-home" placeholder="1 Иванов Иван (C)&#10;10 Петров&#10;7 Сидоров *" style="min-height:160px;"></textarea>
+                        </div>
+                        <div class="form-group" style="flex:1;">
+                            <label for="bulk-away">Состав (гости):</label>
+                            <textarea id="bulk-away" placeholder="9 Смирнов&#10;5 Орлов&#10;11 Кузнецов" style="min-height:160px;"></textarea>
                         </div>
                     </div>
-                    
-                    <div class="form-group">
-                        <h3 id="away-team-name">Команда в гостях</h3>
-                        <div class="lineup-section">
-                            <h4>Основной состав</h4>
-                            <div id="away-starting-eleven">
-                                <!-- Основной состав гостей -->
-                            </div>
-                            <h4>Запасные</h4>
-                            <div id="away-substitutes">
-                                <!-- Запасные гостей -->
-                            </div>
-                            <div class="add-player-form">
-                                <select id="add-away-player">
-                                    <option value="">Добавить игрока</option>
-                                </select>
-                                <input type="number" id="add-away-jersey" placeholder="Номер" min="1" max="99">
-                                <select id="add-away-position">
-                                    <option value="starting_eleven">Основа</option>
-                                    <option value="substitute">Запасной</option>
-                                </select>
-                                <button onclick="addPlayerToLineup('away')">Добавить</button>
-                            </div>
+                    <div class="form-row">
+                        <div class="form-group" style="max-width:260px;">
+                            <label for="bulk-mode">Режим:</label>
+                            <select id="bulk-mode">
+                                <option value="replace">Заменить существующий</option>
+                                <option value="append">Добавить (без удаления)</option>
+                            </select>
                         </div>
                     </div>
+                    <button onclick="bulkSetLineups()">Импортировать составы</button>
+                    <small>Первые 11 строк каждой стороны будут отмечены как "Основа" автоматически.</small>
                 </div>
             </div>
-        </div>
-
-        <!-- Управление счетом матча -->
-        <div class="admin-section">
-            <h2>Управление счетом матча</h2>
-            
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="match-select">Выберите матч:</label>
                     <select id="match-select">
-                        <option value="">Загрузка матчей...</option>
-                    </select>
-                </div>
-            </div>
-            
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="home-score">Счет хозяев:</label>
-                    <input type="number" id="home-score" min="0" value="0">
-                </div>
-                <div class="form-group">
-                    <label for="away-score">Счет гостей:</label>
-                    <input type="number" id="away-score" min="0" value="0">
-                </div>
-            </div>
-            
-            <button class="btn btn-primary" onclick="updateMatchScore()">Обновить счет</button>
-        </div>
-        
-        <!-- Добавление событий матча -->
-        <div class="admin-section">
-            <h2>События матча</h2>
-            
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="event-player">Игрок:</label>
-                    <select id="event-player">
-                        <option value="">Выберите игрока</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="event-team">Команда:</label>
-                    <select id="event-team">
-                        <option value="">Выберите команду</option>
-                    </select>
-                </div>
-            </div>
-            
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="event-minute">Минута:</label>
-                    <input type="number" id="event-minute" min="0" max="120" value="0">
-                </div>
-                <div class="form-group">
-                    <label for="event-additional">Доп. время:</label>
-                    <input type="number" id="event-additional" min="0" max="15" value="0">
-                </div>
-            </div>
-            
-            <div class="form-group">
-                <label for="event-assist">Передача от (если гол):</label>
-                <select id="event-assist">
-                    <option value="">Нет передачи</option>
-                </select>
-            </div>
-            
-            <div class="form-group">
-                <label for="event-description">Описание:</label>
-                <textarea id="event-description" placeholder="Дополнительная информация о событии"></textarea>
-            </div>
-            
-            <div class="event-buttons">
-                <button class="event-btn goal" onclick="addEvent('goal')">⚽ Гол</button>
-                <button class="event-btn assist" onclick="addEvent('assist')">🅰️ Передача</button>
-                <button class="event-btn yellow" onclick="addEvent('yellow_card')">🟨 Желтая</button>
-                <button class="event-btn red" onclick="addEvent('red_card')">🟥 Красная</button>
-            </div>
-        </div>
-        
-        <!-- Текущие события матча -->
-        <div class="admin-section">
-            <h2>Текущие события</h2>
-            <div id="current-events" class="current-events">
-                <p>Выберите матч для просмотра событий</p>
-            </div>
-        </div>
-        
-        <!-- Создание игрока -->
-        <div class="admin-section">
-            <h2>Создать нового игрока</h2>
-            
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="player-first-name">Имя:</label>
-                    <input type="text" id="player-first-name" required>
-                </div>
-                <div class="form-group">
-                    <label for="player-last-name">Фамилия:</label>
-                    <input type="text" id="player-last-name">
-                </div>
-            </div>
-            
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="player-username">Username:</label>
-                    <input type="text" id="player-username">
-                </div>
-                <div class="form-group">
-                    <label for="player-position">Позиция:</label>
-                    <select id="player-position">
-                        <option value="">Не указана</option>
-                        <option value="goalkeeper">Вратарь</option>
-                        <option value="defender">Защитник</option>
-                        <option value="midfielder">Полузащитник</option>
-                        <option value="forward">Нападающий</option>
-                    </select>
-                </div>
-            </div>
-            
-            <div class="form-group">
-                <label for="player-telegram-id">Telegram ID:</label>
-                <input type="number" id="player-telegram-id">
-            </div>
-            
-            <button class="btn btn-success" onclick="createPlayer()">Создать игрока</button>
-        </div>
-        
-        <!-- Действия -->
-        <div class="admin-section">
-            <h2>Действия</h2>
+                        // Минимальная версия: только импорт составов
+                        let allMatches = [];
+                        window.addEventListener('DOMContentLoaded', loadMatchesForBulk);
+                        async function loadMatchesForBulk(){
+                            try {
+                                const resp = await fetch('/api/schedule');
+                                const data = await resp.json();
+                                allMatches = [];
+                                if(data.tours){
+                                    data.tours.forEach(t => (t.matches||[]).forEach(m => {
+                                        allMatches.push({
+                                            id: `${m.home}_${m.away}_${m.date || m.datetime}`,
+                                            home_team_name: m.home,
+                                            away_team_name: m.away,
+                                            match_date: m.datetime || m.date
+                                        });
+                                    }));
+                                }
+                                const sel = document.getElementById('bulk-lineup-match');
+                                sel.innerHTML = '<option value="">Выберите матч</option>' + allMatches.map(m => `<option value="${m.id}">${m.home_team_name} vs ${m.away_team_name} (${formatDate(m.match_date)})</option>`).join('');
+                            } catch(e){
+                                console.error(e); showAlert('Не удалось загрузить матчи','error');
+                            }
+                        }
+                        function formatDate(s){ try { return new Date(s).toLocaleDateString('ru-RU'); } catch(_){ return s; } }
             
             <div style="display: flex; gap: 12px; flex-wrap: wrap;">
                 <button class="btn btn-secondary" onclick="refreshStatistics()">Пересчитать статистику</button>
@@ -872,12 +570,12 @@
         async function bulkSetLineups(){
             const sel = document.getElementById('bulk-lineup-match');
             const val = sel.value;
-            if(!val){ showAlert('Выберите матч', 'error'); return; }
+            if(!val){ showAlert('Выберите матч','error'); return; }
             const match = allMatches.find(m=>m.id===val);
-            if(!match){ showAlert('Матч не найден', 'error'); return; }
+            if(!match){ showAlert('Матч не найден','error'); return; }
             const homeTxt = document.getElementById('bulk-home').value.trim();
             const awayTxt = document.getElementById('bulk-away').value.trim();
-            if(!homeTxt && !awayTxt){ showAlert('Нет данных для импорта', 'error'); return; }
+            if(!homeTxt && !awayTxt){ showAlert('Нет данных для импорта','error'); return; }
             const mode = document.getElementById('bulk-mode').value;
             try {
                 const fd = new FormData();
@@ -890,18 +588,12 @@
                 if(!resp.ok) throw new Error('HTTP '+resp.status);
                 const js = await resp.json();
                 if(js.error) throw new Error(js.error);
-                showAlert('Импорт выполнен: добавлено дом '+js.added.home+', гост '+js.added.away, 'success');
-                // Если открыт блок составов для этого матча — обновим
-                const curMatchLineup = document.getElementById('lineup-match-select').value;
-                if(curMatchLineup === val){
-                    loadTeamLineups(match);
-                }
+                showAlert('Составы успешно изменены','success');
             } catch(e){
                 console.error(e);
-                showAlert('Ошибка импорта: '+e.message, 'error');
+                showAlert('Не удалось изменить составы: '+e.message,'error');
             }
         }
-        // Помечаем что это админ
         window.isAdmin = true;
     </script>
 </body>
