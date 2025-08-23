@@ -4515,180 +4515,83 @@ def index():
 @require_telegram_auth()
 @rate_limit(max_requests=60, time_window=60)  # 60 запросов за минуту для данных пользователя
 def get_user():
-    """Получает данные пользователя из Telegram WebApp"""
+    """Получает данные пользователя (исправленная версия без конфликтов отступов)."""
     try:
-        # Если декоратор уже сохранил auth_data – используем его
+        parsed = {}
         if hasattr(flask.g, 'auth_data') and getattr(flask.g, 'auth_data', {}).get('user'):
             user_data = flask.g.auth_data['user']
         else:
-            # Расширенный сбор initData
-            init_data = (request.form.get('initData') or request.form.get('init_data') or
-                         (request.get_json(silent=True) or {}).get('initData') if request.is_json else None or
-                         request.args.get('initData') or request.headers.get('X-Telegram-Init-Data') or '')
+            init_data = (request.form.get('initData') or request.form.get('init_data') or (request.get_json(silent=True) or {}).get('initData') if request.is_json else None or request.args.get('initData') or request.headers.get('X-Telegram-Init-Data') or '')
             parsed = parse_and_verify_telegram_init_data(init_data or '')
             if not parsed or not parsed.get('user'):
                 return jsonify({'error': 'Недействительные данные'}), 401
             user_data = parsed['user']
-
         if SessionLocal is None:
-            # Fallback без БД: старый путь через таблицу (на случай локальной разработки)
             row_num = find_user_row(user_data['id'])
             sheet = get_user_sheet()
             if not row_num:
-                # инициализация в листе
-                new_row = [
-                    user_data['id'], user_data.get('first_name', 'User'), user_data.get('username', ''),
-                    '1000','0','1','0','', '0','', datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat()
-                ]
+                new_row = [user_data['id'], user_data.get('first_name', 'User'), user_data.get('username',''), '1000','0','1','0','', '0','', datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat()]
                 sheet.append_row(new_row)
                 row = new_row
             else:
                 row = sheet.row_values(row_num)
-            # формируем ответ из строки
-            row = list(row) + [''] * (12 - len(row))
-            resp = {
-                'user_id': _to_int(row[0]),
-                'display_name': row[1],
-                'tg_username': row[2],
-                'credits': _to_int(row[3]),
-                'xp': _to_int(row[4]),
-                'level': _to_int(row[5], 1),
-                'consecutive_days': _to_int(row[6]),
-                'last_checkin_date': row[7],
-                'badge_tier': _to_int(row[8]),
-                'created_at': row[10],
-                'updated_at': row[11]
-            }
-            return jsonify(resp)
-
-    # Основной путь: через БД
+            row = list(row)+['']*(12-len(row))
+            return jsonify({'user_id': _to_int(row[0]), 'display_name': row[1], 'tg_username': row[2], 'credits': _to_int(row[3]), 'xp': _to_int(row[4]), 'level': _to_int(row[5],1), 'consecutive_days': _to_int(row[6]), 'last_checkin_date': row[7], 'badge_tier': _to_int(row[8]), 'created_at': row[10], 'updated_at': row[11]})
         db: Session = get_db()
         try:
             db_user = db.get(User, int(user_data['id']))
             now = datetime.now(timezone.utc)
             if not db_user:
-                # Попробуем взять стартовые данные из Google Sheets, если пользователь уже есть там
-                seed = {
-                    'display_name': user_data.get('first_name') or 'User',
-                    'tg_username': user_data.get('username') or '',
-                    'credits': 1000,
-                    'xp': 0,
-                    'level': 1,
-                    'consecutive_days': 0,
-                    'last_checkin_date': None,
-                }
-                try:
-                    row_num = find_user_row(user_data['id'])
-                    if row_num:
-                        sheet = get_user_sheet()
-                        row = sheet.row_values(row_num)
-                        row = list(row) + [''] * (12 - len(row))
-                        seed.update({
-                            'display_name': row[1] or seed['display_name'],
-                            'tg_username': row[2] or seed['tg_username'],
-                            'credits': _to_int(row[3], seed['credits']),
-                            'xp': _to_int(row[4], seed['xp']),
-                            'level': _to_int(row[5], seed['level']),
-                            'consecutive_days': _to_int(row[6], seed['consecutive_days']),
-                            'last_checkin_date': (datetime.fromisoformat(row[7]).date() if row[7] else None)
-                        })
-                except Exception as e:
-                    app.logger.warning(f"Seed from sheets failed: {e}")
-                db_user = User(
-                    user_id=int(user_data['id']),
-                    display_name=seed['display_name'],
-                    tg_username=seed['tg_username'],
-                    credits=seed['credits'],
-                    xp=seed['xp'],
-                    level=seed['level'],
-                    consecutive_days=seed['consecutive_days'],
-                    last_checkin_date=seed['last_checkin_date'],
-                    badge_tier=0,
-                    created_at=now,
-                    updated_at=now,
-                )
+                db_user = User(user_id=int(user_data['id']), display_name=user_data.get('first_name') or 'User', tg_username=user_data.get('username') or '', credits=1000, xp=0, level=1, consecutive_days=0, last_checkin_date=None, badge_tier=0, created_at=now, updated_at=now)
                 db.add(db_user)
-                # Реферальная привязка на первичном входе
-                start_param = None
                 try:
                     raw = parsed.get('raw') or {}
-                    if 'start_param' in raw:
-                        start_param = raw['start_param'][0]
+                    start_param = raw.get('start_param',[None])[0] if isinstance(raw.get('start_param'), list) else None
                 except Exception:
                     start_param = None
                 try:
-                    # создаём запись в referrals с уникальным кодом
                     code = _generate_ref_code(int(user_data['id']))
-                    referrer_id = None
-                    if start_param and start_param != code:
-                        # найдём пригласившего по коду
-                        existing = db.query(Referral).filter(Referral.referral_code == start_param).first()
-                        if existing and existing.user_id != int(user_data['id']):
-                            referrer_id = existing.user_id
-                    db_ref = Referral(user_id=int(user_data['id']), referral_code=code, referrer_id=referrer_id)
-                    db.add(db_ref)
-                except Exception as e:
-                    app.logger.warning(f"Create referral row failed: {e}")
+                    referrer_id=None
+                    if start_param and start_param!=code:
+                        existing = db.query(Referral).filter(Referral.referral_code==start_param).first()
+                        if existing and existing.user_id!=int(user_data['id']):
+                            referrer_id=existing.user_id
+                    db.add(Referral(user_id=int(user_data['id']), referral_code=code, referrer_id=referrer_id))
+                except Exception as re:
+                    app.logger.warning(f"Create referral row failed: {re}")
             else:
-                # just update updated_at
                 db_user.updated_at = now
-                # Убедимся, что у пользователя есть запись в referrals
-                try:
-                    db_ref = db.get(Referral, int(user_data['id']))
-                    if not db_ref:
-                        code = _generate_ref_code(int(user_data['id']))
-                        db.add(Referral(user_id=int(user_data['id']), referral_code=code))
-                except Exception as e:
-                    app.logger.warning(f"Ensure referral row failed: {e}")
-            db.commit()
-            db.refresh(db_user)
+            db.commit(); db.refresh(db_user)
         finally:
             db.close()
-
-        # Сохраним аватар (photo_url) пользователя, если пришёл из Telegram
+        # mirror photo
         try:
             if parsed.get('user') and parsed['user'].get('photo_url') and SessionLocal is not None:
-                db2: Session = get_db()
+                dbp = get_db();
                 try:
-                    uid = int(user_data['id'])
-                    url = parsed['user'].get('photo_url')
-                    row = db2.get(UserPhoto, uid)
-                    now = datetime.now(timezone.utc)
-                    if row:
-                        if url and row.photo_url != url:
-                            row.photo_url = url
-                            row.updated_at = now
-                            db2.commit()
+                    r = dbp.get(UserPhoto, int(user_data['id']))
+                    url = parsed['user'].get('photo_url'); nnow=datetime.now(timezone.utc)
+                    if r:
+                        if url and r.photo_url!=url:
+                            r.photo_url=url; r.updated_at=nnow; dbp.commit()
                     else:
-                        db2.add(UserPhoto(user_id=uid, photo_url=url, updated_at=now))
-                        db2.commit()
+                        dbp.add(UserPhoto(user_id=int(user_data['id']), photo_url=url, updated_at=nnow)); dbp.commit()
                 finally:
-                    db2.close()
-        except Exception as e:
-            app.logger.warning(f"Mirror user photo failed: {e}")
-
-        # Зеркалим в Google Sheets (best-effort)
-        try:
-            mirror_user_to_sheets(db_user)
-        except Exception as e:
-            app.logger.warning(f"Mirror user to sheets failed: {e}")
-
-        # Дополнительно вернём favorite_team из user_prefs
-        fav = ''
+                    dbp.close()
+        except Exception as pe:
+            app.logger.warning(f"Mirror user photo failed: {pe}")
+        fav=''
         if SessionLocal is not None:
-            db3: Session = get_db()
+            dbf=get_db();
             try:
-                p = db3.get(UserPref, int(user_data['id']))
-                fav = (p.favorite_team or '') if p else ''
+                pref=dbf.get(UserPref, int(user_data['id'])); fav=(pref.favorite_team or '') if pref else ''
             finally:
-                db3.close()
-        u = serialize_user(db_user)
-        u['favorite_team'] = fav
+                dbf.close()
+        u=serialize_user(db_user); u['favorite_team']=fav
         return jsonify(u)
-
     except Exception as e:
-        app.logger.error(f"Ошибка получения пользователя: {str(e)}")
-        return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
+        app.logger.error(f"Ошибка получения пользователя: {e}")
+        return jsonify({'error':'Внутренняя ошибка сервера'}),500
 
 @app.route('/api/user/avatars')
 def api_user_avatars():
@@ -5043,10 +4946,21 @@ def daily_checkin():
 def get_achievements():
     """Получает достижения пользователя"""
     try:
+        # Короткоживущий кэш (30с) на пользователя
+        global ACHIEVEMENTS_CACHE
+        try:
+            ACHIEVEMENTS_CACHE
+        except NameError:
+            ACHIEVEMENTS_CACHE = {}
         parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
         if not parsed or not parsed.get('user'):
             return jsonify({'error': 'Недействительные данные'}), 401
         user_id = parsed['user'].get('id')
+        cache_key = f"ach:{user_id}"
+        now_ts = time.time()
+        ce = ACHIEVEMENTS_CACHE.get(cache_key)
+        if ce and (now_ts - ce.get('ts',0) < 30):
+            return jsonify(ce['data'])
 
         # Получаем пользователя из БД либо (fallback) из листа
         if SessionLocal is None:
@@ -5277,7 +5191,9 @@ def get_achievements():
             achievements.append({ 'group': 'weeks', 'tier': weeks_tier, 'name': {1:'Регуляр',2:'Постоянный',3:'Железный'}[weeks_tier], 'value': len(bet_stats['weeks_active']), 'target': {1:2,2:5,3:10}[weeks_tier], 'next_target': _next_target_by_value(len(bet_stats['weeks_active']), weeks_targets), 'all_targets': weeks_targets, 'icon': {1:'bronze',2:'silver',3:'gold'}[weeks_tier], 'unlocked': True })
         else:
             achievements.append({ 'group': 'weeks', 'tier': 1, 'name': 'Регуляр', 'value': len(bet_stats['weeks_active']), 'target': 2, 'next_target': _next_target_by_value(len(bet_stats['weeks_active']), weeks_targets), 'all_targets': weeks_targets, 'icon': 'bronze', 'unlocked': False })
-        return jsonify({'achievements': achievements})
+    resp = {'achievements': achievements}
+    ACHIEVEMENTS_CACHE[cache_key] = { 'ts': now_ts, 'data': resp }
+    return jsonify(resp)
 
     except Exception as e:
         app.logger.error(f"Ошибка получения достижений: {str(e)}")
@@ -8347,6 +8263,9 @@ def api_match_settle():
                 try: app.logger.warning(f"auto specials fix failed: {_spec_auto_err}")
                 except Exception: pass
 
+            # Подсчёт total_bets до расчёта (все ставки по матчу)
+            total_bets_cnt = db.query(func.count(Bet.id)).filter(Bet.home==home, Bet.away==away).scalar() or 0
+            open_before_cnt = db.query(func.count(Bet.id)).filter(Bet.home==home, Bet.away==away, Bet.status=='open').scalar() or 0
             open_bets = db.query(Bet).filter(Bet.status=='open', Bet.home==home, Bet.away==away).all()
             changed = 0
             won_cnt = 0
@@ -8364,13 +8283,21 @@ def api_match_settle():
                     res_known = True
                     won = (res == b.selection)
                 elif b.market == 'totals':
-                    parts = (b.selection or '').split('_', 1)
-                    if len(parts) != 2:
-                        continue
-                    side, line_str = parts[0], parts[1]
-                    try:
-                        line = float(line_str)
-                    except Exception:
+                    sel_raw = (b.selection or '').strip()
+                    side=None; line=None
+                    if '_' in sel_raw:  # старый формат over_3.5
+                        parts = sel_raw.split('_',1)
+                        if len(parts)==2:
+                            side = parts[0];
+                            try: line=float(parts[1])
+                            except Exception: line=None
+                    else:  # новый формат O35 / U45 / U55
+                        if len(sel_raw) in (3,4) and sel_raw[0] in ('O','U') and sel_raw[1:].isdigit():
+                            side = 'over' if sel_raw[0]=='O' else 'under'
+                            mp={'35':'3.5','45':'4.5','55':'5.5'}; ln=mp.get(sel_raw[1:], sel_raw[1:])
+                            try: line=float(ln)
+                            except Exception: line=None
+                    if side not in ('over','under') or line is None:
                         continue
                     total = _get_match_total_goals(b.home, b.away)
                     if total is None:
@@ -8472,19 +8399,17 @@ def api_match_settle():
                 # Обновляем события если ещё не применены
                 if state.events_applied == 0:
                     for ev in event_rows:
-                        player = (ev.player or '').strip()
-                        if not player:
-                            continue
+                        player = (ev.player or '').strip();
+                        if not player: continue
                         team_side = ev.team or 'home'
                         pl = upsert_player(team_side, player)
-                        if ev.type == 'goal':
-                            pl.goals = (pl.goals or 0) + 1
-                        elif ev.type == 'assist':
-                            pl.assists = (pl.assists or 0) + 1
-                        elif ev.type == 'yellow':
-                            pl.yellows = (pl.yellows or 0) + 1
-                        elif ev.type == 'red':
-                            pl.reds = (pl.reds or 0) + 1
+                        # Если у игрока ещё 0 игр (и не добавлялся по составу) — считаем, что сыграл
+                        if not pl.games:
+                            pl.games = 1
+                        if ev.type == 'goal': pl.goals = (pl.goals or 0) + 1
+                        elif ev.type == 'assist': pl.assists = (pl.assists or 0) + 1
+                        elif ev.type == 'yellow': pl.yellows = (pl.yellows or 0) + 1
+                        elif ev.type == 'red': pl.reds = (pl.reds or 0) + 1
                         pl.updated_at = datetime.now(timezone.utc)
                     state.events_applied = 1
                     state.updated_at = datetime.now(timezone.utc)
@@ -8518,7 +8443,46 @@ def api_match_settle():
                     app.logger.error(f"player stats aggregation failed: {agg_err}")
                 except Exception as log_err:
                     print(f"Failed to log aggregation error: {log_err}, original error: {agg_err}")
-            return jsonify({'status':'ok', 'changed': changed, 'won': won_cnt, 'lost': lost_cnt})
+
+            # --- Инкрементируем столбец И (сыгранные матчи) в snapshot league-table (best-effort) ---
+            # Допущение структуры: колонки = [#, Team, Games(И), Wins, Draws, Losses, Goals, Points]
+            # Чтобы избежать двойного подсчёта при повторном settle, используем payload.counted_matches (список ключей)
+            try:
+                if SessionLocal is not None:
+                    snap_lt = _snapshot_get(db, 'league-table')
+                    payload_lt = snap_lt.get('payload') if snap_lt else None
+                    if payload_lt and isinstance(payload_lt.get('values'), list):
+                        counted = set(payload_lt.get('counted_matches') or [])
+                        mkey = f"{home.lower().strip()}__{away.lower().strip()}"
+                        if mkey not in counted:
+                            changed_games = False
+                            vals = payload_lt['values']
+                            # Проходим по строкам, ищем home/away по второй колонке (index 1)
+                            for row in vals:
+                                try:
+                                    team_name = (row[1] if len(row) > 1 else '').strip().lower()
+                                except Exception:
+                                    team_name = ''
+                                if team_name in (home.lower().strip(), away.lower().strip()):
+                                    # Колонка игр индекс 2
+                                    while len(row) < 3:
+                                        row.append('')
+                                    try:
+                                        games = int(str(row[2]).strip() or '0')
+                                    except Exception:
+                                        games = 0
+                                    row[2] = str(games + 1)
+                                    changed_games = True
+                            if changed_games:
+                                counted.add(mkey)
+                                payload_lt['counted_matches'] = list(counted)
+                                payload_lt['updated_at'] = datetime.now(timezone.utc).isoformat()
+                                # Persist snapshot
+                                _snapshot_set(db, 'league-table', payload_lt)
+            except Exception as inc_err:  # noqa: F841
+                try: app.logger.warning(f"league-table games increment failed: {inc_err}")
+                except Exception: pass
+            return jsonify({'status':'ok', 'changed': changed, 'won': won_cnt, 'lost': lost_cnt, 'total_bets': total_bets_cnt, 'open_before': open_before_cnt})
         finally:
             db.close()
     except Exception as e:
