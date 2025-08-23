@@ -66,6 +66,9 @@ class SecurityMiddleware:
     def _check_sql_injection(self):
         """Check for SQL injection attempts"""
         for key, value in request.values.items():
+            # initData может содержать множество символов (%, =) по спецификации Telegram
+            if key in ('initData', 'init_data'):
+                continue
             if isinstance(value, str) and not sql_prevention.is_safe_string(value):
                 print(f"Potential SQL injection attempt: {key}={value[:100]}")
                 # In production, you might want to block the request

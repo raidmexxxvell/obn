@@ -126,68 +126,44 @@ class TelegramSecurity:
     
     @staticmethod
     def verify_init_data(init_data: str, bot_token: str, max_age_seconds: int = 86400) -> tuple[bool, Optional[Dict]]:
-        """Verify Telegram WebApp initData signature"""
+        """Verify Telegram WebApp initData signature (correct HMAC per spec).
+        Spec: secret_key = HMAC_SHA256("WebAppData", bot_token), then
+              check_hash = HMAC_SHA256(secret_key, data_check_string)
+        data_check_string = lines key=value sorted by key (excluding hash).
+        """
         if not init_data or not bot_token:
             return False, None
-        
         try:
-            # Parse init data
             parsed = parse_qs(init_data)
-            
             if 'hash' not in parsed:
                 return False, None
-            
-            received_hash = parsed['hash'][0]
-            
-            # Remove hash from data for verification
-            data_check_string = []
-            for key, values in sorted(parsed.items()):
-                if key != 'hash':
-                    data_check_string.append(f"{key}={values[0]}")
-            
-            data_check_string = '\n'.join(data_check_string)
-            
-            # Create secret key
-            secret_key = hashlib.sha256(bot_token.encode()).digest()
-            
-            # Calculate HMAC
-            calculated_hash = hmac.new(
-                secret_key,
-                data_check_string.encode(),
-                hashlib.sha256
-            ).hexdigest()
-            
-            # Verify hash
+            received_hash = parsed.pop('hash')[0]
+            data_check_string = '\n'.join([f"{k}={v[0]}" for k,v in sorted(parsed.items())])
+            # Correct secret key derivation
+            secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
+            calculated_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
             if not hmac.compare_digest(received_hash, calculated_hash):
                 return False, None
-            
-            # Check age
-            if 'auth_date' in parsed:
-                try:
-                    auth_date = int(parsed['auth_date'][0])
-                    current_time = int(datetime.now(timezone.utc).timestamp())
-                    
-                    if current_time - auth_date > max_age_seconds:
-                        return False, None
-                except (ValueError, IndexError):
+            # Age check
+            try:
+                auth_date = int(parsed.get('auth_date', ['0'])[0])
+            except Exception:
+                auth_date = 0
+            if auth_date:
+                now = int(datetime.now(timezone.utc).timestamp())
+                if now - auth_date > max_age_seconds:
                     return False, None
-            
-            # Parse user data
+            # Parse user JSON
             user_data = None
             if 'user' in parsed:
                 try:
                     import json
                     user_data = json.loads(parsed['user'][0])
-                except (json.JSONDecodeError, IndexError):
+                except Exception:
                     return False, None
-            
-            return True, {
-                'user': user_data,
-                'auth_date': parsed.get('auth_date', [None])[0],
-                'raw': init_data
-            }
-            
-        except Exception:
+            return True, { 'user': user_data, 'auth_date': auth_date, 'raw': parsed }
+        except Exception as e:
+            # Silent fail (return False) to not leak details
             return False, None
     
     @staticmethod
