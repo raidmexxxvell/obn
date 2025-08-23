@@ -7115,6 +7115,9 @@ def api_streams_set():
         home = _norm_team(home_raw)
         away = _norm_team(away_raw)
         dt_raw = (request.form.get('datetime') or '').strip()
+        # Поддержка ISO форматов с суффиксом Z
+        if dt_raw.endswith('Z'):
+            dt_raw = dt_raw[:-1] + '+00:00'
         vk_raw = (request.form.get('vk') or '').strip()
         if not home or not away:
             return jsonify({'error': 'home/away обязательны'}), 400
@@ -7122,9 +7125,15 @@ def api_streams_set():
         date_str = ''
         try:
             if dt_raw:
+                # Попробуем разные варианты разделения даты
                 date_str = datetime.fromisoformat(dt_raw).date().isoformat()
         except Exception:
-            date_str = ''
+            try:
+                date_part = dt_raw.split('T')[0]
+                datetime.fromisoformat(date_part)  # проверка
+                date_str = date_part
+            except Exception:
+                date_str = ''
         # Разобрать vk_raw в vkVideoId или vkPostUrl
         vk_id = ''
         vk_url = ''
@@ -7210,6 +7219,10 @@ def api_streams_set():
             except Exception:
                 pass
             msg = 'Ссылка принята и сохранена'
+            try:
+                app.logger.info(f"streams/set saved: home_raw='{home_raw}' away_raw='{away_raw}' norm=('{home}','{away}') date='{date_str}' vk_id='{row.vk_video_id}' vk_url='{row.vk_post_url}'")
+            except Exception:
+                pass
             return jsonify({
                 'status': 'ok',
                 'message': msg,
@@ -7228,174 +7241,150 @@ def api_streams_set():
 
 @app.route('/api/streams/get', methods=['GET'])
 def api_streams_get():
-    """Клиентский эндпоинт: получить трансляцию для конкретного матча, если подтверждена и если в окне +-N минут.
-    Параметры: home, away, date (YYYY-MM-DD optional), window (минут, по умолчанию 60).
-    """
-    try:
-        if SessionLocal is None:
-            return jsonify({'available': False})
-        def _norm_team(v:str)->str:
-            return ' '.join(v.strip().split()).lower()
-        home_raw = (request.args.get('home') or '').strip()
-        away_raw = (request.args.get('away') or '').strip()
-        home = _norm_team(home_raw)
-        away = _norm_team(away_raw)
-        date_str = (request.args.get('date') or '').strip()
-        try:
-            app.logger.info(f"streams/get req: home='{home}' away='{away}' date='{date_str}'")
-        except Exception:
-            pass
-        try:
-            win = int(request.args.get('window') or '60')
-        except Exception:
-            win = 60
-        # минимальное окно 10 минут
-        win = max(10, min(240, win))
+    """Вернёт ссылку на трансляцию матча.
 
-        # 1) Приоритет: если для матча уже сохранена трансляция — сразу отдаем её, без привязки ко времени (по запросу пользователя)
+    Логика:
+    1. Нормализуем названия команд (пробелы + lowercase).
+    2. Сначала отдаём последнюю сохранённую ссылку (если она актуальна <=48ч), БЕЗ проверки окна – чтобы админ сразу видел результат.
+    3. Если явной ссылки нет – сверяемся с расписанием и, если до матча осталось <= window минут, повторно ищем ссылку (на случай несовпадения даты).
+    4. Иначе available=False.
+    """
+    if SessionLocal is None:
+        return jsonify({'available': False})
+
+    # --- Входные параметры ---
+    def _norm_team(v: str) -> str:
+        return ' '.join(v.strip().split()).lower()
+
+    home_raw = (request.args.get('home') or '').strip()
+    away_raw = (request.args.get('away') or '').strip()
+    home = _norm_team(home_raw)
+    away = _norm_team(away_raw)
+    date_str = (request.args.get('date') or '').strip()
+    try:
+        win = int(request.args.get('window') or '60')
+    except Exception:
+        win = 60
+    win = max(10, min(240, win))
+
+    from sqlalchemy import func
+
+    # --- 1. Немедленный возврат сохранённой ссылки ---
+    try:
+        db = get_db()
         try:
-            db0: Session = get_db()
-            try:
-                from sqlalchemy import func
-                row0 = db0.query(MatchStream).filter(func.lower(MatchStream.home)==home, func.lower(MatchStream.away)==away, MatchStream.date==(date_str or None)).first()
-                # Фолбек: если не нашли точное совпадение по дате
-                if not row0:
-                    # Если клиент передал дату — уже был fallback (ниже) на latest, но мы расширим и для случая пустой даты
-                    # Берём самую свежую запись по паре команд
-                    latest = db0.query(MatchStream).filter(func.lower(MatchStream.home)==home, func.lower(MatchStream.away)==away).order_by(MatchStream.updated_at.desc()).first()
-                    if latest:
-                        # Дополнительная валидация: не слишком ли старая (например > 48 часов), чтобы не подтянуть ссылку со старого матча
-                        try:
-                            if latest.updated_at and (datetime.now(timezone.utc) - latest.updated_at) > timedelta(hours=48):
-                                latest = None
-                        except Exception:
-                            pass
-                        if latest:
-                            row0 = latest
-                if row0 and ((row0.vk_video_id and row0.vk_video_id.strip()) or (row0.vk_post_url and row0.vk_post_url.strip())):
-                    try:
-                        app.logger.info("streams/get hit: immediate saved link")
-                    except Exception:
-                        pass
-                    return jsonify({'available': True, 'vkVideoId': row0.vk_video_id or '', 'vkPostUrl': row0.vk_post_url or ''})
-                # Туровой фолбэк: если для текущей пары нет прямой записи, но есть ссылка в этом же туре — отдадим её
-                # Для этого чуть ниже определим тур; здесь просто продолжим
-            finally:
-                db0.close()
-        except Exception:
-            pass
-        # найдём матч и время старта, а также сам тур для турового фолбэка
-        start_ts = None
-        matched_tour = None
-        try:
-            tours = []
-            if SessionLocal is not None:
-                dbx = get_db()
-                try:
-                    snap = _snapshot_get(dbx, 'schedule')
-                    payload = snap and snap.get('payload')
-                    tours = payload and payload.get('tours') or []
-                finally:
-                    dbx.close()
-            if not tours:
-                tours = _load_all_tours_from_sheet()
-            for t in tours:
-                for m in t.get('matches', []):
-                    if (m.get('home') == home and m.get('away') == away):
-                        # С датой в запросе — сопоставляем по datetime или по date, и вычисляем старт
-                        if date_str:
-                            try:
-                                if m.get('datetime') and str(m['datetime']).startswith(date_str):
-                                    start_ts = int(datetime.fromisoformat(m['datetime']).timestamp() * 1000)
-                                    matched_tour = t
-                                    raise StopIteration
-                                if m.get('date') and str(m['date']).startswith(date_str):
-                                    # Построим dt из date+time
-                                    d = datetime.fromisoformat(str(m['date'])).date()
-                                    try:
-                                        tm = datetime.strptime((m.get('time') or '00:00'), "%H:%M").time()
-                                    except Exception:
-                                        tm = datetime.min.time()
-                                    dt = datetime.combine(d, tm)
-                                    start_ts = int(dt.timestamp() * 1000)
-                                    matched_tour = t
-                                    raise StopIteration
-                            except Exception:
-                                pass
-                        else:
-                            # Без даты в запросе — берём datetime, если есть; иначе date+time
-                            try:
-                                if m.get('datetime'):
-                                    start_ts = int(datetime.fromisoformat(m['datetime']).timestamp() * 1000)
-                                    matched_tour = t
-                                elif m.get('date'):
-                                    d = datetime.fromisoformat(str(m['date'])).date()
-                                    try:
-                                        tm = datetime.strptime((m.get('time') or '00:00'), "%H:%M").time()
-                                    except Exception:
-                                        tm = datetime.min.time()
-                                    start_ts = int(datetime.combine(d, tm).timestamp() * 1000)
-                                    matched_tour = t
-                                raise StopIteration
-                            except Exception:
-                                start_ts = None
-                                raise StopIteration
-        except StopIteration:
-            pass
-        # Если по указанной дате не нашли старт — попробуем вычислить его без учёта даты
-        if start_ts is None and date_str:
-            try:
-                for t in tours or []:
-                    for m in (t.get('matches') or []):
-                        if (m.get('home') == home and m.get('away') == away):
-                            if m.get('datetime'):
-                                start_ts = int(datetime.fromisoformat(m['datetime']).timestamp() * 1000)
-                                raise StopIteration
-                            if m.get('date'):
-                                d = datetime.fromisoformat(str(m['date'])).date()
-                                try:
-                                    tm = datetime.strptime((m.get('time') or '00:00'), "%H:%M").time()
-                                except Exception:
-                                    tm = datetime.min.time()
-                                start_ts = int(datetime.combine(d, tm).timestamp() * 1000)
-                                raise StopIteration
-            except StopIteration:
-                pass
-        # Сдвигаем текущее время по настройке SCHEDULE_TZ_SHIFT_*
-        try:
-            tz_min = int(os.environ.get('SCHEDULE_TZ_SHIFT_MIN') or '0')
-        except Exception:
-            tz_min = 0
-        if tz_min == 0:
-            try:
-                tz_h = int(os.environ.get('SCHEDULE_TZ_SHIFT_HOURS') or '0')
-            except Exception:
-                tz_h = 0
-            tz_min = tz_h * 60
-        now = int((time.time() + tz_min*60) * 1000)
-        if not start_ts or (start_ts - now) > win*60*1000:
-            # Если старт неизвестен или слишком рано — по умолчанию недоступно (но выше уже пробовали вернуть сохранённую трансляцию)
-            return jsonify({'available': False})
-        # найдём подтверждение
-        db: Session = get_db()
-        try:
-            from sqlalchemy import func
-            row = db.query(MatchStream).filter(func.lower(MatchStream.home)==home, func.lower(MatchStream.away)==away, MatchStream.date==(date_str or None)).first()
-            if not row and date_str:
-                # Фоллбек: искать запись без date (старые сохранения) или любую последнюю
-                row = db.query(MatchStream).filter(func.lower(MatchStream.home)==home, func.lower(MatchStream.away)==away).order_by(MatchStream.updated_at.desc()).first()
+            q = db.query(MatchStream).filter(
+                func.lower(MatchStream.home) == home,
+                func.lower(MatchStream.away) == away,
+                MatchStream.date == (date_str or None)
+            )
+            row = q.first()
             if not row:
-                return jsonify({'available': False})
-            try:
-                app.logger.info("streams/get hit: within window link")
-            except Exception:
-                pass
-            return jsonify({'available': True, 'vkVideoId': row.vk_video_id or '', 'vkPostUrl': row.vk_post_url or ''})
+                # Последняя по обновлению запись по парам команд (если нет даты или различается)
+                row_latest = db.query(MatchStream).filter(
+                    func.lower(MatchStream.home) == home,
+                    func.lower(MatchStream.away) == away
+                ).order_by(MatchStream.updated_at.desc()).first()
+                if row_latest:
+                    try:
+                        if row_latest.updated_at and (datetime.now(timezone.utc) - row_latest.updated_at) <= timedelta(hours=48):
+                            row = row_latest
+                    except Exception:
+                        row = row_latest
+            if row and ((row.vk_video_id and row.vk_video_id.strip()) or (row.vk_post_url and row.vk_post_url.strip())):
+                try:
+                    app.logger.info(f"streams/get immediate link id='{row.vk_video_id}' url='{row.vk_post_url}' home='{home}' away='{away}' date='{date_str}'")
+                except Exception:
+                    pass
+                return jsonify({'available': True, 'vkVideoId': row.vk_video_id or '', 'vkPostUrl': row.vk_post_url or ''})
         finally:
             db.close()
     except Exception as e:
-        app.logger.error(f"streams/get error: {e}")
+        app.logger.error(f"streams/get immediate lookup error: {e}")
+
+    # --- 2. Загрузка расписания (snapshot -> fallback sheet) ---
+    tours = []
+    try:
+        dbs = get_db()
+        try:
+            snap = _snapshot_get(dbs, 'schedule')
+            payload = snap and snap.get('payload')
+            tours = (payload and payload.get('tours')) or []
+        finally:
+            dbs.close()
+    except Exception:
+        pass
+    if not tours:
+        try:
+            tours = _load_all_tours_from_sheet()
+        except Exception:
+            tours = []
+
+    # --- 3. Поиск матча в расписании ---
+    start_ts = None
+    if tours:
+        for t in tours:
+            matches = t.get('matches') or []
+            for m in matches:
+                try:
+                    if _norm_team(m.get('home','')) != home or _norm_team(m.get('away','')) != away:
+                        continue
+                    if m.get('datetime'):
+                        dt_obj = datetime.fromisoformat(str(m['datetime']).replace('Z', '+00:00'))
+                    elif m.get('date'):
+                        d_obj = datetime.fromisoformat(str(m['date'])).date()
+                        try:
+                            tm = datetime.strptime((m.get('time') or '00:00'), '%H:%M').time()
+                        except Exception:
+                            tm = datetime.min.time()
+                        dt_obj = datetime.combine(d_obj, tm)
+                    else:
+                        continue
+                    start_ts = int(dt_obj.timestamp() * 1000)
+                    raise StopIteration  # выходим из всех циклов
+                except StopIteration:
+                    break
+                except Exception:
+                    continue
+            if start_ts is not None:
+                break
+
+    # --- 4. Проверка окна ---
+    try:
+        tz_min = int(os.environ.get('SCHEDULE_TZ_SHIFT_MIN') or '0')
+    except Exception:
+        tz_min = 0
+    if tz_min == 0:
+        try:
+            tz_h = int(os.environ.get('SCHEDULE_TZ_SHIFT_HOURS') or '0')
+        except Exception:
+            tz_h = 0
+        tz_min = tz_h * 60
+    now_ms = int((time.time() + tz_min * 60) * 1000)
+    if not start_ts or (start_ts - now_ms) > win * 60 * 1000:
         return jsonify({'available': False})
+
+    # --- 5. Повторный поиск ссылки в окне ---
+    try:
+        db = get_db()
+        try:
+            row2 = db.query(MatchStream).filter(
+                func.lower(MatchStream.home) == home,
+                func.lower(MatchStream.away) == away,
+                MatchStream.date == (date_str or None)
+            ).first()
+            if not row2 and date_str:
+                row2 = db.query(MatchStream).filter(
+                    func.lower(MatchStream.home) == home,
+                    func.lower(MatchStream.away) == away
+                ).order_by(MatchStream.updated_at.desc()).first()
+            if row2 and ((row2.vk_video_id and row2.vk_video_id.strip()) or (row2.vk_post_url and row2.vk_post_url.strip())):
+                return jsonify({'available': True, 'vkVideoId': row2.vk_video_id or '', 'vkPostUrl': row2.vk_post_url or ''})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"streams/get window lookup error: {e}")
+    return jsonify({'available': False})
 
 @app.route('/api/streams/reset', methods=['POST'])
 def api_streams_reset():
