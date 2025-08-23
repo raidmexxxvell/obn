@@ -60,7 +60,8 @@ except ImportError as e:
 def check_required_environment_variables():
     """Проверяет наличие критически важных переменных окружения при старте приложения"""
     required_vars = {
-        'GOOGLE_CREDENTIALS_B64': 'Google Sheets API credentials (required for data sync)',
+    # Принимаем либо GOOGLE_CREDENTIALS_B64 (base64 json), либо GOOGLE_SHEETS_CREDENTIALS (raw json)
+    'GOOGLE_CREDENTIALS_B64': 'Google Sheets API credentials (required for data sync, or provide GOOGLE_SHEETS_CREDENTIALS)' ,
         'DATABASE_URL': 'PostgreSQL database connection string (required for data persistence)'
     }
     
@@ -74,8 +75,12 @@ def check_required_environment_variables():
     missing_optional = []
     
     for var, description in required_vars.items():
-        if not os.environ.get(var):
-            missing_required.append(f"  - {var}: {description}")
+        if var == 'GOOGLE_CREDENTIALS_B64':
+            if not (os.environ.get('GOOGLE_CREDENTIALS_B64') or os.environ.get('GOOGLE_SHEETS_CREDENTIALS')):
+                missing_required.append(f"  - GOOGLE_CREDENTIALS_B64 or GOOGLE_SHEETS_CREDENTIALS: {description}")
+        else:
+            if not os.environ.get(var):
+                missing_required.append(f"  - {var}: {description}")
     
     for var, description in optional_vars.items():
         if not os.environ.get(var):
