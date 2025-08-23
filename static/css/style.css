@@ -1,51 +1,25 @@
-:root {
-    --primary: #1e40af;
-    --primary-dark: #1d4ed8;
-    --secondary: #f59e0b;
+ :root {
+    --bg:#0f1720;
+    --card:#111827;
+    --muted:#9aa4b2;
+    --accent1:linear-gradient(135deg,#ffb86b,#6c8cff);
+    --glass:rgba(255,255,255,0.03);
+    --primary: #6c8cff;
+    --primary-dark: #5c7cef;
+    --secondary: #ffb86b;
     --success: #10b981;
     --danger: #ef4444;
-    --dark: #0f172a;
-    --darker: #020617;
     --light: #f1f5f9;
-    --gray: #94a3b8;
-    --card-bg: rgba(30, 41, 59, 0.7);
+    --gray: #9aa4b2;
     --border-radius: 12px;
     --transition: all 0.3s ease;
-    /* Новая палитра для НЛО (применим постфактум классом .theme-ufo) */
-    --ufo-bg:#0f1720;
-    --ufo-card:#111827;
-    --ufo-muted:#9aa4b2;
-    --ufo-accent1:linear-gradient(135deg,#ffb86b,#6c8cff);
-    --ufo-glass:rgba(255,255,255,0.03);
 }
-
-/* Тема UFO */
-body.theme-ufo { background: var(--ufo-bg); }
-body.theme-ufo .stat-card,
-body.theme-ufo .checkin-section,
-body.theme-ufo .achievement-card,
-body.theme-ufo .referral-box,
-body.theme-ufo .profile-header-card { background: var(--ufo-card); border:1px solid rgba(255,255,255,0.08); }
-body.theme-ufo .stat-value { color:#fff; }
-body.theme-ufo .stat-label, body.theme-ufo .level-info, body.theme-ufo .badge-requirements, body.theme-ufo .ref-note, body.theme-ufo .ref-stats { color: var(--ufo-muted); }
-body.theme-ufo .xp-progress { background: var(--ufo-accent1); }
-body.theme-ufo .checkin-day.completed, body.theme-ufo .checkin-day.active { background: var(--ufo-accent1); }
-body.theme-ufo .subtab-item.active { background: var(--ufo-accent1); }
-/* Компоновка профиля в едином блоке */
-.profile-header-card { display:grid; grid-template-columns:72px 1fr; gap:14px; padding:14px; border-radius:14px; background:var(--card-bg); margin-bottom:14px; align-items:center; }
-body.theme-ufo .profile-header-card { background: var(--ufo-card); }
-.profile-header-card .profile-avatar { margin:0; width:72px; height:72px; box-shadow:none; border:2px solid rgba(255,255,255,0.15); }
-.profile-mini-stats { display:flex; gap:10px; margin-top:8px; }
-.profile-mini-stats .stat-card { flex:1; padding:10px 8px; }
-/* Скрываем старую раскладку */
-.profile-header { display:none !important; }
-.profile-stats { display:none !important; }
 
 /* splash-стили перенесены в splash.css */
 
 /* --- ОСНОВНОЕ ПРИЛОЖЕНИЕ --- */
 body {
-    background: linear-gradient(135deg, var(--dark), var(--darker));
+    background: var(--bg);
     color: var(--light);
     min-height: 100vh;
     padding: 16px 0 64px; /* без боковых полей */
@@ -424,7 +398,7 @@ body.allow-landscape #md-pane-stream.fs-mode * {
 
 /* Кнопка «Обновить» в таблице */
 .refresh-btn {
-    background: linear-gradient(90deg, var(--primary), var(--primary-dark));
+    background: var(--accent1);
     color: #fff;
     border: none;
     border-radius: 10px;
@@ -442,7 +416,7 @@ body.allow-landscape #md-pane-stream.fs-mode * {
 
 .stat-card {
     flex: 1;
-    background: var(--card-bg);
+    background: var(--card);
     border-radius: var(--border-radius);
     padding: 15px;
     text-align: center;
@@ -479,7 +453,7 @@ body.allow-landscape #md-pane-stream.fs-mode * {
 
 .xp-progress {
     height: 100%;
-    background: linear-gradient(90deg, var(--primary), var(--secondary));
+    background: var(--accent1);
     border-radius: 20px;
     width: 0;
     transition: width 1s ease-out;
@@ -493,7 +467,7 @@ body.allow-landscape #md-pane-stream.fs-mode * {
 }
 
 .checkin-section {
-    background: var(--card-bg);
+    background: var(--card);
     border-radius: 14px;
     padding: 10px;
     margin: 14px 0;
@@ -545,19 +519,19 @@ body.allow-landscape #md-pane-stream.fs-mode * {
 
 .checkin-day.completed {
     /* совпадает с градиентом активной подвкладки */
-    background: linear-gradient(90deg, var(--primary), var(--secondary));
+    background: var(--accent1);
     border-color: rgba(255,255,255,0.22);
     color: rgba(255, 255, 255, 0.95);
 }
 
 .checkin-day.active {
-    background: linear-gradient(90deg, var(--primary), var(--secondary));
+    background: var(--accent1);
     border-color: rgba(255,255,255,0.22);
     color: #fff;
 }
 
 .checkin-button {
-    background: linear-gradient(90deg, var(--primary), var(--primary-dark));
+    background: var(--accent1);
     color: white;
     border: none;
     border-radius: 10px;
@@ -604,7 +578,7 @@ body.allow-landscape #md-pane-stream.fs-mode * {
 }
 
 .achievement-card {
-    background: var(--card-bg);
+    background: var(--card);
     border-radius: var(--border-radius);
     padding: 10px;
     text-align: center;
@@ -646,7 +620,7 @@ body.allow-landscape #md-pane-stream.fs-mode * {
 
 .badge-requirements {
     font-size: 11px;
-    color: var(--gray);
+    color: var(--muted);
     margin-top: 2px;
 }
 
@@ -673,6 +647,14 @@ body.allow-landscape #md-pane-stream.fs-mode * {
     overflow: hidden;
     margin-top: 6px;
     width: 100%;
+}
+
+.achv-progress-bar {
+    height: 100%;
+    background: var(--accent1);
+    border-radius: 10px;
+    width: 0%;
+    transition: width 0.8s ease-out;
 }
 
 .achv-progress {
@@ -767,7 +749,7 @@ body.allow-landscape #md-pane-stream.fs-mode * {
 }
 
 .subtab-item.active {
-    background: linear-gradient(90deg, var(--primary), var(--secondary));
+    background: var(--accent1);
     color: #fff;
 }
 
@@ -949,7 +931,7 @@ body.theme-blb .share-btn {
 .score { color: var(--secondary); font-weight: 800; font-size: 18px; }
 .match-footer { margin-top: 10px; display: flex; justify-content: center; gap: 8px; }
 .details-btn {
-    background: linear-gradient(90deg, var(--secondary), var(--primary));
+    background: var(--accent1);
     color: #fff;
     border: none;
     padding: 8px 14px;
@@ -1143,34 +1125,3 @@ body.theme-blb .share-btn {
     border-radius: 999px;
     font-size: 12px;
 }
-
-/* Прогресс достижений */
-.ach-progress-wrap { width:100%; margin-top:4px; }
-.ach-progress-bar { width:100%; height:6px; border-radius:4px; background:rgba(255,255,255,0.08); overflow:hidden; }
-.ach-progress-fill { height:100%; width:0; background:linear-gradient(135deg,#ffb86b,#6c8cff); transition:width .6s ease; }
-.ach-progress-meta { width:100%; text-align:center; font-size:10px; margin-top:4px; color:var(--gray); }
-body.theme-ufo .ach-progress-bar { background: var(--ufo-glass); }
-body.theme-ufo .ach-progress-fill { background: var(--ufo-accent1); }
-body.theme-ufo .ach-progress-meta { color: var(--ufo-muted); }
-/* Кнопки UFO перекрашены */
-body.theme-ufo .details-btn,
-body.theme-ufo .checkin-button,
-body.theme-ufo .refresh-btn,
-body.theme-ufo .share-btn,
-body.theme-ufo .btn-primary,
-body.theme-ufo .predictions-wrap button,
-body.theme-ufo .bet-card button {
-  background: var(--ufo-accent1) !important;
-  border:none;
-  color:#0f1720 !important;
-  font-weight:700;
-}
-body.theme-ufo .details-btn:hover,
-body.theme-ufo .checkin-button:hover { filter:brightness(1.05); }
-body.theme-ufo .subtab-item.active { color:#0f1720; font-weight:700; }
-body.theme-ufo .subtab-item { background: var(--ufo-glass); border:1px solid rgba(255,255,255,0.05); }
-body.theme-ufo .subtab-item:not(.active){ color: var(--ufo-muted); }
-body.theme-ufo .league-table-wrap, body.theme-ufo .pred-pane, body.theme-ufo .ufo-pane, body.theme-ufo .bets-list .bet-card { background: var(--ufo-card); border:1px solid rgba(255,255,255,0.06); }
-body.theme-ufo .bet-status.open { color: var(--ufo-muted); }
-body.theme-ufo .bet-status.won { color:#34d399; }
-body.theme-ufo .bet-status.lost { color:#f87171; }

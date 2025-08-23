@@ -57,16 +57,21 @@
       if(!a.unlocked) card.classList.add('locked');
       const img=document.createElement('img'); img.alt=a.name||''; setAchievementIcon(img,a);
       const name=document.createElement('div'); name.className='badge-name'; name.textContent=a.name||'';
-      // Прогресс
-      const progressWrap=document.createElement('div'); progressWrap.className='ach-progress-wrap';
-      const bar=document.createElement('div'); bar.className='ach-progress-bar';
-      const fill=document.createElement('div'); fill.className='ach-progress-fill';
-      const cur=Number(a.value||0); const target=Number(a.target||0)||1; const pct=Math.min(100, Math.round(cur*100/target)); fill.style.width=pct+'%';
-      bar.appendChild(fill); progressWrap.appendChild(bar);
-      const meta=document.createElement('div'); meta.className='ach-progress-meta';
-      const next=a.next_target; meta.textContent = next? `${cur} / ${target} (след. цель: ${next})` : `${cur} / ${target}`;
       const req=document.createElement('div'); req.className='badge-requirements'; req.textContent=descFor(a);
-      card.append(img,name,progressWrap,meta,req); badgesContainer.appendChild(card);
+      
+      // Добавляем прогресс-бар
+      if(a.value !== undefined && a.target !== undefined) {
+        const progressContainer = document.createElement('div'); progressContainer.className='achv-progress-container';
+        const progressBar = document.createElement('div'); progressBar.className='achv-progress-bar';
+        const progress = Math.min(100, Math.max(0, (a.value / a.target) * 100));
+        progressBar.style.width = progress + '%';
+        progressContainer.appendChild(progressBar);
+        card.append(img,name,req,progressContainer);
+      } else {
+        card.append(img,name,req);
+      }
+      
+      badgesContainer.appendChild(card);
     });
   }
   function fetchAchievements(){

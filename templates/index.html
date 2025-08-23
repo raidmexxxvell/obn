@@ -83,7 +83,53 @@
                 <div class="stat-label">Опыт</div>
             </div>
         </div>
-    </div>
+    <div class="xp-section">
+            <div class="level-info">
+                <span>Уровень <span id="current-level">1</span></span>
+                <span><span id="current-xp">0</span>/<span id="xp-needed">100</span> XP</span>
+            </div>
+            <div class="xp-progress-container">
+                <div class="xp-progress" id="xp-progress"></div>
+            </div>
+        </div>
+
+        <div class="checkin-section">
+            <div class="checkin-title">
+                <span>Ежедневные награды</span>
+                <span id="streak-days">День <span id="current-streak">1</span></span>
+            </div>
+            <div class="checkin-days" id="checkin-days">
+                <!-- Дни цикла будут сгенерированы JS -->
+            </div>
+            <button class="checkin-button" id="checkin-btn">Получить награду</button>
+            <div class="checkin-status" id="checkin-status"></div>
+        </div>
+
+    <div class="achievements-section">
+            <div class="subtabs" id="profile-subtabs">
+                <div class="subtab-item active" data-psub="badges">Достижения</div>
+                <div class="subtab-item" data-psub="ref">Реферальная ссылка</div>
+            </div>
+            <div id="profile-pane-badges" class="profile-pane">
+            <div class="achievements-container" id="badges">
+                <!-- Достижение будет загружено через API -->
+                <div class="achievement-card locked" id="achievement-placeholder">
+                    <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiM4ODg4ODgiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIiBjbGFzcz0iZmVhdGhlciBmZWF0aGVyLXRyb2Z5Ij48Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSIxMCIvPjxwb2x5bGluZSBwb2ludHM9IjEyIDYgMTYgMTQgMTIgMTAgOCAxNCAxMiA2Ii8+PC9zdmc+" alt="Достижение">
+                    <div class="badge-name">Бронза</div>
+                    <div class="badge-requirements">7 дней подряд</div>
+                </div>
+            </div>
+            </div>
+            
+            <div id="profile-pane-ref" class="profile-pane" style="display:none;">
+                <div class="referral-box">
+                    <button class="share-btn" id="share-ref">Поделиться ссылкой</button>
+                    <div class="ref-stats">Приглашено: <span id="ref-count">0</span></div>
+                    <div class="ref-note" id="ref-note">Зачёт происходит, когда приглашённый достигнет 2 уровня аккаунта.</div>
+                </div>
+            </div>
+        </div>
+        </div>
 
         <!-- Вкладка НЛО -->
     <div id="tab-ufo" style="display:none;">

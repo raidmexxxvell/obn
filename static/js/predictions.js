@@ -280,16 +280,21 @@
           const when = document.createElement('div'); when.className = 'bet-when'; when.textContent = b.datetime ? formatDateTime(b.datetime) : '';
           top.append(title, when);
           const mid = document.createElement('div'); mid.className = 'bet-mid'; mid.textContent = `Исход: ${b.selection.toUpperCase()} | Кф: ${b.odds || '-'} | Ставка: ${b.stake}`;
-          const st = document.createElement('div'); st.className = `bet-status ${b.status}`;
-          const statusMap = { open: 'Открыта', won: 'Выигрыш', lost: 'Проигрыш', void: 'Возврат' };
-          let label = statusMap[b.status] || b.status;
-          if (b.status === 'won') {
-            const odds = parseFloat((b.odds||'').toString().replace(',','.'))||0;
-            const stake = parseFloat(b.stake)||0;
-            const winAmount = (odds*stake).toFixed(0);
-            label += ` +${winAmount}`;
+          const st = document.createElement('div'); 
+          st.className = `bet-status ${b.status}`;
+          
+          // Локализация статусов
+          let statusText = b.status;
+          if (b.status === 'open') statusText = 'Открыта';
+          else if (b.status === 'won') statusText = 'Выиграна';
+          else if (b.status === 'lost') statusText = 'Проиграна';
+          
+          // Добавляем сумму выигрыша для выигранных ставок
+          if (b.status === 'won' && b.winnings) {
+            statusText += ` (+${b.winnings} кр.)`;
           }
-          st.textContent = label;
+          
+          st.textContent = statusText;
           card.append(top, mid, st);
           list.appendChild(card);
         });
