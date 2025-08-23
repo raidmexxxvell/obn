@@ -2,9 +2,11 @@
 (function(){
   const tg = window.Telegram?.WebApp;
   function initHomeAdsCarousel(){
-    const track = document.getElementById('ads-track');
-    const dots = document.getElementById('ads-dots');
+    let track = document.getElementById('ads-track');
+    let dots = document.getElementById('ads-dots');
     const box = document.getElementById('ads-carousel');
+    if(box && !track){ track=document.createElement('div'); track.id='ads-track'; track.className='ads-track'; box.appendChild(track); }
+    if(box && !dots){ dots=document.createElement('div'); dots.id='ads-dots'; dots.className='ads-dots'; box.appendChild(dots); }
     if (!track || !dots || !box) return;
     let slides = Array.isArray(window.__HOME_ADS__) ? window.__HOME_ADS__.slice() : null;
     if (!slides || slides.length === 0) {
@@ -24,11 +26,18 @@
         slide.addEventListener('click', () => {
           try {
             if (s.action === 'BLB') {
-              try {
-                if (window.selectBLBLeague) { window.selectBLBLeague(true); }
-                else if (window.playLeagueTransition) { window.playLeagueTransition('BLB'); }
-                else { if (window.setActiveLeague) window.setActiveLeague('BLB'); }
-              } catch(_){ }
+              // Используем анимацию перехода лиг, если доступна
+              if (window.selectBLBLeague) {
+                window.selectBLBLeague(true);
+              } else {
+                window.__ACTIVE_LEAGUE__ = 'BLB';
+                if (window.setActiveLeague) { try { window.setActiveLeague('BLB'); } catch(_) {} }
+                document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+                const navUfo = document.querySelector('.nav-item[data-tab="ufo"]');
+                if (navUfo) navUfo.classList.add('active');
+                ['tab-home','tab-ufo','tab-predictions','tab-leaderboard','tab-shop','tab-admin']
+                  .forEach(id => { const el = document.getElementById(id); if (el) el.style.display = (id==='tab-ufo'?'':'none'); });
+              }
             }
           } catch(_) {}
         });

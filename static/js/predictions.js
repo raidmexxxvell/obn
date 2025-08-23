@@ -281,10 +281,13 @@
           top.append(title, when);
           const mid = document.createElement('div'); mid.className = 'bet-mid'; mid.textContent = `Исход: ${b.selection.toUpperCase()} | Кф: ${b.odds || '-'} | Ставка: ${b.stake}`;
           const st = document.createElement('div'); st.className = `bet-status ${b.status}`;
-          const map = { open: 'Открыта', won: 'Выигрыш', lost: 'Проигрыш', refunded: 'Возврат' };
-          let label = map[b.status] || b.status;
-          if (b.status === 'won' && b.stake && b.odds) {
-            try { const gain = Math.round(Number(b.stake) * Number(b.odds)); label += ` +${gain}`; } catch(_) {}
+          const statusMap = { open: 'Открыта', won: 'Выигрыш', lost: 'Проигрыш', void: 'Возврат' };
+          let label = statusMap[b.status] || b.status;
+          if (b.status === 'won') {
+            const odds = parseFloat((b.odds||'').toString().replace(',','.'))||0;
+            const stake = parseFloat(b.stake)||0;
+            const winAmount = (odds*stake).toFixed(0);
+            label += ` +${winAmount}`;
           }
           st.textContent = label;
           card.append(top, mid, st);

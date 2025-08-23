@@ -57,12 +57,16 @@
       if(!a.unlocked) card.classList.add('locked');
       const img=document.createElement('img'); img.alt=a.name||''; setAchievementIcon(img,a);
       const name=document.createElement('div'); name.className='badge-name'; name.textContent=a.name||'';
-      const req=document.createElement('div'); req.className='badge-requirements'; req.textContent=descFor(a);
       // Прогресс
-      const cur = Number(a.value||0); const target = Number(a.target||0)|| (a.next_target||0) || 0; const pct = target? Math.min(100, Math.round(cur*100/target)) : 0;
-      const prog=document.createElement('div'); prog.className='achievement-progress'; const inner=document.createElement('div'); inner.className='achievement-progress-inner'; inner.style.width=pct+'%'; prog.appendChild(inner);
-      const meta=document.createElement('div'); meta.className='badge-meta'; meta.textContent = target? `${cur} / ${target}${a.next_target? ' (следующая цель: '+a.next_target+')':''}` : `${cur}`;
-      card.append(img,name,req,prog,meta); badgesContainer.appendChild(card);
+      const progressWrap=document.createElement('div'); progressWrap.className='ach-progress-wrap';
+      const bar=document.createElement('div'); bar.className='ach-progress-bar';
+      const fill=document.createElement('div'); fill.className='ach-progress-fill';
+      const cur=Number(a.value||0); const target=Number(a.target||0)||1; const pct=Math.min(100, Math.round(cur*100/target)); fill.style.width=pct+'%';
+      bar.appendChild(fill); progressWrap.appendChild(bar);
+      const meta=document.createElement('div'); meta.className='ach-progress-meta';
+      const next=a.next_target; meta.textContent = next? `${cur} / ${target} (след. цель: ${next})` : `${cur} / ${target}`;
+      const req=document.createElement('div'); req.className='badge-requirements'; req.textContent=descFor(a);
+      card.append(img,name,progressWrap,meta,req); badgesContainer.appendChild(card);
     });
   }
   function fetchAchievements(){

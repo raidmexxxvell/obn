@@ -37,15 +37,11 @@ body.theme-ufo .profile-header-card { background: var(--ufo-card); }
 .profile-header-card .profile-avatar { margin:0; width:72px; height:72px; box-shadow:none; border:2px solid rgba(255,255,255,0.15); }
 .profile-mini-stats { display:flex; gap:10px; margin-top:8px; }
 .profile-mini-stats .stat-card { flex:1; padding:10px 8px; }
-/* Удаляем скрытие старой раскладки (возврат) */
-/* .profile-header { display:none !important; } */
-/* .profile-stats { display:none !important; } */
+/* Скрываем старую раскладку */
+.profile-header { display:none !important; }
+.profile-stats { display:none !important; }
 
-/* Кнопки темы UFO */
-body.theme-ufo .details-btn, body.theme-ufo .bet-btn, body.theme-ufo .share-btn, body.theme-ufo .refresh-btn, body.theme-ufo .checkin-button, body.theme-ufo .back-btn, body.theme-ufo .btn-primary { background: var(--ufo-accent1); border:none; color:#fff; }
-body.theme-ufo .details-btn:hover, body.theme-ufo .bet-btn:hover, body.theme-ufo .share-btn:hover, body.theme-ufo .refresh-btn:hover, body.theme-ufo .checkin-button:hover, body.theme-ufo .back-btn:hover { filter: brightness(1.05); }
-body.theme-ufo .subtab-item { background: var(--ufo-card); }
-body.theme-ufo .subtab-item.active { color:#fff; }
+/* splash-стили перенесены в splash.css */
 
 /* --- ОСНОВНОЕ ПРИЛОЖЕНИЕ --- */
 body {
@@ -1149,6 +1145,32 @@ body.theme-blb .share-btn {
 }
 
 /* Прогресс достижений */
-.achievement-progress { width:100%; height:6px; background:rgba(255,255,255,0.08); border-radius:4px; margin-top:6px; overflow:hidden; }
-.achievement-progress-inner { height:100%; background:var(--ufo-accent1); width:0; transition:width .6s ease; }
-.badge-meta { font-size:10px; color:var(--ufo-muted); margin-top:4px; }
+.ach-progress-wrap { width:100%; margin-top:4px; }
+.ach-progress-bar { width:100%; height:6px; border-radius:4px; background:rgba(255,255,255,0.08); overflow:hidden; }
+.ach-progress-fill { height:100%; width:0; background:linear-gradient(135deg,#ffb86b,#6c8cff); transition:width .6s ease; }
+.ach-progress-meta { width:100%; text-align:center; font-size:10px; margin-top:4px; color:var(--gray); }
+body.theme-ufo .ach-progress-bar { background: var(--ufo-glass); }
+body.theme-ufo .ach-progress-fill { background: var(--ufo-accent1); }
+body.theme-ufo .ach-progress-meta { color: var(--ufo-muted); }
+/* Кнопки UFO перекрашены */
+body.theme-ufo .details-btn,
+body.theme-ufo .checkin-button,
+body.theme-ufo .refresh-btn,
+body.theme-ufo .share-btn,
+body.theme-ufo .btn-primary,
+body.theme-ufo .predictions-wrap button,
+body.theme-ufo .bet-card button {
+  background: var(--ufo-accent1) !important;
+  border:none;
+  color:#0f1720 !important;
+  font-weight:700;
+}
+body.theme-ufo .details-btn:hover,
+body.theme-ufo .checkin-button:hover { filter:brightness(1.05); }
+body.theme-ufo .subtab-item.active { color:#0f1720; font-weight:700; }
+body.theme-ufo .subtab-item { background: var(--ufo-glass); border:1px solid rgba(255,255,255,0.05); }
+body.theme-ufo .subtab-item:not(.active){ color: var(--ufo-muted); }
+body.theme-ufo .league-table-wrap, body.theme-ufo .pred-pane, body.theme-ufo .ufo-pane, body.theme-ufo .bets-list .bet-card { background: var(--ufo-card); border:1px solid rgba(255,255,255,0.06); }
+body.theme-ufo .bet-status.open { color: var(--ufo-muted); }
+body.theme-ufo .bet-status.won { color:#34d399; }
+body.theme-ufo .bet-status.lost { color:#f87171; }
