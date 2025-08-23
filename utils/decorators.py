@@ -1,0 +1,257 @@
+"""
+Decorators for Liga Obninska
+Security, performance, and utility decorators
+"""
+import functools
+import time
+import os
+from datetime import datetime, timezone
+from flask import request, jsonify, g
+from typing import Callable, Any, Dict, Optional
+
+from utils.security import telegram_security, rate_limiter, input_validator
+
+def require_telegram_auth(max_age_seconds: int = 86400):
+    """Decorator to require valid Telegram authentication"""
+    def decorator(f: Callable) -> Callable:
+        @functools.wraps(f)
+        def decorated_function(*args, **kwargs):
+            # Get initData from request
+            init_data = request.form.get('initData', '') or request.json.get('initData', '') if request.json else ''
+            
+            if not init_data:
+                return jsonify({'error': 'Authentication required'}), 401
+            
+            # Get bot token
+            bot_token = os.environ.get('BOT_TOKEN')
+            if not bot_token:
+                # In development mode, allow without token
+                if os.environ.get('FLASK_ENV') == 'development':
+                    g.user = {'id': '123', 'first_name': 'Dev', 'username': 'dev_user'}
+                    g.auth_data = {'user': g.user, 'auth_date': str(int(time.time()))}
+                    return f(*args, **kwargs)
+                return jsonify({'error': 'Service configuration error'}), 500
+            
+            # Verify initData
+            is_valid, auth_data = telegram_security.verify_init_data(init_data, bot_token, max_age_seconds)
+            
+            if not is_valid or not auth_data:
+                return jsonify({'error': 'Invalid authentication'}), 401
+            
+            # Store auth data in g for use in the route
+            g.user = auth_data.get('user', {})
+            g.auth_data = auth_data
+            
+            return f(*args, **kwargs)
+        
+        return decorated_function
+    return decorator
+
+def require_admin():
+    """Decorator to require admin privileges"""
+    def decorator(f: Callable) -> Callable:
+        @functools.wraps(f)
+        def decorated_function(*args, **kwargs):
+            # Check if user is authenticated
+            if not hasattr(g, 'user') or not g.user:
+                return jsonify({'error': 'Authentication required'}), 401
+            
+            # Check admin status
+            user_id = str(g.user.get('id', ''))
+            admin_id = os.environ.get('ADMIN_USER_ID', '')
+            
+            if not admin_id or user_id != admin_id:
+                return jsonify({'error': 'Admin access required'}), 403
+            
+            return f(*args, **kwargs)
+        
+        return decorated_function
+    return decorator
+
+def rate_limit(max_requests: int = 60, time_window: int = 60, per: str = 'ip'):
+    """Decorator for rate limiting"""
+    def decorator(f: Callable) -> Callable:
+        @functools.wraps(f)
+        def decorated_function(*args, **kwargs):
+            # Determine identifier
+            if per == 'ip':
+                identifier = request.remote_addr or 'unknown'
+            elif per == 'user':
+                identifier = getattr(g, 'user', {}).get('id', request.remote_addr or 'unknown')
+            else:
+                identifier = request.remote_addr or 'unknown'
+            
+            # Check rate limit
+            if not rate_limiter.is_allowed(f"{f.__name__}:{identifier}", max_requests, time_window):
+                return jsonify({'error': 'Rate limit exceeded'}), 429
+            
+            return f(*args, **kwargs)
+        
+        return decorated_function
+    return decorator
+
+def validate_input(**validators):
+    """Decorator for input validation"""
+    def decorator(f: Callable) -> Callable:
+        @functools.wraps(f)
+        def decorated_function(*args, **kwargs):
+            errors = []
+            
+            # Get data from request
+            if request.method == 'POST':
+                data = request.form.to_dict()
+                if request.json:
+                    data.update(request.json)
+            else:
+                data = request.args.to_dict()
+            
+            # Validate each field
+            for field_name, validator_config in validators.items():
+                value = data.get(field_name)
+                
+                if isinstance(validator_config, dict):
+                    validator_type = validator_config.get('type')
+                    required = validator_config.get('required', False)
+                    min_length = validator_config.get('min_length')
+                    max_length = validator_config.get('max_length')
+                else:
+                    validator_type = validator_config
+                    required = False
+                    min_length = None
+                    max_length = None
+                
+                # Check if required
+                if required and not value:
+                    errors.append(f"{field_name} is required")
+                    continue
+                
+                if value is None:
+                    continue
+                
+                # Validate based on type
+                if validator_type == 'team_name':
+                    is_valid, result = input_validator.validate_team_name(value)
+                    if not is_valid:
+                        errors.append(f"{field_name}: {result}")
+                
+                elif validator_type == 'score':
+                    is_valid, result = input_validator.validate_score(value)
+                    if not is_valid:
+                        errors.append(f"{field_name}: {result}")
+                
+                elif validator_type == 'int':
+                    try:
+                        int(value)
+                    except (ValueError, TypeError):
+                        errors.append(f"{field_name} must be an integer")
+                
+                elif validator_type == 'string':
+                    if not isinstance(value, str):
+                        errors.append(f"{field_name} must be a string")
+                    elif min_length and len(value) < min_length:
+                        errors.append(f"{field_name} too short (min {min_length})")
+                    elif max_length and len(value) > max_length:
+                        errors.append(f"{field_name} too long (max {max_length})")
+            
+            if errors:
+                return jsonify({'error': 'Validation failed', 'details': errors}), 400
+            
+            return f(*args, **kwargs)
+        
+        return decorated_function
+    return decorator
+
+def cache_response(timeout: int = 300, key_func: Optional[Callable] = None):
+    """Decorator for caching responses"""
+    def decorator(f: Callable) -> Callable:
+        @functools.wraps(f)
+        def decorated_function(*args, **kwargs):
+            # Generate cache key
+            if key_func:
+                cache_key = key_func(*args, **kwargs)
+            else:
+                cache_key = f"{f.__name__}:{request.path}:{request.query_string.decode()}"
+            
+            # Try to get from cache (if cache system is available)
+            try:
+                from optimizations.multilevel_cache import get_cache
+                cache = get_cache()
+                if cache:
+                    cached_result = cache.get(cache_key)
+                    if cached_result is not None:
+                        return cached_result
+            except ImportError:
+                pass
+            
+            # Execute function
+            result = f(*args, **kwargs)
+            
+            # Store in cache
+            try:
+                if cache:
+                    cache.set(cache_key, result, timeout)
+            except:
+                pass  # Fail silently if cache is not available
+            
+            return result
+        
+        return decorated_function
+    return decorator
+
+def log_performance(threshold_ms: int = 1000):
+    """Decorator to log slow requests"""
+    def decorator(f: Callable) -> Callable:
+        @functools.wraps(f)
+        def decorated_function(*args, **kwargs):
+            start_time = time.time()
+            
+            try:
+                result = f(*args, **kwargs)
+                return result
+            finally:
+                duration = (time.time() - start_time) * 1000
+                
+                if duration > threshold_ms:
+                    print(f"SLOW REQUEST: {f.__name__} took {duration:.2f}ms")
+        
+        return decorated_function
+    return decorator
+
+def handle_errors(default_response: Dict[str, Any] = None):
+    """Decorator for consistent error handling"""
+    def decorator(f: Callable) -> Callable:
+        @functools.wraps(f)
+        def decorated_function(*args, **kwargs):
+            try:
+                return f(*args, **kwargs)
+            except ValueError as e:
+                return jsonify({'error': 'Invalid input', 'details': str(e)}), 400
+            except KeyError as e:
+                return jsonify({'error': 'Missing required field', 'field': str(e)}), 400
+            except Exception as e:
+                # Log the error
+                print(f"ERROR in {f.__name__}: {str(e)}")
+                
+                # Return default response or generic error
+                if default_response:
+                    return jsonify(default_response), 500
+                else:
+                    return jsonify({'error': 'Internal server error'}), 500
+        
+        return decorated_function
+    return decorator
+
+def require_database():
+    """Decorator to ensure database is available"""
+    def decorator(f: Callable) -> Callable:
+        @functools.wraps(f)
+        def decorated_function(*args, **kwargs):
+            # Check if database is configured
+            database_url = os.environ.get('DATABASE_URL')
+            if not database_url:
+                return jsonify({'error': 'Database not configured'}), 503
+            
+            return f(*args, **kwargs)
+        
+        return decorated_function
+    return decorator
