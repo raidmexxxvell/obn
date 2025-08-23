@@ -1533,6 +1533,184 @@ def api_admin_order_delete(order_id: int):
         app.logger.error(f"Admin order delete error: {e}")
         return jsonify({'error': 'internal'}), 500
 
+# -------------------- ADMIN MATCHES & LINEUPS (missing frontend endpoints) --------------------
+@app.route('/api/admin/matches/upcoming', methods=['POST'])
+@require_admin
+def api_admin_matches_upcoming():
+    """Возвращает список ближайших матчей для админки.
+    Формат элемента: {id, home_team, away_team, match_date(iso), lineups?}
+    match id: sha1(home|away|date) первые 12 hex.
+    """
+    try:
+        # auth уже прошёл через @require_admin; дополнительно верифицируем initData для единообразия
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData',''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'unauthorized'}), 401
+        # грузим туры
+        try:
+            tours = _load_all_tours_from_sheet()
+        except Exception as e:
+            app.logger.error(f"admin_upcoming: sheet error {e}")
+            return jsonify({'error': 'schedule_unavailable'}), 500
+        now = datetime.now()
+        out = []
+        import hashlib
+        for t in tours or []:
+            for m in t.get('matches', []) or []:
+                # Берём будущие или начинающиеся через <= 1 день
+                dt = None
+                try:
+                    if m.get('datetime'):
+                        dt = datetime.fromisoformat(str(m['datetime']))
+                    elif m.get('date'):
+                        dt = datetime.fromisoformat(str(m['date']))
+                except Exception:
+                    dt = None
+                if not dt or dt < (now - timedelta(hours=1)):
+                    continue
+                home = (m.get('home') or '').strip()
+                away = (m.get('away') or '').strip()
+                if not home or not away:
+                    continue
+                date_key = (dt.isoformat())
+                h = hashlib.sha1(f"{home}|{away}|{date_key[:10]}".encode('utf-8')).hexdigest()[:12]
+                # Попробуем достать уже сохранённые составы из БД (если доступна)
+                lineups = None
+                if SessionLocal is not None:
+                    db: Session = get_db()
+                    try:
+                        rows = db.query(MatchLineupPlayer).filter(
+                            MatchLineupPlayer.home==home, MatchLineupPlayer.away==away
+                        ).all()
+                        if rows:
+                            def pack(team, pos):
+                                return [
+                                    { 'name': r.player, 'number': r.jersey_number, 'position': r.position if r.position!='starting_eleven' else None }
+                                    for r in rows if r.team==team and (pos=='main' and r.position=='starting_eleven' or pos=='sub' and r.position=='substitute')
+                                ]
+                            lineups = {
+                                'home': { 'main': pack('home','main'), 'sub': pack('home','sub') },
+                                'away': { 'main': pack('away','main'), 'sub': pack('away','sub') },
+                            }
+                    except Exception:
+                        lineups = None
+                    finally:
+                        db.close()
+                out.append({
+                    'id': h,
+                    'home_team': home,
+                    'away_team': away,
+                    'match_date': dt.isoformat() if dt else None,
+                    'lineups': lineups
+                })
+        # отсортируем по дате
+        out.sort(key=lambda x: x.get('match_date') or '')
+        return jsonify({'matches': out})
+    except Exception as e:
+        app.logger.error(f"admin matches upcoming error: {e}")
+        return jsonify({'error': 'internal'}), 500
+
+def _resolve_match_by_id(match_id: str, tours=None):
+    """Восстанавливает (home,away,dt) по match_id (sha1 первые 12)."""
+    import hashlib
+    if tours is None:
+        tours = _load_all_tours_from_sheet()
+    for t in tours or []:
+        for m in t.get('matches', []) or []:
+            home = (m.get('home') or '').strip(); away = (m.get('away') or '').strip()
+            if not home or not away:
+                continue
+            dt = None
+            try:
+                if m.get('datetime'):
+                    dt = datetime.fromisoformat(str(m['datetime']))
+                elif m.get('date'):
+                    dt = datetime.fromisoformat(str(m['date']))
+            except Exception:
+                dt = None
+            date_key = (dt.isoformat() if dt else '')[:10]
+            h = hashlib.sha1(f"{home}|{away}|{date_key}".encode('utf-8')).hexdigest()[:12]
+            if h == match_id:
+                return home, away, dt
+    return None, None, None
+
+@app.route('/api/admin/match/<match_id>/lineups', methods=['POST'])
+@require_admin
+def api_admin_get_lineups(match_id: str):
+    try:
+        home, away, dt = _resolve_match_by_id(match_id)
+        if not home:
+            return jsonify({'error': 'not found'}), 404
+        result = { 'home': { 'main': [], 'sub': [] }, 'away': { 'main': [], 'sub': [] } }
+        if SessionLocal is not None:
+            db: Session = get_db()
+            try:
+                rows = db.query(MatchLineupPlayer).filter(MatchLineupPlayer.home==home, MatchLineupPlayer.away==away).all()
+                for r in rows:
+                    entry = { 'name': r.player, 'number': r.jersey_number, 'position': None if r.position=='starting_eleven' else r.position }
+                    bucket = 'main' if r.position=='starting_eleven' else 'sub'
+                    result[r.team][bucket].append(entry)
+            except Exception:
+                pass
+            finally:
+                db.close()
+        return jsonify({'lineups': result})
+    except Exception as e:
+        app.logger.error(f"admin get lineups error: {e}")
+        return jsonify({'error': 'internal'}), 500
+
+@app.route('/api/admin/match/<match_id>/lineups/save', methods=['POST'])
+@require_admin
+def api_admin_save_lineups(match_id: str):
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData',''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'unauthorized'}), 401
+        raw = request.form.get('lineups') or ''
+        try:
+            data = json.loads(raw)
+        except Exception:
+            return jsonify({'error': 'bad_json'}), 400
+        home, away, dt = _resolve_match_by_id(match_id)
+        if not home:
+            return jsonify({'error': 'not_found'}), 404
+        if SessionLocal is None:
+            return jsonify({'error': 'db_unavailable'}), 500
+        db: Session = get_db()
+        try:
+            # удаляем прежние
+            db.query(MatchLineupPlayer).filter(MatchLineupPlayer.home==home, MatchLineupPlayer.away==away).delete()
+            def ins(team, arr, pos_label):
+                for p in arr or []:
+                    name = (p.get('name') or '').strip()
+                    if not name:
+                        continue
+                    num = p.get('number')
+                    try:
+                        if num is not None:
+                            num = int(num)
+                    except Exception:
+                        num = None
+                    pos = p.get('position') or 'starting_eleven'
+                    if pos not in ('starting_eleven','substitute'):
+                        # фронт передаёт main/sub -> нормализуем
+                        if pos in ('main', 'start'): pos = 'starting_eleven'
+                        elif pos in ('sub', 'bench'): pos = 'substitute'
+                        else: pos = 'starting_eleven'
+                    row = MatchLineupPlayer(home=home, away=away, team=team, player=name, jersey_number=num, position=('starting_eleven' if pos=='starting_eleven' else 'substitute'))
+                    db.add(row)
+            ins('home', (data.get('home') or {}).get('main'), 'starting_eleven')
+            ins('home', (data.get('home') or {}).get('sub'), 'substitute')
+            ins('away', (data.get('away') or {}).get('main'), 'starting_eleven')
+            ins('away', (data.get('away') or {}).get('sub'), 'substitute')
+            db.commit()
+            return jsonify({'success': True})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"admin save lineups error: {e}")
+        return jsonify({'error': 'internal'}), 500
+
 @app.route('/api/shop/my-orders', methods=['POST'])
 def api_shop_my_orders():
     """Возвращает последние 50 заказов текущего пользователя. Требует initData."""
@@ -5074,8 +5252,11 @@ def health_sync():
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
-# Telegram webhook handler with proper validation and logging
-@app.route('/<path:maybe_token>', methods=['POST'])
+# Telegram webhook handler with proper validation and logging.
+# ВАЖНО: ранее использовался маршрут '/<path:maybe_token>' который перехватывал ВСЕ многоуровневые POST пути
+# (например '/api/admin/matches/upcoming'), из-за чего реальные API возвращали 404 и логировались как Invalid webhook path.
+# Теперь ограничиваем webhook на префикс '/telegram/<maybe_token>' чтобы исключить конфликт.
+@app.route('/telegram/<maybe_token>', methods=['POST'])
 def telegram_webhook_handler(maybe_token: str):
     """
     Обработчик Telegram webhook с валидацией токена и логированием
@@ -5085,21 +5266,14 @@ def telegram_webhook_handler(maybe_token: str):
         # Проверяем формат токена Telegram (должен содержать ':' и быть достаточно длинным)
         if ':' in maybe_token and len(maybe_token) >= 40:
             app.logger.info(f"Received Telegram webhook for token: {maybe_token[:10]}...")
-            
-            # Получаем данные webhook
-            webhook_data = request.get_json()
+            webhook_data = request.get_json(silent=True)
             if webhook_data:
-                # Здесь можно добавить обработку webhook данных если нужно
-                # Пока просто логируем и возвращаем OK
                 return jsonify({'ok': True, 'status': 'webhook_received'}), 200
-            else:
-                app.logger.warning("Webhook received but no JSON data found")
-                return jsonify({'error': 'no data'}), 400
-        
-        # Для других путей возвращаем 404
-        app.logger.warning(f"Invalid webhook path accessed: {maybe_token}")
+            app.logger.warning("Webhook received but no JSON data found")
+            return jsonify({'error': 'no data'}), 400
+        # Некорректный токен по нашему шаблону
+        app.logger.warning(f"Invalid telegram webhook token accessed: {maybe_token}")
         return jsonify({'error': 'not found'}), 404
-        
     except Exception as e:
         app.logger.error(f"Telegram webhook handler error: {e}")
         return jsonify({'error': 'internal error'}), 500
@@ -7028,8 +7202,20 @@ def api_streams_get():
             db0: Session = get_db()
             try:
                 row0 = db0.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None)).first()
-                if not row0 and date_str:
-                    row0 = db0.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away).order_by(MatchStream.updated_at.desc()).first()
+                # Фолбек: если не нашли точное совпадение по дате
+                if not row0:
+                    # Если клиент передал дату — уже был fallback (ниже) на latest, но мы расширим и для случая пустой даты
+                    # Берём самую свежую запись по паре команд
+                    latest = db0.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away).order_by(MatchStream.updated_at.desc()).first()
+                    if latest:
+                        # Дополнительная валидация: не слишком ли старая (например > 48 часов), чтобы не подтянуть ссылку со старого матча
+                        try:
+                            if latest.updated_at and (datetime.now(timezone.utc) - latest.updated_at) > timedelta(hours=48):
+                                latest = None
+                        except Exception:
+                            pass
+                        if latest:
+                            row0 = latest
                 if row0 and ((row0.vk_video_id and row0.vk_video_id.strip()) or (row0.vk_post_url and row0.vk_post_url.strip())):
                     try:
                         app.logger.info("streams/get hit: immediate saved link")
