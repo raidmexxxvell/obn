@@ -1,5 +1,6 @@
 """Flask backend for Liga Obninska app with betting, Google Sheets and SQLAlchemy."""
 import os
+import flask  # added to reference flask.g explicitly
 import json
 import time
 import hashlib
@@ -8,7 +9,7 @@ from datetime import datetime, date, timezone
 from datetime import timedelta
 from urllib.parse import parse_qs, urlparse
 
-from flask import Flask, request, jsonify, render_template, send_from_directory
+from flask import Flask, request, jsonify, render_template, send_from_directory, g
 
 # Импорты для системы безопасности и мониторинга (Фаза 3)
 try:
@@ -4469,10 +4470,18 @@ def index():
 def get_user():
     """Получает данные пользователя из Telegram WebApp"""
     try:
-        parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
-        if not parsed or not parsed.get('user'):
-            return jsonify({'error': 'Недействительные данные'}), 401
-        user_data = parsed['user']
+        # Если декоратор уже сохранил auth_data – используем его
+        if hasattr(flask.g, 'auth_data') and getattr(flask.g, 'auth_data', {}).get('user'):
+            user_data = flask.g.auth_data['user']
+        else:
+            # Расширенный сбор initData
+            init_data = (request.form.get('initData') or request.form.get('init_data') or
+                         (request.get_json(silent=True) or {}).get('initData') if request.is_json else None or
+                         request.args.get('initData') or request.headers.get('X-Telegram-Init-Data') or '')
+            parsed = parse_and_verify_telegram_init_data(init_data or '')
+            if not parsed or not parsed.get('user'):
+                return jsonify({'error': 'Недействительные данные'}), 401
+            user_data = parsed['user']
 
         if SessionLocal is None:
             # Fallback без БД: старый путь через таблицу (на случай локальной разработки)
