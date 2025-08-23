@@ -5,6 +5,7 @@
   const tg = window.Telegram?.WebApp || null;
   const badgesContainer = document.getElementById('badges');
   const achievementPlaceholder = document.getElementById('achievement-placeholder');
+  let _loadedOnce = false;
 
   function renderAchievements(achievements){
     if (achievementPlaceholder) achievementPlaceholder.remove();
@@ -61,13 +62,19 @@
   }
 
   function fetchAchievements(){
+    if(_loadedOnce) return Promise.resolve([]);
     if(!tg || !tg.initDataUnsafe?.user){ renderAchievements([]); return Promise.resolve([]); }
     const fd = new FormData(); fd.append('initData', tg.initData || '');
     return fetch('/api/achievements',{ method:'POST', body: fd })
       .then(r=>r.json())
-      .then(data => { renderAchievements(data.achievements||[]); return data.achievements||[]; })
+      .then(data => { _loadedOnce = true; renderAchievements(data.achievements||[]); return data.achievements||[]; })
       .catch(err => { console.error('achievements load error', err); renderAchievements([]); return []; });
   }
+  // Автозагрузка при готовности профиля и при клике на вкладку "Достижения"
+  window.addEventListener('profile:user-loaded', ()=>{ try { const active = document.querySelector('.subtab-item.active[data-psub="badges"]'); if(active) fetchAchievements(); } catch(_) {} });
+  document.addEventListener('click', e=>{ const tab = e.target.closest('.subtab-item[data-psub="badges"]'); if(tab) setTimeout(()=>fetchAchievements(), 30); });
+  // Если вкладка активна сразу (по умолчанию)
+  document.addEventListener('DOMContentLoaded', ()=>{ const active = document.querySelector('.subtab-item.active[data-psub="badges"]'); if(active) fetchAchievements(); });
 
-  window.ProfileAchievements = { fetchAchievements, renderAchievements };
+  window.ProfileAchievements = { fetchAchievements, renderAchievements, forceReload: ()=>{ _loadedOnce=false; return fetchAchievements(); } };
 })();

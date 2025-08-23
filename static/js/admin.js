@@ -64,11 +64,16 @@
   async function renderAdminOrders() {
     const table = document.getElementById('admin-orders-table');
     const updated = document.getElementById('admin-orders-updated');
-    if (!table) return; const tbody = table.querySelector('tbody'); tbody.innerHTML = '';
+    if (!table) return; const tbody = table.querySelector('tbody');
+    // Чтобы избежать мерцания и дубликатов, соберём новые строки во фрагмент
+    tbody.innerHTML = '';
+    const seen = new Set();
     try {
       const fd = new FormData(); fd.append('initData', (window.Telegram?.WebApp?.initData || ''));
       const r = await fetch('/api/admin/orders', { method: 'POST', body: fd }); const data = await r.json();
       (data.orders||[]).forEach((o, idx) => {
+        const oid = o.id || o.order_id || ('idx_'+idx);
+        if (seen.has(oid)) return; seen.add(oid);
         const tr = document.createElement('tr');
         let created = o.created_at || '';
         try { created = new Date(created).toLocaleDateString('ru-RU'); } catch(_) {}

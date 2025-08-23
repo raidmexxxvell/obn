@@ -40,7 +40,21 @@
     if(!favoriteTeamSelect) return;
     favoriteTeamSelect.innerHTML='';
     const ph=document.createElement('option'); ph.value=''; ph.textContent='— выбрать —'; favoriteTeamSelect.appendChild(ph);
-    (_teamCountsCache.teams||[]).forEach(teamName=>{ const opt=document.createElement('option'); opt.value=String(teamName); opt.textContent=String(teamName); if(current && String(current)===String(teamName)) opt.selected=true; favoriteTeamSelect.appendChild(opt); });
+    // Нормализуем: если элемент объект, пробуем поля name/title/team
+    const raw = Array.isArray(_teamCountsCache.teams)? _teamCountsCache.teams : [];
+    const norm = raw.map(t => {
+      if (t == null) return '';
+      if (typeof t === 'string') return t.trim();
+      if (typeof t === 'object'){
+        return (t.name || t.title || t.team || t.team_name || '').toString().trim();
+      }
+      return String(t).trim();
+    }).filter(Boolean);
+    // Уникальные + сортировка как в исходном порядке (первая встреча)
+    const seen = new Set();
+    const ordered = [];
+    norm.forEach(n=>{ if(!seen.has(n)){ seen.add(n); ordered.push(n); } });
+    ordered.forEach(teamName=>{ const opt=document.createElement('option'); opt.value=teamName; opt.textContent=teamName; if(current && String(current)===teamName) opt.selected=true; favoriteTeamSelect.appendChild(opt); });
   }
   async function initFavoriteTeamUI(user){ await fetchTeamsAndCounts(); renderFavoriteSelect(user && (user.favorite_team||user.favoriteTeam)); }
   async function saveFavoriteTeam(value){

@@ -18,10 +18,10 @@
         console.log('[TG-PATCH] WebApp expanded');
     }
     
-    // Включаем закрытие по свайпу вниз
-    if (tg.enableClosingConfirmation) {
-        tg.enableClosingConfirmation();
-    }
+    // Ранее вызывалось tg.enableClosingConfirmation(), что включало системный диалог Telegram
+    // «Вы действительно хотите закрыть? / изменения могут быть потеряны». Убираем, чтобы не мешать UX.
+    // Если когда‑нибудь понадобится вернуть — раскомментировать ниже.
+    // if (tg.enableClosingConfirmation) { tg.enableClosingConfirmation(); }
     
     // Настраиваем viewport для лучшей работы с видео
     if (tg.setHeaderColor) {

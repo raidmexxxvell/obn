@@ -51,15 +51,57 @@
     try {
       const xpElement = document.querySelector('.stat-value[data-stat="xp"]') || document.getElementById('xp');
       const creditsElement = document.querySelector('.stat-value[data-stat="credits"]') || document.getElementById('credits');
-      if (window.CounterAnimation){
+      // Получаем текущие значения профиля (для корректного расчёта прогресса уровня)
+      const user = (window.ProfileUser && window.ProfileUser.getLastUser && window.ProfileUser.getLastUser()) || null;
+      if (window.CounterAnimation && user){
+        // Текущий уровень и XP
+        let level = user.level || 1;
+        let totalXpBefore = user.xp || 0;
+        const totalXpAfter = totalXpBefore + xpGain;
+        // Функция для вычисления отображаемых данных
+        function levelMeta(total){
+          let lvl = 1; let remain = total; let need = 100; // формула: уровень N требует N*100 для перехода на N+1
+          while(true){
+            need = lvl * 100;
+            if (remain < need) return { lvl, cur: remain, need };
+            remain -= need; lvl++;
+            if (lvl>500) return { lvl:500, cur:0, need:500*100 }; // предохранитель
+          }
+        }
+        const beforeMeta = levelMeta(totalXpBefore);
+        const afterMeta = levelMeta(totalXpAfter);
         if (xpElement){
-          const parts = xpElement.textContent.split('/');
-            const curXP = parseInt(parts[0]) || 0;
-          window.CounterAnimation.animate(xpElement, curXP, curXP + xpGain, 1000, v=>`${v}/${parts[1]||100}`);
+          // Анимируем не просто число, а плавно переход, включая возможный апгрейд уровня
+          const steps = 30; const duration = 1200; const start = performance.now();
+          function frame(now){
+            const p = Math.min(1, (now-start)/duration);
+            const eased = 1 - Math.pow(1-p,3);
+            const curTotal = totalXpBefore + (xpGain * eased);
+            const m = levelMeta(curTotal);
+            xpElement.textContent = `${Math.round(m.cur)}/${m.need}`;
+            // Обновляем полоску прогресса если есть
+            try { const bar = document.getElementById('xp-progress'); if(bar) bar.style.width = `${Math.min(100, (m.cur/m.need)*100)}%`; } catch(_) {}
+            try { const lvlEl = document.getElementById('level'); const clEl=document.getElementById('current-level'); if (lvlEl) lvlEl.textContent = m.lvl; if(clEl) clEl.textContent = m.lvl; } catch(_) {}
+            if (p<1) requestAnimationFrame(frame); else {
+              xpElement.textContent = `${afterMeta.cur}/${afterMeta.need}`;
+            }
+          }
+          requestAnimationFrame(frame);
         }
         if (creditsElement){
           const curCr = parseInt((creditsElement.textContent||'0').replace(/\D/g,''))||0;
-          window.CounterAnimation.animate(creditsElement, curCr, curCr + creditsGain, 1000, v=>v.toLocaleString());
+            window.CounterAnimation.animate(creditsElement, curCr, curCr + creditsGain, 1200, v=>Math.round(v).toLocaleString());
+        }
+      } else if (window.CounterAnimation) {
+        // fallback прежнее поведение
+        if (xpElement){
+          const parts = xpElement.textContent.split('/');
+          const curXP = parseInt(parts[0]) || 0;
+          window.CounterAnimation.animate(xpElement, curXP, curXP + xpGain, 1200, v=>`${Math.round(v)}/${parts[1]||100}`);
+        }
+        if (creditsElement){
+          const curCr = parseInt((creditsElement.textContent||'0').replace(/\D/g,''))||0;
+          window.CounterAnimation.animate(creditsElement, curCr, curCr + creditsGain, 1200, v=>Math.round(v).toLocaleString());
         }
       }
       if (window.UIAnimations){ if (xpElement) window.UIAnimations.pulse(xpElement); if (creditsElement) window.UIAnimations.pulse(creditsElement); }
