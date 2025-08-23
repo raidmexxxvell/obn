@@ -301,11 +301,23 @@
         } catch(_) {}
       }
   
-  const url = `/api/streams/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}&date=${encodeURIComponent(dateStr)}`;
-      const r = await fetch(url, { cache: 'no-store' });
-      const ans = await r.json();
-      
-      if (ans && ans.available && (ans.vkVideoId || ans.vkPostUrl)) return ans;
+      // Первая попытка: с датой (если есть)
+      let ans = null;
+      const base = `/api/streams/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}`;
+      if (dateStr) {
+        const url1 = `${base}&date=${encodeURIComponent(dateStr)}`;
+        try {
+          const r1 = await fetch(url1, { cache: 'no-store' });
+          ans = await r1.json();
+          if (ans && ans.available && (ans.vkVideoId || ans.vkPostUrl)) return ans;
+        } catch(_) {}
+      }
+      // Вторая попытка: без даты (сервер теперь отдаёт последнюю свежую)
+      try {
+        const r2 = await fetch(base, { cache: 'no-store' });
+        const ans2 = await r2.json();
+        if (ans2 && ans2.available && (ans2.vkVideoId || ans2.vkPostUrl)) return ans2;
+      } catch(_) {}
     }catch(_){/* noop */}
     return null;
   }
@@ -420,4 +432,125 @@
   }
 
   window.Streams = { setupMatchStream, onStreamTabActivated, resetOnLeave };
+
+  // ---------------- Комментарии к трансляции -----------------
+  // Минимальная реализация поверх существующих эндпоинтов.
+  function createCommentsUI(pane, match){
+    const wrap = document.createElement('div');
+    wrap.className = 'stream-comments';
+    wrap.style.marginTop = '12px';
+    wrap.style.borderTop = '1px solid rgba(255,255,255,0.08)';
+    wrap.style.paddingTop = '8px';
+    wrap.innerHTML = `<div class="sc-head" style="font-size:13px;font-weight:600;opacity:.85;margin-bottom:4px;">Комментарии</div>`;
+    const list = document.createElement('div');
+    list.className = 'sc-list';
+    list.style.maxHeight = '180px';
+    list.style.overflowY = 'auto';
+    list.style.fontSize = '13px';
+    list.style.lineHeight = '1.3';
+    list.style.paddingRight = '4px';
+    list.innerHTML = '<div style="opacity:.6;">Загрузка...</div>';
+    const form = document.createElement('div');
+    form.className = 'sc-form';
+    form.style.display = 'flex';
+    form.style.gap = '6px';
+    form.style.marginTop = '6px';
+    const input = document.createElement('input');
+    input.type='text';
+    input.placeholder='Ваш комментарий';
+    input.maxLength = 280;
+    input.style.flex='1';
+    input.style.fontSize='13px';
+    input.autocomplete='off';
+    const btn = document.createElement('button');
+    btn.type='button';
+    btn.textContent='Отпр.';
+    btn.className='details-btn';
+    btn.style.fontSize='12px';
+    const hint = document.createElement('div');
+    hint.className='sc-hint';
+    hint.style.fontSize='11px';
+    hint.style.marginTop='4px';
+    hint.style.minHeight='14px';
+    form.append(input, btn);
+    wrap.append(list, form, hint);
+    pane.appendChild(wrap);
+    return { list, input, btn, hint, wrap };
+  }
+
+  function renderComments(listEl, items){
+    if(!Array.isArray(items) || !items.length){
+      listEl.innerHTML = '<div style="opacity:.6;">Пока нет комментариев</div>';
+      return;
+    }
+    const frag = document.createDocumentFragment();
+    items.forEach(it=>{
+      const row = document.createElement('div');
+      row.className='sc-item';
+      row.style.padding='3px 0';
+      const name = document.createElement('span');
+      name.style.fontWeight='600';
+      name.style.marginRight='4px';
+      name.textContent = (it.name||'User')+':';
+      const content = document.createElement('span');
+      content.textContent = it.content||'';
+      row.append(name, content);
+      frag.appendChild(row);
+    });
+    listEl.innerHTML=''; listEl.appendChild(frag);
+    // автопрокрутка вниз, если почти внизу
+    try {
+      const nearBottom = (listEl.scrollTop + listEl.clientHeight + 30) >= listEl.scrollHeight;
+      if (nearBottom) listEl.scrollTop = listEl.scrollHeight;
+    } catch(_) {}
+  }
+
+  window.initStreamComments = function(pane, match){
+    try {
+      if (!match || !pane) return;
+      if (pane.__commentsInited) return;
+      const ui = createCommentsUI(pane, match);
+      pane.__commentsInited = true;
+      const state = { etag:null, dateStr:(match?.datetime||match?.date||'').toString().slice(0,10) };
+      function buildQuery(){
+        const base = `/api/match/comments/list?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}`;
+        return state.dateStr? base+`&date=${encodeURIComponent(state.dateStr)}`: base;
+      }
+      async function loadOnce(){
+        const url = buildQuery();
+        const hdrs = { 'Cache-Control':'no-cache' };
+        if (state.etag) hdrs['If-None-Match']=state.etag;
+        try {
+          const r = await fetch(url, { headers: hdrs });
+          if (r.status === 304) return; // не изменилось
+          const et = r.headers.get('ETag'); if (et) state.etag = et;
+          const d = await r.json().catch(()=>({}));
+          if (Array.isArray(d.items)) renderComments(ui.list, d.items);
+        } catch(_) {}
+      }
+      pane.__startCommentsPoll = function(){ if (pane.__commentsTimer) return; loadOnce(); pane.__commentsTimer = setInterval(loadOnce, 10000); };
+      pane.__stopCommentsPoll = function(){ try { clearInterval(pane.__commentsTimer); } catch(_){} pane.__commentsTimer=null; };
+      // Автостарт сразу после создания
+      pane.__startCommentsPoll();
+      ui.btn.onclick = async ()=>{
+        const val = (ui.input.value||'').trim();
+        if (!val){ ui.hint.textContent='Пусто'; ui.hint.style.color='#f66'; return; }
+        ui.btn.disabled=true; const old=ui.btn.textContent; ui.btn.textContent='...'; ui.hint.textContent='';
+        try {
+          const fd = new FormData();
+          fd.append('initData', window.Telegram?.WebApp?.initData || '');
+            fd.append('home', match.home||''); fd.append('away', match.away||'');
+            if (state.dateStr) fd.append('date', state.dateStr);
+            fd.append('content', val);
+          const r = await fetch('/api/match/comments/add', { method:'POST', body: fd });
+          const d = await r.json().catch(()=>({}));
+          if(!r.ok || d.error){ throw new Error(d.error||'err'); }
+          ui.input.value=''; ui.hint.textContent='Отправлено'; ui.hint.style.color='#4caf50';
+          // моментально обновим
+          state.etag=null; loadOnce();
+        } catch(e){ ui.hint.textContent = e?.message || 'Ошибка'; ui.hint.style.color='#f66'; }
+        finally { ui.btn.disabled=false; ui.btn.textContent=old; }
+      };
+    } catch(_) {}
+  };
 })();
