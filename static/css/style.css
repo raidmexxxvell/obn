@@ -11,7 +11,35 @@
     --card-bg: rgba(30, 41, 59, 0.7);
     --border-radius: 12px;
     --transition: all 0.3s ease;
+    /* Новая палитра для НЛО (применим постфактум классом .theme-ufo) */
+    --ufo-bg:#0f1720;
+    --ufo-card:#111827;
+    --ufo-muted:#9aa4b2;
+    --ufo-accent1:linear-gradient(135deg,#ffb86b,#6c8cff);
+    --ufo-glass:rgba(255,255,255,0.03);
 }
+
+/* Тема UFO */
+body.theme-ufo { background: var(--ufo-bg); }
+body.theme-ufo .stat-card,
+body.theme-ufo .checkin-section,
+body.theme-ufo .achievement-card,
+body.theme-ufo .referral-box,
+body.theme-ufo .profile-header-card { background: var(--ufo-card); border:1px solid rgba(255,255,255,0.08); }
+body.theme-ufo .stat-value { color:#fff; }
+body.theme-ufo .stat-label, body.theme-ufo .level-info, body.theme-ufo .badge-requirements, body.theme-ufo .ref-note, body.theme-ufo .ref-stats { color: var(--ufo-muted); }
+body.theme-ufo .xp-progress { background: var(--ufo-accent1); }
+body.theme-ufo .checkin-day.completed, body.theme-ufo .checkin-day.active { background: var(--ufo-accent1); }
+body.theme-ufo .subtab-item.active { background: var(--ufo-accent1); }
+/* Компоновка профиля в едином блоке */
+.profile-header-card { display:grid; grid-template-columns:72px 1fr; gap:14px; padding:14px; border-radius:14px; background:var(--card-bg); margin-bottom:14px; align-items:center; }
+body.theme-ufo .profile-header-card { background: var(--ufo-card); }
+.profile-header-card .profile-avatar { margin:0; width:72px; height:72px; box-shadow:none; border:2px solid rgba(255,255,255,0.15); }
+.profile-mini-stats { display:flex; gap:10px; margin-top:8px; }
+.profile-mini-stats .stat-card { flex:1; padding:10px 8px; }
+/* Скрываем старую раскладку */
+.profile-header { display:none !important; }
+.profile-stats { display:none !important; }
 
 /* splash-стили перенесены в splash.css */
 

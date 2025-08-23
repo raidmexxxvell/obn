@@ -11,7 +11,8 @@
     if (achievementPlaceholder) achievementPlaceholder.remove();
     if (!badgesContainer) return;
     badgesContainer.innerHTML='';
-    if(!achievements || !achievements.length) return;
+    if(!achievements || !achievements.length){
+      const empty=document.createElement('div'); empty.style.cssText='padding:12px; color:var(--gray); font-size:12px;'; empty.textContent='Пока нет достижений'; badgesContainer.appendChild(empty); return; }
     const slugify = (s) => (s||'').toString().trim().toLowerCase().replace(/[\s_/]+/g,'-').replace(/[^a-z0-9\-]/g,'');
     const stateFromTier = (a) => {
       const t = (typeof a.tier === 'number') ? a.tier : null;
@@ -53,30 +54,18 @@
     };
     achievements.forEach(a => {
       const card = document.createElement('div'); card.className='achievement-card';
-      card.classList.add(a.unlocked ? '' : 'locked');
+      if(!a.unlocked) card.classList.add('locked');
       const img=document.createElement('img'); img.alt=a.name||''; setAchievementIcon(img,a);
       const name=document.createElement('div'); name.className='badge-name'; name.textContent=a.name||'';
       const req=document.createElement('div'); req.className='badge-requirements'; req.textContent=descFor(a);
       card.append(img,name,req); badgesContainer.appendChild(card);
     });
   }
-
   function fetchAchievements(){
     if(_loadedOnce) return Promise.resolve([]);
-    // Разрешаем принудительную загрузку даже без Telegram (dev режим)
-    if(!tg || !tg.initDataUnsafe?.user){
-      const fd = new FormData();
-      fd.append('initData', tg?.initData || '');
-      return fetch('/api/achievements',{ method:'POST', body: fd })
-        .then(r=>r.json())
-        .then(data => { _loadedOnce = true; renderAchievements(data.achievements||[]); return data.achievements||[]; })
-        .catch(err => { console.error('achievements load error (no tg user)', err); renderAchievements([]); return []; });
-    }
-    const fd = new FormData(); fd.append('initData', tg.initData || '');
-    return fetch('/api/achievements',{ method:'POST', body: fd })
-      .then(r=>r.json())
-      .then(data => { _loadedOnce = true; renderAchievements(data.achievements||[]); return data.achievements||[]; })
-      .catch(err => { console.error('achievements load error', err); renderAchievements([]); return []; });
+    const send=(init)=> fetch('/api/achievements',{ method:'POST', body: init }).then(r=>r.json()).then(data=>{ console.debug('achievements data',data); _loadedOnce=true; renderAchievements(data.achievements||[]); return data.achievements||[]; });
+    if(!tg || !tg.initDataUnsafe?.user){ const fd=new FormData(); fd.append('initData', tg?.initData||''); return send(fd).catch(err=>{ console.error('achievements load error (no tg user)',err); renderAchievements([]); return []; }); }
+    const fd=new FormData(); fd.append('initData', tg.initData||''); return send(fd).catch(err=>{ console.error('achievements load error',err); renderAchievements([]); return []; });
   }
   // Автозагрузка при готовности профиля и при клике на вкладку "Достижения"
   window.addEventListener('profile:user-loaded', ()=>{ try { const active = document.querySelector('.subtab-item.active[data-psub="badges"]'); if(active) fetchAchievements(); } catch(_) {} });
