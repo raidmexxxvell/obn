@@ -7,7 +7,7 @@ services:
     pythonVersion: 3.12
     plan: free
     buildCommand: pip install --upgrade pip && pip install -r requirements.txt
-    startCommand: gunicorn -k eventlet -w 1 -b 0.0.0.0:$PORT wsgi:app
+  startCommand: gunicorn -w 2 -b 0.0.0.0:$PORT wsgi:app
     healthCheckPath: /ping
     autoDeploy: true
     envVars:
@@ -26,6 +26,9 @@ services:
 
 # Быстрый откат на dev сервер (при проблемах с gunicorn):
 #   заменить startCommand на: python app.py
+# Для полноценного WebSocket (Flask-SocketIO) можно переключиться на gevent позже:
+#   pip install gevent gevent-websocket
+#   startCommand: gunicorn -k geventwebsocket.gunicorn.workers.GeventWebSocketWorker -w 1 -b 0.0.0.0:$PORT wsgi:app
 
 # Примечание:
 #  - Python 3.13 пока может быть не полностью совместим с eventlet; 3.12 стабильнее.
