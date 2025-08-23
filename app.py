@@ -163,6 +163,7 @@ if SECURITY_SYSTEM_AVAILABLE:
         rate_limiter = RateLimiter()
         sql_protection = SQLInjectionPrevention()
         performance_metrics = PerformanceMetrics()
+        db_monitor = DatabaseMonitor()
         health_check = HealthCheck()
         SecurityMiddleware(app)
         PerformanceMiddleware(app)
@@ -174,6 +175,7 @@ if SECURITY_SYSTEM_AVAILABLE:
             telegram_security=telegram_security,
             rate_limiter=rate_limiter,
             performance_metrics=performance_metrics,
+            db_monitor=db_monitor,
             health_check=health_check,
         )
         print('[INFO] Phase 3: Security and monitoring middleware activated')
@@ -1920,12 +1922,8 @@ if engine is not None:
 def get_db() -> Session:
     if SessionLocal is None:
         raise RuntimeError('База данных не сконфигурирована (DATABASE_URL не задан).')
-    
     # Интеграция с системой мониторинга БД (Фаза 3)
-    if SECURITY_SYSTEM_AVAILABLE and app.config.get('performance_metrics'):
-        db_monitor = DatabaseMonitor(SessionLocal.bind if hasattr(SessionLocal, 'bind') else None)
-        db_monitor.record_connection()
-    
+    # Упрощено: просто возвращаем сессию; мониторинг запросов делается через SQLAlchemy events в DatabaseMiddleware
     return SessionLocal()
 
 def _generate_ref_code(uid: int) -> str:

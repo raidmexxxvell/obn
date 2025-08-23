@@ -11,13 +11,54 @@ from typing import Callable, Any, Dict, Optional
 
 from utils.security import telegram_security, rate_limiter, input_validator
 
+# --- Backward compatibility adapters ---
+# В старом коде могли использовать @validate_input(['field1','field2']).
+# Текущая реализация ожидает именованные валидаторы. Добавим тонкий слой,
+# позволяющий списковый вызов: @validate_input(['a','b']) будет трактоваться
+# как просто проверка присутствия (required string) этих полей.
+
+def _compat_validate_input_arg(arg):
+    if isinstance(arg, (list, tuple)):
+        spec = {}
+        for name in arg:
+            # Простейшая проверка на обязательное строковое поле
+            spec[name] = {'type': 'string', 'required': True, 'min_length': 1}
+        return spec
+    return arg
+
 def require_telegram_auth(max_age_seconds: int = 86400):
     """Decorator to require valid Telegram authentication"""
     def decorator(f: Callable) -> Callable:
         @functools.wraps(f)
         def decorated_function(*args, **kwargs):
-            # Get initData from request
-            init_data = request.form.get('initData', '') or request.json.get('initData', '') if request.json else ''
+            # Unified extraction of initData from multiple possible sources
+            init_data = None
+            try:
+                if request.method in ('POST','PUT','PATCH'):
+                    # form first
+                    init_data = request.form.get('initData') or request.form.get('init_data')
+                if init_data is None and request.is_json:
+                    try:
+                        js = request.get_json(silent=True) or {}
+                        init_data = js.get('initData') or js.get('init_data')
+                    except Exception:
+                        pass
+                if init_data is None:
+                    init_data = request.args.get('initData') or request.args.get('init_data')
+                if init_data is None:
+                    # Custom header
+                    init_data = request.headers.get('X-Telegram-Init-Data')
+                if init_data is None and request.data:
+                    # Raw fallback (e.g. text/plain body like initData=...)
+                    try:
+                        from urllib.parse import parse_qs
+                        raw_map = parse_qs(request.data.decode('utf-8'), keep_blank_values=True)
+                        init_data = raw_map.get('initData', [None])[0] or raw_map.get('init_data', [None])[0]
+                    except Exception:
+                        pass
+            except Exception:
+                init_data = None
+            init_data = init_data or ''
             
             if not init_data:
                 return jsonify({'error': 'Authentication required'}), 401
@@ -90,74 +131,82 @@ def rate_limit(max_requests: int = 60, time_window: int = 60, per: str = 'ip'):
         return decorated_function
     return decorator
 
-def validate_input(**validators):
-    """Decorator for input validation"""
+def validate_input(*args, **validators):
+    """Decorator for input validation.
+
+    Использование:
+      @validate_input(field={'type':'team_name', 'required':True}, stake='int')
+    Либо (устаревшее):
+      @validate_input(['field1','field2'])
+    """
+    # Поддержка старого варианта: первым позиционным аргументом список полей
+    legacy_spec = {}
+    if args:
+        if len(args) == 1:
+            legacy_spec = _compat_validate_input_arg(args[0]) or {}
+        else:
+            raise TypeError('validate_input legacy form принимает максимум один позиционный аргумент')
+    # Объединяем legacy и именованные
+    full_spec = { **legacy_spec, **validators }
+
     def decorator(f: Callable) -> Callable:
         @functools.wraps(f)
-        def decorated_function(*args, **kwargs):
+        def decorated_function(*f_args, **f_kwargs):
             errors = []
-            
-            # Get data from request
+            # Собираем данные
             if request.method == 'POST':
                 data = request.form.to_dict()
-                if request.json:
-                    data.update(request.json)
+                try:
+                    if request.json:
+                        data.update(request.json)
+                except Exception:
+                    pass
             else:
                 data = request.args.to_dict()
-            
-            # Validate each field
-            for field_name, validator_config in validators.items():
+
+            for field_name, validator_config in full_spec.items():
                 value = data.get(field_name)
-                
                 if isinstance(validator_config, dict):
-                    validator_type = validator_config.get('type')
+                    vtype = validator_config.get('type')
                     required = validator_config.get('required', False)
                     min_length = validator_config.get('min_length')
                     max_length = validator_config.get('max_length')
                 else:
-                    validator_type = validator_config
+                    vtype = validator_config
                     required = False
                     min_length = None
                     max_length = None
-                
-                # Check if required
-                if required and not value:
+
+                if required and (value is None or value == ''):
                     errors.append(f"{field_name} is required")
                     continue
-                
                 if value is None:
                     continue
-                
-                # Validate based on type
-                if validator_type == 'team_name':
-                    is_valid, result = input_validator.validate_team_name(value)
-                    if not is_valid:
-                        errors.append(f"{field_name}: {result}")
-                
-                elif validator_type == 'score':
-                    is_valid, result = input_validator.validate_score(value)
-                    if not is_valid:
-                        errors.append(f"{field_name}: {result}")
-                
-                elif validator_type == 'int':
+
+                if vtype == 'team_name':
+                    ok, res = input_validator.validate_team_name(value)
+                    if not ok:
+                        errors.append(f"{field_name}: {res}")
+                elif vtype == 'score':
+                    ok, res = input_validator.validate_score(value)
+                    if not ok:
+                        errors.append(f"{field_name}: {res}")
+                elif vtype == 'int':
                     try:
                         int(value)
                     except (ValueError, TypeError):
                         errors.append(f"{field_name} must be an integer")
-                
-                elif validator_type == 'string':
+                elif vtype == 'string':
                     if not isinstance(value, str):
                         errors.append(f"{field_name} must be a string")
                     elif min_length and len(value) < min_length:
                         errors.append(f"{field_name} too short (min {min_length})")
                     elif max_length and len(value) > max_length:
                         errors.append(f"{field_name} too long (max {max_length})")
-            
+
             if errors:
                 return jsonify({'error': 'Validation failed', 'details': errors}), 400
-            
-            return f(*args, **kwargs)
-        
+            return f(*f_args, **f_kwargs)
         return decorated_function
     return decorator
 
