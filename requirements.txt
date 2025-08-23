@@ -20,3 +20,5 @@ psutil==5.9.8  # System monitoring
 cryptography==41.0.7  # Enhanced security
 bleach==6.1.0  # HTML sanitization
 flask-limiter==3.5.0  # Rate limiting
+gunicorn==21.2.0  # Production WSGI server
+eventlet==0.36.1  # Async for Flask-SocketIO in production

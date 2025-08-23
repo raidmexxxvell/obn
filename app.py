@@ -8738,32 +8738,38 @@ def api_lineup_bulk_set():
         return jsonify({'error': 'Не удалось выполнить массовый импорт'}), 500
 
 if __name__ == '__main__':
-    # Стартуем фоновой синхронизатор при локальном запуске
+    # Локальный standalone запуск (в прод Gunicorn вызывает wsgi:app)
     try:
         start_background_sync()
     except Exception as _e:
         print(f"[WARN] Background sync not started: {_e}")
-    # Автопинг для поддержания контейнера в онлайне (Render/др.)
-    try:
-        import threading, requests
-        def self_ping_loop():
-            url_env = os.environ.get('RENDER_URL') or ''
-            base = url_env.rstrip('/') if url_env else None
-            while True:
-                try:
-                    target = (base + '/ping') if base else None
-                    if target:
-                        requests.get(target, timeout=5)
-                    else:
-                        # локальный пинг (если базовый URL неизвестен)
-                        requests.get('http://127.0.0.1:' + str(int(os.environ.get('PORT', 5000))) + '/ping', timeout=3)
-                except Exception:
-                    pass
-                finally:
-                    time.sleep(300)
-        threading.Thread(target=self_ping_loop, daemon=True).start()
-    except Exception as _e:
-        print(f"[WARN] Self-ping thread not started: {_e}")
+    # Self-ping только если явно включен (для локальных тестов)
+    if os.environ.get('ENABLE_SELF_PING','1') == '1':
+        try:
+            import threading, requests
+            def self_ping_loop():
+                url_env = os.environ.get('RENDER_URL') or ''
+                base = url_env.rstrip('/') if url_env else None
+                while True:
+                    try:
+                        target = (base + '/ping') if base else None
+                        if target:
+                            requests.get(target, timeout=5)
+                        else:
+                            requests.get('http://127.0.0.1:' + str(int(os.environ.get('PORT', 5000))) + '/ping', timeout=3)
+                    except Exception:
+                        pass
+                    finally:
+                        time.sleep(300)
+            threading.Thread(target=self_ping_loop, daemon=True).start()
+        except Exception as _e:
+            print(f"[WARN] Self-ping thread not started: {_e}")
     port = int(os.environ.get('PORT', 5000))
     debug_mode = os.environ.get('FLASK_DEBUG', '').lower() in ('1', 'true', 'yes')
-    app.run(host='0.0.0.0', port=port, debug=debug_mode)
+    # Предпочтительно использовать socketio.run с eventlet, если установлен
+    try:
+        import eventlet  # noqa: F401
+        from flask_socketio import SocketIO  # noqa: F401
+        socketio.run(app, host='0.0.0.0', port=port, debug=debug_mode)
+    except Exception:
+        app.run(host='0.0.0.0', port=port, debug=debug_mode)
