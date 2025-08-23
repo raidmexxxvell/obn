@@ -2888,39 +2888,61 @@ def _cache_fresh(cache_obj: dict, ttl: int) -> bool:
 
 # ---------------------- DB SNAPSHOTS HELPERS ----------------------
 def _snapshot_get(db: Session, key: str):
-    try:
-        row = db.get(Snapshot, key)
-        if not row:
-            return None
+    attempts = 0
+    while attempts < 3:
         try:
-            data = json.loads(row.payload)
-        except Exception:
-            data = None
-        return {
-            'key': key,
-            'payload': data,
-            'updated_at': (row.updated_at or datetime.now(timezone.utc)).isoformat()
-        }
-    except Exception as e:
-        app.logger.warning(f"Snapshot get failed for {key}: {e}")
-        return None
+            row = db.get(Snapshot, key)
+            if not row:
+                return None
+            try:
+                data = json.loads(row.payload)
+            except Exception:
+                data = None
+            return {
+                'key': key,
+                'payload': data,
+                'updated_at': (row.updated_at or datetime.now(timezone.utc)).isoformat()
+            }
+        except Exception as e:
+            # OperationalError / EOF: rollback and retry
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            attempts += 1
+            if attempts >= 3:
+                app.logger.warning(f"Snapshot get failed for {key} (attempt {attempts}): {e}")
+                return None
+            # small backoff
+            time.sleep(0.1 * attempts)
+    return None
 
 def _snapshot_set(db: Session, key: str, payload: dict):
-    try:
-        raw = json.dumps(payload, ensure_ascii=False)
-        row = db.get(Snapshot, key)
-        now = datetime.now(timezone.utc)
-        if row:
-            row.payload = raw
-            row.updated_at = now
-        else:
-            row = Snapshot(key=key, payload=raw, updated_at=now)
-            db.add(row)
-        db.commit()
-        return True
-    except Exception as e:
-        app.logger.warning(f"Snapshot set failed for {key}: {e}")
-        return False
+    attempts = 0
+    while attempts < 3:
+        try:
+            raw = json.dumps(payload, ensure_ascii=False)
+            row = db.get(Snapshot, key)
+            now = datetime.now(timezone.utc)
+            if row:
+                row.payload = raw
+                row.updated_at = now
+            else:
+                row = Snapshot(key=key, payload=raw, updated_at=now)
+                db.add(row)
+            db.commit()
+            return True
+        except Exception as e:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            attempts += 1
+            if attempts >= 3:
+                app.logger.warning(f"Snapshot set failed for {key} (attempt {attempts}): {e}")
+                return False
+            time.sleep(0.1 * attempts)
+    return False
 
 # ---------------------- BUILDERS FROM SHEETS ----------------------
 @app.route('/api/feature-match/set', methods=['POST'])
@@ -6915,8 +6937,12 @@ def api_streams_confirm():
         admin_id = os.environ.get('ADMIN_USER_ID','')
         if not admin_id or user_id != admin_id:
             return jsonify({'error': 'forbidden'}), 403
-        home = (request.form.get('home') or '').strip()
-        away = (request.form.get('away') or '').strip()
+        def _norm_team(v:str)->str:
+            return ' '.join(v.strip().split()).lower()
+        home_raw = (request.form.get('home') or '').strip()
+        away_raw = (request.form.get('away') or '').strip()
+        home = _norm_team(home_raw)
+        away = _norm_team(away_raw)
         date_str = (request.form.get('date') or '').strip()  # YYYY-MM-DD
         vk_id = (request.form.get('vkVideoId') or '').strip()
         vk_url = (request.form.get('vkPostUrl') or '').strip()
@@ -6954,7 +6980,8 @@ def api_streams_confirm():
             return jsonify({'error': 'БД недоступна'}), 500
         db: Session = get_db()
         try:
-            row = db.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None)).first()
+            from sqlalchemy import func
+            row = db.query(MatchStream).filter(func.lower(MatchStream.home)==home, func.lower(MatchStream.away)==away, MatchStream.date==(date_str or None)).first()
             now = datetime.now(timezone.utc)
             if not row:
                 row = MatchStream(home=home, away=away, date=(date_str or None))
@@ -6964,7 +6991,7 @@ def api_streams_confirm():
             row.confirmed_at = now
             row.updated_at = now
             db.commit()
-            return jsonify({'status': 'ok', 'home': home, 'away': away, 'date': date_str, 'vkVideoId': row.vk_video_id, 'vkPostUrl': row.vk_post_url})
+            return jsonify({'status': 'ok', 'home': home_raw, 'away': away_raw, 'date': date_str, 'vkVideoId': row.vk_video_id, 'vkPostUrl': row.vk_post_url})
         finally:
             db.close()
     except Exception as e:
@@ -7081,8 +7108,12 @@ def api_streams_set():
         admin_id = os.environ.get('ADMIN_USER_ID', '')
         if not admin_id or user_id != admin_id:
             return jsonify({'error': 'forbidden'}), 403
-        home = (request.form.get('home') or '').strip()
-        away = (request.form.get('away') or '').strip()
+        def _norm_team(v:str)->str:
+            return ' '.join(v.strip().split()).lower()
+        home_raw = (request.form.get('home') or '').strip()
+        away_raw = (request.form.get('away') or '').strip()
+        home = _norm_team(home_raw)
+        away = _norm_team(away_raw)
         dt_raw = (request.form.get('datetime') or '').strip()
         vk_raw = (request.form.get('vk') or '').strip()
         if not home or not away:
@@ -7139,16 +7170,17 @@ def api_streams_set():
             return jsonify({'error': 'БД недоступна'}), 500
         db: Session = get_db()
         try:
+            from sqlalchemy import func
             row = db.query(MatchStream).filter(
-                MatchStream.home == home,
-                MatchStream.away == away,
+                func.lower(MatchStream.home) == home,
+                func.lower(MatchStream.away) == away,
                 MatchStream.date == (date_str or None)
             ).first()
             if not row and not date_str:
                 # Разрешим перезапись самой свежей записи, даже если она без даты, если совпали команды
                 row = db.query(MatchStream).filter(
-                    MatchStream.home == home,
-                    MatchStream.away == away
+                    func.lower(MatchStream.home) == home,
+                    func.lower(MatchStream.away) == away
                 ).order_by(MatchStream.updated_at.desc()).first()
             now_ts = datetime.now(timezone.utc)
             prev_id = None
@@ -7181,8 +7213,8 @@ def api_streams_set():
             return jsonify({
                 'status': 'ok',
                 'message': msg,
-                'home': home,
-                'away': away,
+                'home': home_raw,
+                'away': away_raw,
                 'date': date_str,
                 'vkVideoId': row.vk_video_id or '',
                 'vkPostUrl': row.vk_post_url or '',
@@ -7202,8 +7234,12 @@ def api_streams_get():
     try:
         if SessionLocal is None:
             return jsonify({'available': False})
-        home = (request.args.get('home') or '').strip()
-        away = (request.args.get('away') or '').strip()
+        def _norm_team(v:str)->str:
+            return ' '.join(v.strip().split()).lower()
+        home_raw = (request.args.get('home') or '').strip()
+        away_raw = (request.args.get('away') or '').strip()
+        home = _norm_team(home_raw)
+        away = _norm_team(away_raw)
         date_str = (request.args.get('date') or '').strip()
         try:
             app.logger.info(f"streams/get req: home='{home}' away='{away}' date='{date_str}'")
@@ -7220,12 +7256,13 @@ def api_streams_get():
         try:
             db0: Session = get_db()
             try:
-                row0 = db0.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None)).first()
+                from sqlalchemy import func
+                row0 = db0.query(MatchStream).filter(func.lower(MatchStream.home)==home, func.lower(MatchStream.away)==away, MatchStream.date==(date_str or None)).first()
                 # Фолбек: если не нашли точное совпадение по дате
                 if not row0:
                     # Если клиент передал дату — уже был fallback (ниже) на latest, но мы расширим и для случая пустой даты
                     # Берём самую свежую запись по паре команд
-                    latest = db0.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away).order_by(MatchStream.updated_at.desc()).first()
+                    latest = db0.query(MatchStream).filter(func.lower(MatchStream.home)==home, func.lower(MatchStream.away)==away).order_by(MatchStream.updated_at.desc()).first()
                     if latest:
                         # Дополнительная валидация: не слишком ли старая (например > 48 часов), чтобы не подтянуть ссылку со старого матча
                         try:
@@ -7342,10 +7379,11 @@ def api_streams_get():
         # найдём подтверждение
         db: Session = get_db()
         try:
-            row = db.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away, MatchStream.date==(date_str or None)).first()
+            from sqlalchemy import func
+            row = db.query(MatchStream).filter(func.lower(MatchStream.home)==home, func.lower(MatchStream.away)==away, MatchStream.date==(date_str or None)).first()
             if not row and date_str:
                 # Фоллбек: искать запись без date (старые сохранения) или любую последнюю
-                row = db.query(MatchStream).filter(MatchStream.home==home, MatchStream.away==away).order_by(MatchStream.updated_at.desc()).first()
+                row = db.query(MatchStream).filter(func.lower(MatchStream.home)==home, func.lower(MatchStream.away)==away).order_by(MatchStream.updated_at.desc()).first()
             if not row:
                 return jsonify({'available': False})
             try:
