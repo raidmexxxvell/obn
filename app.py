@@ -7931,6 +7931,7 @@ def api_scorers():
     Сортировка: (гол+пас desc, игры asc, голы desc).
     """
     try:
+        global SCORERS_CACHE
         limit_param = request.args.get('limit')
         try:
             limit = int(limit_param) if limit_param else None
@@ -7960,7 +7961,6 @@ def api_scorers():
                     scorers.sort(key=lambda x: (-x['total_points'], x['games'], -x['goals']))
                     for i,s in enumerate(scorers, start=1):
                         s['rank'] = i
-                    global SCORERS_CACHE
                     SCORERS_CACHE = { 'ts': time.time(), 'items': scorers }
                 finally:
                     db.close()
