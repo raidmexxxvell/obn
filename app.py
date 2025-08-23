@@ -7427,7 +7427,7 @@ def api_streams_reset():
         app.logger.error(f"streams/reset error: {e}")
         return jsonify({'error': 'Не удалось сбросить ссылку'}), 500
 
-COMMENT_TTL_MINUTES = 10
+COMMENT_TTL_MINUTES = 60  # хранить комментарии трансляции 60 минут
 COMMENT_RATE_MINUTES = 5
 
 @app.route('/api/match/comments/list', methods=['GET'])

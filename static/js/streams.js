@@ -80,13 +80,12 @@
     // Обнуляем инициализацию при смене матча
     const key = makeKey(match);
     if (pane.getAttribute('data-match-key') !== key) {
-  // Смена матча — сбрасываем состояние
+      // Смена матча — сбрасываем состояние, но оставляем display='none' до активации вкладки
       pane.__inited = false;
       pane.__streamInfo = null;
       pane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
       pane.setAttribute('data-match-key', key);
-      // Показываем панель при смене матча, но контролируем видимость через активную вкладку
-      pane.style.display = '';
+      if(pane.style.display!=='none') pane.style.display='none';
     }
     return pane;
   }
