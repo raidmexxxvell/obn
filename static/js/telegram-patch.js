@@ -7,15 +7,13 @@
         return;
     }
     
-    console.log('[TG-PATCH] Initializing Telegram WebApp mobile fullscreen patch');
-    
     // Настраиваем Telegram WebApp для лучшей работы с видео
     const tg = window.Telegram.WebApp;
     
     // Расширяем область просмотра
     if (tg.expand) {
         tg.expand();
-        console.log('[TG-PATCH] WebApp expanded');
+        
     }
     
     // Ранее вызывалось tg.enableClosingConfirmation(), что включало системный диалог Telegram
@@ -64,17 +62,17 @@
                 const target = mutation.target;
                 if (target.id === 'md-pane-stream') {
                     if (target.classList.contains('fs-mode')) {
-                        console.log('[TG-PATCH] Entering pseudo-fullscreen');
+                        
                         disableSwipes();
                         
                         // Принудительно поворачиваем в ландшафт если возможно
                         if (window.screen && window.screen.orientation) {
                             window.screen.orientation.lock('landscape').catch(() => {
-                                console.log('[TG-PATCH] Orientation lock not available');
+                                
                             });
                         }
                     } else {
-                        console.log('[TG-PATCH] Exiting pseudo-fullscreen');
+                        
                         enableSwipes();
                         
                         // Разблокируем ориентацию
@@ -102,7 +100,7 @@
             // Выходим из фуллскрина вместо закрытия приложения
             streamPane.classList.remove('fs-mode');
             enableSwipes();
-            console.log('[TG-PATCH] Exited fullscreen via back button');
+            
         } else {
             // Обычное поведение кнопки "Назад"
             tg.close();
@@ -126,5 +124,5 @@
     // Периодически проверяем состояние фуллскрина
     setInterval(updateBackButton, 500);
     
-    console.log('[TG-PATCH] Telegram WebApp mobile patch initialized');
+    
 })();

@@ -20,7 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (_) { /* no-op */ }
         if (!debugEnabled) return;
         const line = `${LOG_PREFIX} ${t} ${level.toUpperCase()}: ${msg}`;
-        const c = console[level] || console.log;
+        const c = function(){}; // console disabled in production
         data !== undefined ? c(line, data) : c(line);
     };
     const log = (msg, data) => pushLog('log', msg, data);

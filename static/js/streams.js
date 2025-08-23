@@ -23,7 +23,7 @@
   }
   function findStream(match){
   const keyExact = makeKey(match);
-  if (DBG) console.debug('[streams] findStream', { keyExact });
+  
   return registry[keyExact] || null;
   }
 
@@ -52,7 +52,7 @@
 
 
   function ensurePane(mdPane, match){
-    if (DBG) console.debug('[streams] ensurePane: enter', { mdKey: mdPane?.getAttribute?.('data-match-key')||null, key: makeKey(match) });
+    ||null, key: makeKey(match) });
     let pane = document.getElementById('md-pane-stream');
     const body = mdPane.querySelector('.modal-body');
 
@@ -63,13 +63,13 @@
       pane.style.display = 'none';
       pane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
       if (body) body.appendChild(pane);
-      if (DBG) console.debug('[streams] ensurePane: created');
+      
     } else {
       // Если панель уже существует, убедимся, что она находится в текущем mdPane
       try {
         if (body && pane.parentNode !== body) {
           body.appendChild(pane);
-          if (DBG) console.debug('[streams] ensurePane: moved existing pane into current mdPane');
+          
         }
       } catch(_) {}
     }
@@ -77,7 +77,7 @@
     // Обнуляем инициализацию при смене матча
     const key = makeKey(match);
     if (pane.getAttribute('data-match-key') !== key) {
-      if (DBG) console.debug('[streams] ensurePane: key change -> reset pane', { from: pane.getAttribute('data-match-key'), to: key });
+      , to: key });
       pane.__inited = false;
       pane.__streamInfo = null;
       pane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
@@ -93,7 +93,7 @@
     if (!tab) {
       tab = document.createElement('div'); tab.className='subtab-item'; tab.setAttribute('data-mdtab','stream'); tab.textContent='Трансляция';
       subtabs.appendChild(tab);
-  if (DBG) console.debug('[streams] ensureTab: created');
+  
     }
     if (match) tab.setAttribute('data-match-key', makeKey(match));
     return tab;
@@ -101,7 +101,7 @@
 
   function buildStreamInto(pane, info, match){
     if (!info || pane.__inited) return !!pane.__inited;
-  if (DBG) console.debug('[streams] buildStreamInto', { key: pane.getAttribute('data-match-key'), info: { hasVideoId: !!info.vkVideoId, hasPostUrl: !!info.vkPostUrl } });
+  , info: { hasVideoId: !!info.vkVideoId, hasPostUrl: !!info.vkPostUrl } });
   const host = document.createElement('div'); host.className = 'stream-wrap';
     const ratio = document.createElement('div'); ratio.className = 'stream-aspect';
     const ifr = document.createElement('iframe');
@@ -147,25 +147,25 @@
     const isTelegramMobile = isTelegramWebApp && isMobile;
     
     const enterFs = () => {
-      if (DBG) console.debug('[streams] enterFs: trying fullscreen', { isTelegramMobile, isMobile, isTelegramWebApp });
+      
       
       // В Telegram WebApp на мобильных устройствах Fullscreen API часто заблокирован
       // Сразу переходим к псевдо-фуллскрину для лучшего UX
       if (isTelegramMobile) {
-        if (DBG) console.debug('[streams] Telegram mobile detected, using pseudo-fullscreen directly');
+        
         try { 
           pane.classList.add('fs-mode'); 
           document.body.classList.add('allow-landscape');
           // Принудительно разворачиваем в ландшафт на мобильном устройстве
           if (window.screen && window.screen.orientation && window.screen.orientation.lock) {
             window.screen.orientation.lock('landscape').catch(e => {
-              if (DBG) console.debug('[streams] orientation lock failed:', e);
+              
             });
           }
-          if (DBG) console.debug('[streams] pseudo-fullscreen enabled for Telegram mobile');
+          
           return;
         } catch(e) { 
-          if (DBG) console.debug('[streams] pseudo-fullscreen failed:', e); 
+           
         }
       }
       
@@ -174,9 +174,9 @@
       try {
         if (ratio.requestFullscreen) { 
           ratio.requestFullscreen().then(()=>{ 
-            if (DBG) console.debug('[streams] fullscreen success'); 
+             
           }).catch(e=>{ 
-            if (DBG) console.debug('[streams] fullscreen failed:', e); 
+             
             // Fallback к псевдо-фуллскрину
             try { 
               pane.classList.add('fs-mode'); 
@@ -188,18 +188,18 @@
         else if (ratio.webkitRequestFullscreen) { 
           ratio.webkitRequestFullscreen(); 
           ok = true; 
-          if (DBG) console.debug('[streams] webkit fullscreen attempt');
+          
         }
         else if (ratio.mozRequestFullScreen) { 
           ratio.mozRequestFullScreen(); 
           ok = true; 
-          if (DBG) console.debug('[streams] moz fullscreen attempt');
+          
         }
         else if (ifr.requestFullscreen) {
           ifr.requestFullscreen().then(()=>{ 
-            if (DBG) console.debug('[streams] iframe fullscreen success'); 
+             
           }).catch(e=>{ 
-            if (DBG) console.debug('[streams] iframe fullscreen failed:', e);
+            
             // Fallback к псевдо-фуллскрину
             try { 
               pane.classList.add('fs-mode'); 
@@ -209,17 +209,17 @@
           ok = true;
         }
       } catch(e) { 
-        if (DBG) console.debug('[streams] fullscreen exception:', e); 
+         
       }
       
       if (!ok) {
-        if (DBG) console.debug('[streams] fallback to pseudo-fullscreen');
+        
         try { 
           pane.classList.add('fs-mode'); 
           document.body.classList.add('allow-landscape'); 
-          if (DBG) console.debug('[streams] pseudo-fullscreen enabled');
+          
         } catch(e) { 
-          if (DBG) console.debug('[streams] pseudo-fullscreen failed:', e); 
+           
         }
       }
     };
@@ -231,29 +231,29 @@
         if (window.screen && window.screen.orientation && window.screen.orientation.unlock) {
           window.screen.orientation.unlock();
         }
-        if (DBG) console.debug('[streams] pseudo-fullscreen disabled');
+        
       } catch(e) { 
-        if (DBG) console.debug('[streams] exit pseudo failed:', e); 
+         
       } 
     };
     
     fsBtn.addEventListener('click', (e)=>{ 
       e.preventDefault(); 
       e.stopPropagation();
-      if (DBG) console.debug('[streams] fullscreen button clicked');
+      
       
       try {
         // Проверяем, уже в фуллскрине ли мы
         const isFullscreen = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement;
         if (isFullscreen) {
-          if (DBG) console.debug('[streams] exiting fullscreen');
+          
           if (document.exitFullscreen) document.exitFullscreen();
           else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
           else if (document.mozCancelFullScreen) document.mozCancelFullScreen();
           return;
         }
       } catch(e) { 
-        if (DBG) console.debug('[streams] exit fullscreen failed:', e); 
+         
       }
       
       // Переключаем псевдо-фуллскрин
@@ -269,12 +269,12 @@
       try {
         const fs = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement;
         if (!fs && pane.classList?.contains('fs-mode')) {
-          if (DBG) console.debug('[streams] fullscreen ended, keeping pseudo mode');
+          
         } else if (!fs) {
           exitPseudo();
         }
       } catch(e) { 
-        if (DBG) console.debug('[streams] fullscreen change handler error:', e); 
+         
       }
     };
     
@@ -300,25 +300,25 @@
           if (parts.length >= 3 && parts[2]) dateStr = parts[2];
         } catch(_) {}
       }
-  if (DBG) console.debug('[streams] fetchServerStream: request', { home: match?.home, away: match?.away, dateStr });
+  
   const url = `/api/streams/get?home=${encodeURIComponent(match.home||'')}&away=${encodeURIComponent(match.away||'')}&date=${encodeURIComponent(dateStr)}`;
       const r = await fetch(url, { cache: 'no-store' });
       const ans = await r.json();
-      if (DBG) console.debug('[streams] fetchServerStream: response', ans);
+      
       if (ans && ans.available && (ans.vkVideoId || ans.vkPostUrl)) return ans;
     }catch(_){/* noop */}
     return null;
   }
 
   function setupMatchStream(mdPane, subtabs, match){
-    if (DBG) console.debug('[streams] setupMatchStream: enter', { key: makeKey(match), match });
+    , match });
     // Fallback сначала из локального реестра, затем запрос на сервер
     let streamInfo = findStream(match);
     if (streamInfo) {
       const pane = ensurePane(mdPane, match);
       ensureTab(subtabs, match);
       pane.__streamInfo = streamInfo;
-      if (DBG) console.debug('[streams] setupMatchStream: local registry hit -> tab added');
+      
       return pane;
     }
     // Асинхронно проверим у сервера и, если есть, добавим вкладку
@@ -331,9 +331,9 @@
       if (!ans) return;
       // Матч всё ещё тот же? (могли уйти на другой экран)
       const currentKey = mdPane.getAttribute('data-match-key') || expectedKey;
-      if (currentKey !== expectedKey) { if (DBG) console.debug('[streams] setupMatchStream: stale resp by mdKey', { expectedKey, currentKey }); return; }
-      if (mdPane.__streamSetupSeq !== reqId || mdPane.__streamSetupKey !== expectedKey) { if (DBG) console.debug('[streams] setupMatchStream: stale resp by reqId'); return; }
-      if (DBG) console.debug('[streams] setupMatchStream: server provided link');
+      if (currentKey !== expectedKey) {  return; }
+      if (mdPane.__streamSetupSeq !== reqId || mdPane.__streamSetupKey !== expectedKey) {  return; }
+      
       const pane = ensurePane(mdPane, match);
       const tab = ensureTab(subtabs, match);
       pane.__streamInfo = ans;
@@ -341,7 +341,7 @@
       try {
         const isActive = tab?.classList?.contains('active') || pane?.style?.display === '';
         if (isActive && !pane.__inited) {
-          if (DBG) console.debug('[streams] setupMatchStream: active -> build now');
+          
           buildStreamInto(pane, ans, match);
         }
       } catch(_) {}
@@ -351,11 +351,11 @@
 
   function onStreamTabActivated(pane, match){
     if (!pane) return;
-    if (DBG) console.debug('[streams] onStreamTabActivated: click', { paneKey: pane.getAttribute('data-match-key'), matchKey: makeKey(match) });
+    , matchKey: makeKey(match) });
     // Безопасность: проверяем, что pane относится к текущему матчу
     const key = makeKey(match);
     if (pane.getAttribute('data-match-key') !== key) {
-      if (DBG) console.debug('[streams] onStreamTabActivated: mismatch -> reset');
+      
       pane.__inited = false;
       pane.__streamInfo = null;
       pane.setAttribute('data-match-key', key);
@@ -363,7 +363,7 @@
     if (!pane.__inited) {
       const info = pane.__streamInfo || findStream(match);
       if (info) {
-        if (DBG) console.debug('[streams] onStreamTabActivated: build from cached info');
+        
         setTimeout(()=>buildStreamInto(pane, info, match), 50);
       } else {
         // Попробуем ещё раз спросить сервер и построить
@@ -373,11 +373,11 @@
         const reqId = pane.__streamTabSeq;
         fetchServerStream(match).then((ans)=>{
           // Проверяем, что мы всё ещё на этом матче
-          if (!ans) { if (DBG) console.debug('[streams] onStreamTabActivated: no link on server'); const sk=pane.querySelector('.stream-skeleton'); if (sk) sk.textContent='Трансляция недоступна'; return; }
+          if (!ans) {  const sk=pane.querySelector('.stream-skeleton'); if (sk) sk.textContent='Трансляция недоступна'; return; }
           const mdKey = (mdPaneFrom(pane)?.getAttribute('data-match-key') || expectedKey);
-          if (mdKey !== expectedKey) { if (DBG) console.debug('[streams] onStreamTabActivated: stale resp by mdKey', { expectedKey, mdKey }); return; }
-          if (pane.__streamTabSeq !== reqId) { if (DBG) console.debug('[streams] onStreamTabActivated: stale resp by reqId'); return; }
-          if (DBG) console.debug('[streams] onStreamTabActivated: server returned link -> build');
+          if (mdKey !== expectedKey) {  return; }
+          if (pane.__streamTabSeq !== reqId) {  return; }
+          
           pane.__streamInfo = ans; buildStreamInto(pane, ans, match);
         }).catch(()=>{});
       }
@@ -397,7 +397,7 @@
     try {
       const pane = document.getElementById('md-pane-stream');
       if (!pane) return;
-  if (DBG) console.debug('[streams] resetOnLeave');
+  
       // Остановить возможный поллинг комментариев
       try { typeof pane.__stopCommentsPoll === 'function' && pane.__stopCommentsPoll(); } catch(_) {}
       // Поставить видео на паузу / полностью сбросить src iframe
@@ -414,7 +414,7 @@
       try {
         pane.removeAttribute('data-match-key');
         if (pane.parentNode) pane.parentNode.removeChild(pane);
-        if (DBG) console.debug('[streams] resetOnLeave: detached pane from old mdPane');
+        
       } catch(_) {}
     } catch(_) {}
   }

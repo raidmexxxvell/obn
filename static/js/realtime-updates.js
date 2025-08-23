@@ -18,16 +18,16 @@ class RealtimeUpdater {
     
     initSocket() {
         try {
-            if (!window.__WEBSOCKETS_ENABLED__) { console.log('[RealtimeUpdater] WebSockets disabled flag'); return; }
+            if (!window.__WEBSOCKETS_ENABLED__) {  return; }
             // Проверяем поддержку Socket.IO
             if (typeof io === 'undefined') {
-                console.warn('[RealtimeUpdater] Socket.IO not available, falling back to polling');
+                
                 return;
             }
             // Пробный ping на /socket.io/ без апгрейда: если 4xx/5xx — отключаем
             try {
                 fetch('/socket.io/?EIO=4&transport=polling&t=' + Date.now(), { method: 'GET' })
-                    .then(r => { if (!r.ok) { console.warn('[RealtimeUpdater] Preflight failed', r.status); window.__WEBSOCKETS_ENABLED__ = false; } });
+                    .then(r => { if (!r.ok) {  window.__WEBSOCKETS_ENABLED__ = false; } });
             } catch(_) {}
             this.socket = io({
                 transports: ['websocket','polling'],
@@ -38,7 +38,7 @@ class RealtimeUpdater {
             });
             this.setupEventHandlers();
         } catch (error) {
-            console.error('[RealtimeUpdater] Failed to initialize WebSocket:', error);
+            
         }
     }
     
@@ -46,7 +46,7 @@ class RealtimeUpdater {
         if (!this.socket) return;
         
         this.socket.on('connect', () => {
-            console.log('[RealtimeUpdater] Connected to server');
+            
             this.isConnected = true;
             this.reconnectAttempts = 0;
             
@@ -58,7 +58,7 @@ class RealtimeUpdater {
         });
         
         this.socket.on('disconnect', (reason) => {
-            console.log('[RealtimeUpdater] Disconnected:', reason);
+            
             this.isConnected = false;
             
             if (reason === 'io server disconnect') {
@@ -68,7 +68,7 @@ class RealtimeUpdater {
         });
         
         this.socket.on('connect_error', (error) => {
-            console.error('[RealtimeUpdater] Connection error:', error);
+            
             this.isConnected = false;
             this.scheduleReconnect();
         });
@@ -85,21 +85,21 @@ class RealtimeUpdater {
         
         if (this.debug) {
             this.socket.onAny((eventName, ...args) => {
-                console.log(`[RealtimeUpdater] Event: ${eventName}`, args);
+                
             });
         }
     }
     
     scheduleReconnect() {
         if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-            console.warn('[RealtimeUpdater] Max reconnect attempts reached');
+            
             return;
         }
         
         this.reconnectAttempts++;
         const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
         
-        console.log(`[RealtimeUpdater] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
+        `);
         
         setTimeout(() => {
             if (!this.isConnected) {
@@ -112,7 +112,7 @@ class RealtimeUpdater {
         const { type, data_type, data, timestamp } = message;
         
         if (this.debug) {
-            console.log('[RealtimeUpdater] Data update:', message);
+            
         }
         
         // Вызываем зарегистрированные callbacks
@@ -121,7 +121,7 @@ class RealtimeUpdater {
             try {
                 callback(data, timestamp);
             } catch (error) {
-                console.error('[RealtimeUpdater] Callback error:', error);
+                
             }
         });
         
@@ -133,7 +133,7 @@ class RealtimeUpdater {
         const { home, away, data } = message;
         
         if (this.debug) {
-            console.log('[RealtimeUpdater] Live update:', message);
+            
         }
         
         // Обновляем счет матча в real-time
@@ -198,7 +198,7 @@ class RealtimeUpdater {
         } else if (window.showAlert) {
             window.showAlert(message, 'info');
         } else {
-            try { console.log('[RealtimeUpdater]', message); } catch(_) {}
+            try {  } catch(_) {}
         }
     }
     

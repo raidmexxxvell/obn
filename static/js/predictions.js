@@ -191,7 +191,7 @@
         fetchWithETag(cached.version).then(renderTours).catch(()=>{}).finally(()=>{ _toursLoading = false; });
       } else {
         fetchWithETag(null).then(renderTours).catch(err => {
-          console.error('betting tours load error', err);
+          
           if (!cached) toursEl.innerHTML = '<div class="schedule-error">Не удалось загрузить</div>';
         }).finally(()=>{ _toursLoading = false; });
       }
@@ -259,7 +259,7 @@
           const myPane = document.getElementById('pred-pane-mybets');
           if (myPane && myPane.style.display !== 'none') loadMyBets();
         })
-        .catch(err => { console.error('place bet error', err); try { tg?.showAlert?.('Ошибка размещения ставки'); } catch(_) {} });
+        .catch(err => {  try { tg?.showAlert?.('Ошибка размещения ставки'); } catch(_) {} });
     }
 
     function loadMyBets() {
@@ -311,7 +311,7 @@
       fetch('/api/betting/my-bets', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(data => { try { localStorage.setItem(CACHE_KEY, JSON.stringify({ data, ts: Date.now() })); } catch(_) {} render(data); })
-        .catch(err => { console.error('my bets load error', err); if (!cached) myBetsEl.innerHTML = '<div class="schedule-error">Ошибка загрузки</div>'; });
+        .catch(err => {  if (!cached) myBetsEl.innerHTML = '<div class="schedule-error">Ошибка загрузки</div>'; });
     }
 
   // Используем унифицированные утилиты форматирования и live-статуса
