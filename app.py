@@ -154,32 +154,21 @@ import threading
 # Flask app
 app = Flask(__name__, static_folder='static', template_folder='templates')
 
-# Инициализация системы безопасности и мониторинга (Фаза 3)
+"""Phase 3 security / monitoring initialization"""
 if SECURITY_SYSTEM_AVAILABLE:
     try:
-        # Конфигурация
         app.config.from_object(Config)
-
-        # Компоненты безопасности
         input_validator = InputValidator()
         telegram_security = TelegramSecurity()
         rate_limiter = RateLimiter()
         sql_protection = SQLInjectionPrevention()
-
-        # Мониторинг
         performance_metrics = PerformanceMetrics()
         health_check = HealthCheck()
-
-        # Middleware
-        SecurityMiddleware(app, input_validator, telegram_security, sql_protection)
-        PerformanceMiddleware(app, performance_metrics)
+        SecurityMiddleware(app)
+        PerformanceMiddleware(app)
         ErrorHandlingMiddleware(app)
-
-        # Blueprints
         app.register_blueprint(monitoring_bp, url_prefix='/api/monitoring')
         app.register_blueprint(security_test_bp, url_prefix='/api/security-test')
-
-        # Ссылки в конфиге
         app.config.update(
             input_validator=input_validator,
             telegram_security=telegram_security,
@@ -187,9 +176,9 @@ if SECURITY_SYSTEM_AVAILABLE:
             performance_metrics=performance_metrics,
             health_check=health_check,
         )
-        print("[INFO] Phase 3: Security and monitoring middleware activated")
-    except Exception as e:
-        print(f"[ERROR] Failed to initialize Phase 3 security system: {e}")
+        print('[INFO] Phase 3: Security and monitoring middleware activated')
+    except Exception as e:  # noqa: BLE001
+        print(f'[ERROR] Failed to initialize Phase 3 security system: {e}')
         SECURITY_SYSTEM_AVAILABLE = False
 
 # Инициализация оптимизаций
@@ -1444,7 +1433,7 @@ def api_shop_checkout():
         return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
 
 @app.route('/api/admin/orders/<int:order_id>/status', methods=['POST'])
-@require_admin
+@require_admin()
 @rate_limit(max_requests=20, time_window=60)
 @validate_input(status={'type':'string','required':True,'min_length':1})
 def api_admin_order_set_status(order_id: int):
@@ -1517,7 +1506,7 @@ def api_admin_order_set_status(order_id: int):
         return jsonify({'error': 'internal'}), 500
 
 @app.route('/api/admin/orders/<int:order_id>/delete', methods=['POST'])
-@require_admin
+@require_admin()
 @rate_limit(max_requests=20, time_window=60)
 def api_admin_order_delete(order_id: int):
     """Админ: удалить заказ целиком вместе с позициями. Поля: initData."""
@@ -1549,7 +1538,7 @@ def api_admin_order_delete(order_id: int):
 
 # -------------------- ADMIN MATCHES & LINEUPS (missing frontend endpoints) --------------------
 @app.route('/api/admin/matches/upcoming', methods=['POST'])
-@require_admin
+@require_admin()
 def api_admin_matches_upcoming():
     """Возвращает список ближайших матчей для админки.
     Формат элемента: {id, home_team, away_team, match_date(iso), lineups?}
@@ -1649,7 +1638,7 @@ def _resolve_match_by_id(match_id: str, tours=None):
     return None, None, None
 
 @app.route('/api/admin/match/<match_id>/lineups', methods=['POST'])
-@require_admin
+@require_admin()
 def api_admin_get_lineups(match_id: str):
     try:
         home, away, dt = _resolve_match_by_id(match_id)
@@ -1674,7 +1663,7 @@ def api_admin_get_lineups(match_id: str):
         return jsonify({'error': 'internal'}), 500
 
 @app.route('/api/admin/match/<match_id>/lineups/save', methods=['POST'])
-@require_admin
+@require_admin()
 def api_admin_save_lineups(match_id: str):
     try:
         parsed = parse_and_verify_telegram_init_data(request.form.get('initData',''))
@@ -7534,7 +7523,7 @@ def api_match_comments_add():
 
 @app.route('/admin')
 @app.route('/admin/')
-@require_admin
+@require_admin()
 @rate_limit(max_requests=10, time_window=300)  # 10 запросов за 5 минут для админки
 def admin_dashboard():
     """Админ панель для управления БД"""
@@ -7546,7 +7535,7 @@ def test_themes():
     return render_template('theme_test.html')
 
 @app.route('/admin/init-database', methods=['POST'])
-@require_admin
+@require_admin()
 @rate_limit(max_requests=5, time_window=300)  # Строгое ограничение для опасных операций
 @validate_input(action={'type':'string','required':True,'min_length':1})
 def admin_init_database():
