@@ -708,7 +708,7 @@ def _pseudo_user_id() -> int:
 
 
 @app.route('/api/betting/place', methods=['POST'])
-@require_telegram_auth
+@require_telegram_auth()
 @rate_limit(max_requests=5, time_window=60)  # 5 ставок за минуту
 @validate_input(
     initData={'type':'string','required':True,'min_length':1},
@@ -1285,7 +1285,7 @@ def _normalize_order_items(raw_items) -> list[dict]:
     return out
 
 @app.route('/api/shop/checkout', methods=['POST'])
-@require_telegram_auth
+@require_telegram_auth()
 @rate_limit(max_requests=10, time_window=300)  # 10 покупок за 5 минут
 @validate_input(
     initData={'type':'string','required':True,'min_length':1},
@@ -4466,7 +4466,7 @@ def index():
     return render_template('index.html', admin_user_id=os.environ.get('ADMIN_USER_ID', ''), static_version=STATIC_VERSION)
 
 @app.route('/api/user', methods=['POST'])
-@require_telegram_auth
+@require_telegram_auth()
 @rate_limit(max_requests=60, time_window=60)  # 60 запросов за минуту для данных пользователя
 def get_user():
     """Получает данные пользователя из Telegram WebApp"""
@@ -5892,7 +5892,7 @@ def api_betting_tours():
  
 
 @app.route('/api/betting/my-bets', methods=['POST'])
-@require_telegram_auth
+@require_telegram_auth()
 @rate_limit(max_requests=30, time_window=60)  # 30 запросов за минуту для просмотра ставок
 def api_betting_my_bets():
     """Список ставок пользователя (последние 50)."""
