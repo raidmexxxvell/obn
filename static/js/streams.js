@@ -52,7 +52,7 @@
 
 
   function ensurePane(mdPane, match){
-    ||null, key: makeKey(match) });
+  // Создаём (или возвращаем) панель для потока
     let pane = document.getElementById('md-pane-stream');
     const body = mdPane.querySelector('.modal-body');
 
@@ -77,7 +77,7 @@
     // Обнуляем инициализацию при смене матча
     const key = makeKey(match);
     if (pane.getAttribute('data-match-key') !== key) {
-      , to: key });
+  // Смена матча — сбрасываем состояние
       pane.__inited = false;
       pane.__streamInfo = null;
       pane.innerHTML = '<div class="stream-wrap"><div class="stream-skeleton">Трансляция будет доступна здесь</div></div>';
@@ -101,7 +101,7 @@
 
   function buildStreamInto(pane, info, match){
     if (!info || pane.__inited) return !!pane.__inited;
-  , info: { hasVideoId: !!info.vkVideoId, hasPostUrl: !!info.vkPostUrl } });
+  // Строим iframe с видео
   const host = document.createElement('div'); host.className = 'stream-wrap';
     const ratio = document.createElement('div'); ratio.className = 'stream-aspect';
     const ifr = document.createElement('iframe');
@@ -311,7 +311,7 @@
   }
 
   function setupMatchStream(mdPane, subtabs, match){
-    , match });
+  // Инициализация вкладки трансляции для указанного матча
     // Fallback сначала из локального реестра, затем запрос на сервер
     let streamInfo = findStream(match);
     if (streamInfo) {
@@ -351,7 +351,7 @@
 
   function onStreamTabActivated(pane, match){
     if (!pane) return;
-    , matchKey: makeKey(match) });
+  // Активирована вкладка «Трансляция»
     // Безопасность: проверяем, что pane относится к текущему матчу
     const key = makeKey(match);
     if (pane.getAttribute('data-match-key') !== key) {

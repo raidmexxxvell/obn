@@ -97,9 +97,8 @@ class RealtimeUpdater {
         }
         
         this.reconnectAttempts++;
-        const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
-        
-        `);
+    const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
+    // Планируем повторное подключение через delay мс (экспоненциальная задержка)
         
         setTimeout(() => {
             if (!this.isConnected) {
