@@ -10,6 +10,66 @@ from urllib.parse import parse_qs, urlparse
 
 from flask import Flask, request, jsonify, render_template, send_from_directory
 
+# Импорты для системы безопасности и мониторинга (Фаза 3)
+try:
+    from utils.security import InputValidator, TelegramSecurity, RateLimiter, SQLInjectionPrevention
+    from utils.decorators import require_telegram_auth, require_admin, rate_limit, validate_input
+    from utils.monitoring import PerformanceMetrics, DatabaseMonitor, CacheMonitor, HealthCheck
+    from utils.middleware import SecurityMiddleware, PerformanceMiddleware, DatabaseMiddleware, ErrorHandlingMiddleware
+    from api.monitoring import monitoring_bp
+    from api.security_test import security_test_bp
+    from config import Config
+    SECURITY_SYSTEM_AVAILABLE = True
+    print("[INFO] Phase 3: Security and monitoring system initialized")
+except ImportError as e:
+    print(f"[WARN] Phase 3 security system not available: {e}")
+    SECURITY_SYSTEM_AVAILABLE = False
+
+def check_required_environment_variables():
+    """Проверяет наличие критически важных переменных окружения при старте приложения"""
+    required_vars = {
+        'GOOGLE_CREDENTIALS_B64': 'Google Sheets API credentials (required for data sync)',
+        'DATABASE_URL': 'PostgreSQL database connection string (required for data persistence)'
+    }
+    
+    optional_vars = {
+        'BOT_TOKEN': 'Telegram bot token (required for production Telegram integration)',
+        'ADMIN_USER_ID': 'Telegram admin user ID (required for admin functions)',
+        'SPREADSHEET_ID': 'Google Sheets spreadsheet ID (required for data sync)'
+    }
+    
+    missing_required = []
+    missing_optional = []
+    
+    for var, description in required_vars.items():
+        if not os.environ.get(var):
+            missing_required.append(f"  - {var}: {description}")
+    
+    for var, description in optional_vars.items():
+        if not os.environ.get(var):
+            missing_optional.append(f"  - {var}: {description}")
+    
+    if missing_required:
+        print("❌ CRITICAL: Missing required environment variables:")
+        for var in missing_required:
+            print(var)
+        print("\nApplication may not function correctly without these variables!")
+        return False
+    
+    if missing_optional:
+        print("⚠️  WARNING: Missing optional environment variables:")
+        for var in missing_optional:
+            print(var)
+        print("Some features may be limited without these variables.")
+    
+    if not missing_required and not missing_optional:
+        print("✅ All environment variables are properly configured")
+    
+    return True
+
+# Проверяем переменные окружения при импорте модуля
+check_required_environment_variables()
+
 # Импорты для новой системы БД
 try:
     from database.database_models import db_manager, db_ops, Base
@@ -56,6 +116,46 @@ import threading
 
 # Flask app
 app = Flask(__name__, static_folder='static', template_folder='templates')
+
+# Инициализация системы безопасности и мониторинга (Фаза 3)
+if SECURITY_SYSTEM_AVAILABLE:
+    try:
+        # Загружаем конфигурацию
+        app.config.from_object(Config)
+        
+        # Инициализация компонентов безопасности
+        input_validator = InputValidator()
+        telegram_security = TelegramSecurity(app.config.get('BOT_TOKEN', ''))
+        rate_limiter = RateLimiter()
+        sql_protection = SQLInjectionPrevention()
+        
+        # Инициализация системы мониторинга
+        performance_metrics = PerformanceMetrics()
+        health_check = HealthCheck()
+        
+        # Регистрация middleware
+        SecurityMiddleware(app, input_validator, telegram_security, sql_protection)
+        PerformanceMiddleware(app, performance_metrics)
+        ErrorHandlingMiddleware(app)
+        
+        # Регистрация blueprint для мониторинга
+        app.register_blueprint(monitoring_bp, url_prefix='/api/monitoring')
+        
+        # Регистрация blueprint для тестирования безопасности
+        app.register_blueprint(security_test_bp, url_prefix='/api/security-test')
+        
+        # Сохраняем ссылки на компоненты в конфигурации приложения
+        app.config['input_validator'] = input_validator
+        app.config['telegram_security'] = telegram_security
+        app.config['rate_limiter'] = rate_limiter
+        app.config['performance_metrics'] = performance_metrics
+        app.config['health_check'] = health_check
+        
+        print("[INFO] Phase 3: Security and monitoring middleware activated")
+        
+    except Exception as e:
+        print(f"[ERROR] Failed to initialize Phase 3 security system: {e}")
+        SECURITY_SYSTEM_AVAILABLE = False
 
 # Инициализация оптимизаций
 if OPTIMIZATIONS_AVAILABLE:
@@ -584,6 +684,9 @@ def _pseudo_user_id() -> int:
 
 
 @app.route('/api/betting/place', methods=['POST'])
+@require_telegram_auth
+@rate_limit(max_requests=5, time_window=60)  # 5 ставок за минуту
+@validate_input(['initData', 'tour', 'home', 'away', 'market', 'selection', 'stake'])
 def api_betting_place():
     """Размещает ставку. Маркеты: 
     - 1X2: selection in ['home','draw','away']
@@ -1150,6 +1253,9 @@ def _normalize_order_items(raw_items) -> list[dict]:
     return out
 
 @app.route('/api/shop/checkout', methods=['POST'])
+@require_telegram_auth
+@rate_limit(max_requests=10, time_window=300)  # 10 покупок за 5 минут
+@validate_input(['initData', 'items'])
 def api_shop_checkout():
     """
     Оформление заказа в магазине. Поля: initData (Telegram), items (JSON-массив [{id|code, qty}]).
@@ -1292,6 +1398,9 @@ def api_shop_checkout():
         return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
 
 @app.route('/api/admin/orders/<int:order_id>/status', methods=['POST'])
+@require_admin
+@rate_limit(max_requests=20, time_window=60)
+@validate_input(['status'])
 def api_admin_order_set_status(order_id: int):
     """Админ: смена статуса заказа. Поля: initData, status in ['new','accepted','done','cancelled'].
     При переводе в 'cancelled' делаем возврат кредитов, если ранее не был отменен.
@@ -1362,6 +1471,8 @@ def api_admin_order_set_status(order_id: int):
         return jsonify({'error': 'internal'}), 500
 
 @app.route('/api/admin/orders/<int:order_id>/delete', methods=['POST'])
+@require_admin
+@rate_limit(max_requests=20, time_window=60)
 def api_admin_order_delete(order_id: int):
     """Админ: удалить заказ целиком вместе с позициями. Поля: initData."""
     try:
@@ -1596,6 +1707,12 @@ if engine is not None:
 def get_db() -> Session:
     if SessionLocal is None:
         raise RuntimeError('База данных не сконфигурирована (DATABASE_URL не задан).')
+    
+    # Интеграция с системой мониторинга БД (Фаза 3)
+    if SECURITY_SYSTEM_AVAILABLE and app.config.get('performance_metrics'):
+        db_monitor = DatabaseMonitor(SessionLocal.bind if hasattr(SessionLocal, 'bind') else None)
+        db_monitor.record_connection()
+    
     return SessionLocal()
 
 def _generate_ref_code(uid: int) -> str:
@@ -1751,7 +1868,7 @@ def _load_league_ranks_from_source() -> dict:
                             continue
                         ranks[norm(name)] = len(ranks) + 1
                 except Exception as e:
-                    app.logger.debug(f"LeagueTableRow read failed: {e}")
+                    app.logger.warning(f"LeagueTableRow read failed: {e}")
         finally:
             db.close()
 
@@ -3650,11 +3767,13 @@ def api_match_status_set():
         try:
             payload = _build_betting_tours_payload()
             _snapshot_set(db, 'betting-tours', payload)
-        except Exception:
-            pass
+        except Exception as e:
+            app.logger.warning(f"Failed to build betting tours payload: {e}")
         if status == 'finished':
-            try: _settle_open_bets()
-            except Exception: pass
+            try: 
+                _settle_open_bets()
+            except Exception as e:
+                app.logger.error(f"Failed to settle open bets: {e}")
         return jsonify({'ok': True, 'status': status})
     finally:
         db.close()
@@ -4075,8 +4194,10 @@ def parse_and_verify_telegram_init_data(init_data: str, max_age_seconds: int = 2
         # В dev окружении можем работать без Telegram — возвращаем None вместо исключения
         global _BOT_TOKEN_WARNED
         if not _BOT_TOKEN_WARNED:
-            try: app.logger.warning('BOT_TOKEN не установлен — initData будет игнорироваться')
-            except Exception: pass
+            try: 
+                app.logger.warning('BOT_TOKEN не установлен — initData будет игнорироваться')
+            except Exception as e:
+                print(f"Warning: Failed to log BOT_TOKEN warning: {e}")
             _BOT_TOKEN_WARNED = True
         return None
 
@@ -4132,6 +4253,8 @@ def index():
     return render_template('index.html', admin_user_id=os.environ.get('ADMIN_USER_ID', ''), static_version=STATIC_VERSION)
 
 @app.route('/api/user', methods=['POST'])
+@require_telegram_auth
+@rate_limit(max_requests=60, time_window=60)  # 60 запросов за минуту для данных пользователя
 def get_user():
     """Получает данные пользователя из Telegram WebApp"""
     try:
@@ -4919,20 +5042,40 @@ def health_sync():
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
-# Optional: Telegram webhook stub to avoid 404 noise if set to this app accidentally
+# Telegram webhook handler with proper validation and logging
 @app.route('/<path:maybe_token>', methods=['POST'])
-def telegram_webhook_stub(maybe_token: str):
-    # If someone posts to /<bot_token> path (common webhook pattern), just 200 OK noop to stop 404 spam
-    if ':' in maybe_token and len(maybe_token) >= 40:
-        return jsonify({'status': 'noop'}), 200
-    # For any other POST falling here, return JSON 404 instead of raising TypeError
-    return jsonify({'error': 'not found'}), 404
+def telegram_webhook_handler(maybe_token: str):
+    """
+    Обработчик Telegram webhook с валидацией токена и логированием
+    Если токен корректный - обрабатываем webhook, иначе возвращаем 404
+    """
+    try:
+        # Проверяем формат токена Telegram (должен содержать ':' и быть достаточно длинным)
+        if ':' in maybe_token and len(maybe_token) >= 40:
+            app.logger.info(f"Received Telegram webhook for token: {maybe_token[:10]}...")
+            
+            # Получаем данные webhook
+            webhook_data = request.get_json()
+            if webhook_data:
+                # Здесь можно добавить обработку webhook данных если нужно
+                # Пока просто логируем и возвращаем OK
+                return jsonify({'ok': True, 'status': 'webhook_received'}), 200
+            else:
+                app.logger.warning("Webhook received but no JSON data found")
+                return jsonify({'error': 'no data'}), 400
+        
+        # Для других путей возвращаем 404
+        app.logger.warning(f"Invalid webhook path accessed: {maybe_token}")
+        return jsonify({'error': 'not found'}), 404
+        
+    except Exception as e:
+        app.logger.error(f"Telegram webhook handler error: {e}")
+        return jsonify({'error': 'internal error'}), 500
 
 # Простой ping endpoint для keepalive
 @app.route('/ping')
 def ping():
     return jsonify({'pong': True, 'ts': datetime.now(timezone.utc).isoformat()}), 200
-    return jsonify({'error': 'not found'}), 404
 
 # -------- Public profiles (batch) for prizes overlay --------
 @app.route('/api/users/public-batch', methods=['POST'])
@@ -5540,6 +5683,8 @@ def api_betting_tours():
  
 
 @app.route('/api/betting/my-bets', methods=['POST'])
+@require_telegram_auth
+@rate_limit(max_requests=30, time_window=60)  # 30 запросов за минуту для просмотра ставок
 def api_betting_my_bets():
     """Список ставок пользователя (последние 50)."""
     try:
@@ -7157,6 +7302,8 @@ def api_match_comments_add():
 
 @app.route('/admin')
 @app.route('/admin/')
+@require_admin
+@rate_limit(max_requests=10, time_window=300)  # 10 запросов за 5 минут для админки
 def admin_dashboard():
     """Админ панель для управления БД"""
     return render_template('admin_dashboard.html')
@@ -7167,6 +7314,9 @@ def test_themes():
     return render_template('theme_test.html')
 
 @app.route('/admin/init-database', methods=['POST'])
+@require_admin
+@rate_limit(max_requests=5, time_window=300)  # Строгое ограничение для опасных операций
+@validate_input(['action'])
 def admin_init_database():
     """Админский роут для инициализации БД через веб-интерфейс"""
     try:
@@ -7570,7 +7720,7 @@ def api_stats_table():
                                 temp_values.append([name, 0, 0, 0, 0, 0, 0])
                                 
                     except Exception as e:
-                        print(f"[DEBUG] Stats query error: {e}")
+                        app.logger.warning(f"Stats query error: {e}")
                         pass
                         
                 # Если все еще нет данных, случайные игроки из Player таблицы
@@ -7985,11 +8135,13 @@ def api_match_settle():
                     # Сохраняем в простой глобальный кэш
                     global SCORERS_CACHE
                     SCORERS_CACHE = { 'ts': time.time(), 'items': scorers }
-                except Exception:
-                    pass
+                except Exception as scorers_err:
+                    app.logger.warning(f"Failed to cache scorers: {scorers_err}")
             except Exception as agg_err:  # noqa: F841
-                try: app.logger.error(f"player stats aggregation failed: {agg_err}")
-                except Exception: pass
+                try: 
+                    app.logger.error(f"player stats aggregation failed: {agg_err}")
+                except Exception as log_err:
+                    print(f"Failed to log aggregation error: {log_err}, original error: {agg_err}")
             return jsonify({'status':'ok', 'changed': changed, 'won': won_cnt, 'lost': lost_cnt})
         finally:
             db.close()
@@ -8390,4 +8542,5 @@ if __name__ == '__main__':
     except Exception as _e:
         print(f"[WARN] Self-ping thread not started: {_e}")
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    debug_mode = os.environ.get('FLASK_DEBUG', '').lower() in ('1', 'true', 'yes')
+    app.run(host='0.0.0.0', port=port, debug=debug_mode)

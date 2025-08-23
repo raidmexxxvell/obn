@@ -14,3 +14,9 @@ python-socketio==5.11.0
 # Database system dependencies
 psycopg[binary]==3.2.9  # PostgreSQL adapter for Python 3.13
 alembic==1.13.2  # Database migrations (optional)
+
+# Security and monitoring (Phase 3)
+psutil==5.9.8  # System monitoring
+cryptography==41.0.7  # Enhanced security
+bleach==6.1.0  # HTML sanitization
+flask-limiter==3.5.0  # Rate limiting
