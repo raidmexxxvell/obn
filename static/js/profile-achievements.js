@@ -41,12 +41,12 @@
     const descFor = (a) => {
       try {
         switch(a.group){
-          case 'streak': return `Ежедневные чекины подряд`;
-          case 'credits': return `Накопление кредитов`;
-          case 'level': return `Повышение уровня`;
-          case 'invited': return `Приглашение друзей`;
-          case 'betcount': return `Количество ставок`;
-          case 'betwins': return `Выигранные ставки`;
+          case 'streak': return `Дней подряд`;
+          case 'credits': return `Кредитов накоплено`;
+          case 'level': return `Достигнут уровень`;
+          case 'invited': return `Друзей приглашено`;
+          case 'betcount': return `Ставок сделано`;
+          case 'betwins': return `Ставок выиграно`;
           default: return a.description || a.desc || '';
         }
       } catch(_) { return a.description || ''; }
@@ -61,20 +61,71 @@
       // Улучшенное отображение прогресса и требований
       if(a.value !== undefined && (a.target !== undefined || a.next_target !== undefined)) {
         const currentValue = a.value || 0;
-        const currentTarget = a.target || 0;
-        const nextTarget = a.next_target;
+        let currentTarget = a.target || 0;
+        let nextTarget = a.next_target;
         
-        // Определяем какую цель показывать
+        console.debug(`Processing achievement: ${a.name} (${a.group}), value: ${currentValue}, original target: ${currentTarget}, next: ${nextTarget}`);
+        
+        // Специальная логика для разных типов достижений с правильными целями
+        if (a.group === 'streak') {
+          const streakTargets = [7, 30, 120]; // Правильные цели для streak
+          
+          // Находим текущую и следующую цель
+          let currentTargetIndex = streakTargets.findIndex(target => currentValue < target);
+          if (currentTargetIndex === -1) {
+            // Достигли максимальной цели
+            currentTarget = streakTargets[streakTargets.length - 1];
+            nextTarget = null;
+          } else {
+            currentTarget = streakTargets[currentTargetIndex];
+            nextTarget = streakTargets[currentTargetIndex + 1] || null;
+          }
+        } else if (a.group === 'betcount') {
+          const betTargets = [10, 50, 200]; // Цели для количества ставок
+          
+          let currentTargetIndex = betTargets.findIndex(target => currentValue < target);
+          if (currentTargetIndex === -1) {
+            currentTarget = betTargets[betTargets.length - 1];
+            nextTarget = null;
+          } else {
+            currentTarget = betTargets[currentTargetIndex];
+            nextTarget = betTargets[currentTargetIndex + 1] || null;
+          }
+        } else if (a.group === 'credits') {
+          const creditTargets = [1000, 5000, 20000]; // Цели для кредитов
+          
+          let currentTargetIndex = creditTargets.findIndex(target => currentValue < target);
+          if (currentTargetIndex === -1) {
+            currentTarget = creditTargets[creditTargets.length - 1];
+            nextTarget = null;
+          } else {
+            currentTarget = creditTargets[currentTargetIndex];
+            nextTarget = creditTargets[currentTargetIndex + 1] || null;
+          }
+        } else if (a.group === 'invited') {
+          const inviteTargets = [1, 5, 20]; // Цели для приглашений
+          
+          let currentTargetIndex = inviteTargets.findIndex(target => currentValue < target);
+          if (currentTargetIndex === -1) {
+            currentTarget = inviteTargets[inviteTargets.length - 1];
+            nextTarget = null;
+          } else {
+            currentTarget = inviteTargets[currentTargetIndex];
+            nextTarget = inviteTargets[currentTargetIndex + 1] || null;
+          }
+        }
+        
+        console.debug(`After processing: target: ${currentTarget}, next: ${nextTarget}`);
+        
+        // Простая логика отображения прогресса
         let displayTarget = currentTarget;
         let progressValue = currentValue;
         let isCompleted = false;
         
+        // Если достигли текущую цель и есть следующая
         if (currentValue >= currentTarget && nextTarget && nextTarget > currentTarget) {
-          // Достигли текущую цель, есть следующая - показываем прогресс к следующей
           displayTarget = nextTarget;
-          // Прогресс показываем от текущей цели до следующей
-          progressValue = currentValue - currentTarget;
-          const progressMax = nextTarget - currentTarget;
+          progressValue = currentValue;
           isCompleted = false;
         } else if (currentValue >= currentTarget && !nextTarget) {
           // Достигли финальную цель
@@ -88,31 +139,26 @@
           isCompleted = false;
         }
         
-        // Текст с прогрессом
+        // Текст с прогрессом - более понятный и простой
         const baseDesc = descFor(a);
         if (isCompleted) {
-          req.textContent = `${baseDesc} ✅ Завершено (${currentValue}/${displayTarget})`;
-        } else if (currentValue >= currentTarget && nextTarget) {
-          req.textContent = `${baseDesc} Прогресс: ${progressValue}/${nextTarget - currentTarget} до следующего уровня`;
+          req.textContent = `${baseDesc} ✅ Завершено (${currentValue})`;
         } else {
-          req.textContent = `${baseDesc} Прогресс: ${progressValue}/${displayTarget}`;
+          req.textContent = `${baseDesc}: ${progressValue}/${displayTarget}`;
         }
         
-        // Прогресс-бар
-        const progressContainer = document.createElement('div'); progressContainer.className='achv-progress-container';
-        const progressBar = document.createElement('div'); progressBar.className='achv-progress-bar';
+        // Прогресс-бар - простая логика
+        const progressContainer = document.createElement('div'); 
+        progressContainer.className='achv-progress-container';
+        const progressBar = document.createElement('div'); 
+        progressBar.className='achv-progress-bar';
         
         let progressPercent = 0;
         if (isCompleted) {
           progressPercent = 100;
-        } else if (currentValue >= currentTarget && nextTarget) {
-          // Прогресс до следующей цели
-          const rangeSize = nextTarget - currentTarget;
-          const progressInRange = Math.max(0, currentValue - currentTarget);
-          progressPercent = Math.min(100, (progressInRange / rangeSize) * 100);
         } else {
-          // Прогресс до текущей цели
-          progressPercent = Math.min(100, (currentValue / currentTarget) * 100);
+          // Простой расчет процента
+          progressPercent = Math.min(100, (progressValue / displayTarget) * 100);
         }
         
         progressBar.style.width = progressPercent + '%';
@@ -129,7 +175,19 @@
   
   function fetchAchievements(){
     if(_loadedOnce) return Promise.resolve([]);
-    const send=(init)=> fetch('/api/achievements',{ method:'POST', body: init }).then(r=>r.json()).then(data=>{ console.debug('achievements data',data); _loadedOnce=true; renderAchievements(data.achievements||[]); return data.achievements||[]; });
+    const send=(init)=> fetch('/api/achievements',{ method:'POST', body: init })
+      .then(r=>r.json())
+      .then(data=>{ 
+        console.debug('achievements raw data',data); 
+        if (data.achievements) {
+          data.achievements.forEach(a => {
+            console.debug(`Achievement: ${a.name}, group: ${a.group}, value: ${a.value}, target: ${a.target}, next_target: ${a.next_target}`);
+          });
+        }
+        _loadedOnce=true; 
+        renderAchievements(data.achievements||[]); 
+        return data.achievements||[]; 
+      });
     if(!tg || !tg.initDataUnsafe?.user){ const fd=new FormData(); fd.append('initData', tg?.initData||''); return send(fd).catch(err=>{ console.error('achievements load error (no tg user)',err); renderAchievements([]); return []; }); }
     const fd=new FormData(); fd.append('initData', tg.initData||''); return send(fd).catch(err=>{ console.error('achievements load error',err); renderAchievements([]); return []; });
   }

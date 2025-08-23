@@ -358,6 +358,7 @@ body.allow-landscape #md-pane-stream.fs-mode * {
     margin-bottom: 20px;
     padding-bottom: 15px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    gap: 16px;
 }
 
 .profile-info {
@@ -436,7 +437,7 @@ body.allow-landscape #md-pane-stream.fs-mode * {
 
 .profile-stats {
     display: flex;
-    gap: 15px;
+    gap: 10px;
     margin-bottom: 20px;
 }
 
@@ -444,7 +445,7 @@ body.allow-landscape #md-pane-stream.fs-mode * {
     flex: 1;
     background: var(--card);
     border-radius: var(--border-radius);
-    padding: 15px;
+    padding: 10px 8px;
     text-align: center;
     backdrop-filter: blur(10px);
     border: 1px solid rgba(255, 255, 255, 0.1);
@@ -458,14 +459,14 @@ body.allow-landscape #md-pane-stream.fs-mode * {
 }
 
 .stat-value {
-    font-size: 24px;
+    font-size: 18px;
     font-weight: bold;
     color: var(--secondary);
-    margin: 5px 0;
+    margin: 3px 0;
 }
 
 .stat-label {
-    font-size: 14px;
+    font-size: 12px;
     color: var(--gray);
 }
 
@@ -713,20 +714,25 @@ body.allow-landscape #md-pane-stream.fs-mode * {
 /* --- АДАПТИВНОСТЬ --- */
 @media (max-width: 480px) {
     .profile-header {
-    flex-direction: column;
-    align-items: center;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
     }
     
     .profile-avatar {
-    margin: 0 0 12px 0;
+        margin: 0 0 8px 0;
     }
     
     .stat-card {
-        padding: 12px;
+        padding: 8px 6px;
     }
     
     .stat-value {
-        font-size: 20px;
+        font-size: 16px;
+    }
+    
+    .stat-label {
+        font-size: 11px;
     }
 }
 
