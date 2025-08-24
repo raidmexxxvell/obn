@@ -115,7 +115,42 @@
                   });
                 };
 
-                const go = (store) => { try { ensureMatchAdvancedLoaded().then(()=>{ try { window.openMatchScreen?.({ home: m.home, away: m.away, date: m.date, time: m.time }, store?.data || store); } catch(e) { console.error(e); } }).finally(()=>{ detailsBtn.disabled=false; detailsBtn.textContent=original; }); } catch(e) { detailsBtn.disabled=false; detailsBtn.textContent=original; } };
+                const showFallbackModal = (store) => {
+                  try {
+                    const data = store?.data || store || {};
+                    const overlay = document.createElement('div');
+                    overlay.className = 'modal-overlay debug-match-fallback';
+                    overlay.style.position = 'fixed'; overlay.style.inset = '0'; overlay.style.background = 'rgba(0,0,0,0.6)'; overlay.style.zIndex = '99999'; overlay.style.display = 'flex'; overlay.style.alignItems = 'center'; overlay.style.justifyContent = 'center';
+                    const box = document.createElement('div');
+                    box.style.background = 'var(--bg,#0b0f1a)'; box.style.border = '1px solid rgba(255,255,255,0.06)'; box.style.borderRadius = '12px'; box.style.width = 'min(92vw,640px)'; box.style.maxHeight = '84vh'; box.style.overflow = 'auto'; box.style.padding = '14px'; box.style.color = 'var(--light,#fff)';
+                    const title = document.createElement('div'); title.style.fontWeight = '800'; title.style.marginBottom = '8px'; title.textContent = `${m.home || ''} — ${m.away || ''}`;
+                    const meta = document.createElement('div'); meta.style.opacity = '.9'; meta.style.marginBottom = '10px'; meta.textContent = `${m.date || ''} ${m.time || ''}`;
+                    const content = document.createElement('pre'); content.style.whiteSpace = 'pre-wrap'; content.style.fontSize = '13px'; content.style.lineHeight = '1.35'; content.style.marginBottom = '12px';
+                    try { content.textContent = JSON.stringify(data, null, 2); } catch(_) { content.textContent = String(data || ''); }
+                    const closeRow = document.createElement('div'); closeRow.style.display = 'flex'; closeRow.style.justifyContent = 'flex-end';
+                    const closeBtn = document.createElement('button'); closeBtn.className = 'app-btn neutral'; closeBtn.textContent = 'Закрыть'; closeBtn.style.marginLeft = '8px';
+                    closeBtn.onclick = () => { try { overlay.remove(); } catch(_){} };
+                    closeRow.appendChild(closeBtn);
+                    box.appendChild(title); box.appendChild(meta); box.appendChild(content); box.appendChild(closeRow); overlay.appendChild(box); document.body.appendChild(overlay);
+                  } catch(e) { console.error('fallback modal err', e); try { alert('Не удалось открыть детали матча'); } catch(_){} }
+                };
+
+                const go = (store) => {
+                  try {
+                    console.log('[predictions] go -> ensureMatchAdvancedLoaded', m.home, m.away);
+                    ensureMatchAdvancedLoaded().then(()=>{
+                      try {
+                        if (window.openMatchScreen && typeof window.openMatchScreen === 'function'){
+                          console.log('[predictions] calling openMatchScreen', m.home, m.away);
+                          window.openMatchScreen({ home: m.home, away: m.away, date: m.date, time: m.time }, store?.data || store);
+                        } else {
+                          console.warn('[predictions] openMatchScreen unavailable, showing fallback modal');
+                          showFallbackModal(store);
+                        }
+                      } catch(err){ console.error('[predictions] error calling openMatchScreen', err); showFallbackModal(store); }
+                    }).catch(err=>{ console.error('[predictions] ensure load failed', err); showFallbackModal(store); }).finally(()=>{ detailsBtn.disabled=false; detailsBtn.textContent=original; });
+                  } catch(e) { console.error('[predictions] go outer error', e); detailsBtn.disabled=false; detailsBtn.textContent=original; }
+                };
                 const FRESH_TTL = 10 * 60 * 1000;
                 const isEmptyRosters = (()=>{ try { const d=cached?.data; const h=Array.isArray(d?.rosters?.home)?d.rosters.home:[]; const a=Array.isArray(d?.rosters?.away)?d.rosters.away:[]; return h.length===0 && a.length===0; } catch(_) { return false; }})();
                 if (cached && !isEmptyRosters && (Date.now() - (cached.ts||0) < FRESH_TTL)) { go(cached); }
