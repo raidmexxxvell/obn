@@ -3268,6 +3268,8 @@ def _build_schedule_payload_from_sheet():
             except Exception:
                 new_matches.append(m)
         t['matches'] = new_matches
+    # Убираем туры, в которых после фильтрации не осталось матчей — чтобы не показывать пустые заголовки
+    upcoming = [t for t in upcoming if t.get('matches') and len(t.get('matches')) > 0]
     def tour_sort_key(t):
         # Приоритизируем ближайшие по номеру после последнего завершённого тура,
         # чтобы показывать, например, 4/5/6 даже если у 7/8/9 есть даты, а у 4/5/6 нет.

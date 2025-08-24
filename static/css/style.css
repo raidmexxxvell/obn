@@ -971,6 +971,30 @@ body.theme-blb .share-btn {
     font-weight: 700;
     cursor: pointer;
 }
+
+/* Специальный стиль для кнопки «Детали матча» в стиле лиги НЛО (UFO) */
+.details-match-btn {
+    /* берём акцент из темы (переменная --accent1 для НЛО задаёт нужный градиент) */
+    background: var(--accent1);
+    color: #0b1220; /* тёмный текст на светлом градиенте для контраста */
+    font-weight: 900;
+    padding: 7px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.06);
+    box-shadow: 0 8px 24px rgba(108,140,255,0.12), inset 0 -2px 6px rgba(0,0,0,0.08);
+    transition: transform .18s ease, box-shadow .18s ease, opacity .12s ease;
+    margin-left: 8px;
+}
+.details-match-btn:hover { transform: translateY(-2px); box-shadow: 0 12px 30px rgba(108,140,255,0.18); }
+.details-match-btn:active { transform: translateY(0); }
+.details-match-btn[disabled] { opacity: 0.7; cursor: not-allowed; box-shadow: none; }
+
+/* В теме BLB кнопка должна выглядеть более тёмной и золотистой */
+body.theme-blb .details-match-btn {
+    background: linear-gradient(90deg, #8d6e2f, #eebb11);
+    color: #0b0b0b;
+    box-shadow: 0 8px 20px rgba(238,187,17,0.12);
+}
 .schedule-loading, .schedule-empty, .schedule-error { color: var(--gray); padding: 10px; }
 
 /* --- Голосование (расписание) старое: вертикальные бары --- */

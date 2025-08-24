@@ -81,9 +81,25 @@
             // Кнопка «Больше прогнозов» и скрытая панель с доп.рынками (тоталы)
             const moreWrap = document.createElement('div'); moreWrap.style.marginTop = '8px'; moreWrap.style.textAlign = 'center';
             const moreBtn = document.createElement('button'); moreBtn.className = 'details-btn'; moreBtn.textContent = 'Больше прогнозов'; moreBtn.setAttribute('data-throttle','800');
+            const detailsBtn = document.createElement('button'); detailsBtn.className = 'details-btn details-match-btn'; detailsBtn.textContent = 'Детали матча'; detailsBtn.setAttribute('data-throttle','800');
             const extra = document.createElement('div'); extra.className = 'extra-markets hidden'; extra.style.marginTop = '8px';
             moreBtn.addEventListener('click', () => { extra.classList.toggle('hidden'); });
+            // Открыть детали конкретного матча
+            detailsBtn.addEventListener('click', () => {
+              try {
+                detailsBtn.disabled = true;
+                const matchObj = { home: m.home || '', away: m.away || '', date: m.date || '', time: m.time || '', datetime: m.datetime || '', tour: t.tour };
+                // Используем общий API для открытия экрана деталей матча
+                if (window.openMatchScreen) {
+                  window.openMatchScreen(matchObj, m);
+                } else {
+                  console.warn('openMatchScreen not available');
+                }
+              } catch (e) { console.error(e); }
+              setTimeout(() => { detailsBtn.disabled = false; }, 800);
+            });
             moreWrap.appendChild(moreBtn);
+            moreWrap.appendChild(detailsBtn);
 
             // Тоталы: 3.5/4.5/5.5 Over/Under
             const totals = (m.markets && m.markets.totals) || [];
