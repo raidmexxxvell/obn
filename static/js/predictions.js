@@ -81,22 +81,48 @@
             // Кнопка «Больше прогнозов» и скрытая панель с доп.рынками (тоталы)
             const moreWrap = document.createElement('div'); moreWrap.style.marginTop = '8px'; moreWrap.style.textAlign = 'center';
             const moreBtn = document.createElement('button'); moreBtn.className = 'details-btn'; moreBtn.textContent = 'Больше прогнозов'; moreBtn.setAttribute('data-throttle','800');
-            const detailsBtn = document.createElement('button'); detailsBtn.className = 'details-btn details-match-btn'; detailsBtn.textContent = 'Детали матча'; detailsBtn.setAttribute('data-throttle','800');
+            const detailsBtn = document.createElement('button'); detailsBtn.className = 'details-btn'; detailsBtn.textContent = 'Детали матча'; detailsBtn.setAttribute('data-throttle','800');
             const extra = document.createElement('div'); extra.className = 'extra-markets hidden'; extra.style.marginTop = '8px';
             moreBtn.addEventListener('click', () => { extra.classList.toggle('hidden'); });
-            // Открыть детали конкретного матча
+            // Открыть детали конкретного матча — предзагружаем данные как в league.js
             detailsBtn.addEventListener('click', () => {
+              const original = detailsBtn.textContent;
+              detailsBtn.disabled = true;
+              detailsBtn.textContent = 'Загрузка...';
               try {
-                detailsBtn.disabled = true;
-                const matchObj = { home: m.home || '', away: m.away || '', date: m.date || '', time: m.time || '', datetime: m.datetime || '', tour: t.tour };
-                // Используем общий API для открытия экрана деталей матча
-                if (window.openMatchScreen) {
-                  window.openMatchScreen(matchObj, m);
-                } else {
-                  console.warn('openMatchScreen not available');
-                }
-              } catch (e) { console.error(e); }
-              setTimeout(() => { detailsBtn.disabled = false; }, 800);
+                const params = new URLSearchParams({ home: m.home || '', away: m.away || '' });
+                const cacheKey = `md:${(m.home||'').toLowerCase()}::${(m.away||'').toLowerCase()}`;
+                const cached = (() => { try { return JSON.parse(localStorage.getItem(cacheKey) || 'null'); } catch(_) { return null; } })();
+                const fetchWithETag = (etag) => fetch(`/api/match-details?${params.toString()}`, { headers: etag ? { 'If-None-Match': etag } : {} })
+                  .then(async r => { if (r.status === 304 && cached) return cached; const data = await r.json(); const version = data.version || r.headers.get('ETag') || null; const toStore = { data, version, ts: Date.now() }; try { localStorage.setItem(cacheKey, JSON.stringify(toStore)); } catch(_) {} return toStore; });
+                const ensureMatchAdvancedLoaded = () => {
+                  return new Promise((resolve) => {
+                    if (window.openMatchScreen) return resolve();
+                    // Попытка динамически загрузить скрипт, если он не подключён
+                    const scriptUrl = '/static/js/profile-match-advanced.js';
+                    const existing = Array.from(document.getElementsByTagName('script')).find(s => (s.src||'').endsWith('profile-match-advanced.js'));
+                    if (existing) {
+                      // если скрипт уже добавлен, ждём его загрузки
+                      if (existing.getAttribute('data-loaded') === '1') return resolve();
+                      existing.addEventListener('load', () => resolve());
+                      existing.addEventListener('error', () => resolve());
+                      return;
+                    }
+                    const s = document.createElement('script'); s.src = scriptUrl; s.async = true;
+                    s.addEventListener('load', () => { s.setAttribute('data-loaded','1'); resolve(); });
+                    s.addEventListener('error', () => resolve());
+                    document.head.appendChild(s);
+                  });
+                };
+
+                const go = (store) => { try { ensureMatchAdvancedLoaded().then(()=>{ try { window.openMatchScreen?.({ home: m.home, away: m.away, date: m.date, time: m.time }, store?.data || store); } catch(e) { console.error(e); } }).finally(()=>{ detailsBtn.disabled=false; detailsBtn.textContent=original; }); } catch(e) { detailsBtn.disabled=false; detailsBtn.textContent=original; } };
+                const FRESH_TTL = 10 * 60 * 1000;
+                const isEmptyRosters = (()=>{ try { const d=cached?.data; const h=Array.isArray(d?.rosters?.home)?d.rosters.home:[]; const a=Array.isArray(d?.rosters?.away)?d.rosters.away:[]; return h.length===0 && a.length===0; } catch(_) { return false; }})();
+                if (cached && !isEmptyRosters && (Date.now() - (cached.ts||0) < FRESH_TTL)) { go(cached); }
+                else if (cached && cached.version) { fetchWithETag(cached.version).then(go).catch(() => { go(cached); }); }
+                else if (cached) { go(cached); }
+                else { fetchWithETag(null).then(go).catch(()=>{ detailsBtn.disabled=false; detailsBtn.textContent=original; }); }
+              } catch(e){ console.error(e); detailsBtn.disabled=false; detailsBtn.textContent=original; }
             });
             moreWrap.appendChild(moreBtn);
             moreWrap.appendChild(detailsBtn);
