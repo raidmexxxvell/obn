@@ -6,6 +6,10 @@ SQLAlchemy==2.0.36
 flask-compress==1.14
 requests==2.31.0
 
+# Ensure distutils is available for eventlet import on newer Python where distutils was removed
+setuptools>=68.0.0
+wheel>=0.40.0
+
 # Оптимизации производительности
 redis==5.0.1
 flask-socketio==5.3.6
@@ -22,3 +26,4 @@ bleach==6.1.0  # HTML sanitization
 flask-limiter==3.5.0  # Rate limiting
 gunicorn==21.2.0  # Production WSGI server (sync worker for now)
 eventlet==0.33.3  # async worker for Flask-SocketIO (recommended)
+greenlet>=2.0.2
