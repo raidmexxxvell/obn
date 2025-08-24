@@ -207,8 +207,20 @@ if OPTIMIZATIONS_AVAILABLE:
             socketio_kwargs = {'cors_allowed_origins': "*", 'logger': False, 'engineio_logger': False}
             if redis_msgq:
                 socketio_kwargs['message_queue'] = redis_msgq
-                # prefer eventlet/gevent if available (server should be started with corresponding worker)
-                socketio_kwargs['async_mode'] = 'eventlet'
+                # detect available async modes in the environment to avoid Invalid async_mode specified
+                async_mode_choice = None
+                try:
+                    import eventlet  # type: ignore
+                    async_mode_choice = 'eventlet'
+                except Exception:
+                    try:
+                        import gevent  # type: ignore
+                        async_mode_choice = 'gevent'
+                    except Exception:
+                        async_mode_choice = None
+                if async_mode_choice:
+                    socketio_kwargs['async_mode'] = async_mode_choice
+                    print(f"[INFO] socketio async_mode set to {async_mode_choice}")
 
             socketio = SocketIO(app, **socketio_kwargs)
             websocket_manager = WebSocketManager(socketio)
