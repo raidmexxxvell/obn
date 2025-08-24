@@ -197,32 +197,7 @@ if OPTIMIZATIONS_AVAILABLE:
         try:
             from flask_socketio import SocketIO
             # Упрощенная инициализация для совместимости
-            redis_msgq = None
-            try:
-                import os as _os
-                redis_msgq = _os.environ.get('REDIS_URL')
-            except Exception:
-                redis_msgq = None
-
-            socketio_kwargs = {'cors_allowed_origins': "*", 'logger': False, 'engineio_logger': False}
-            if redis_msgq:
-                socketio_kwargs['message_queue'] = redis_msgq
-                # detect available async modes in the environment to avoid Invalid async_mode specified
-                async_mode_choice = None
-                try:
-                    import eventlet  # type: ignore
-                    async_mode_choice = 'eventlet'
-                except Exception:
-                    try:
-                        import gevent  # type: ignore
-                        async_mode_choice = 'gevent'
-                    except Exception:
-                        async_mode_choice = None
-                if async_mode_choice:
-                    socketio_kwargs['async_mode'] = async_mode_choice
-                    print(f"[INFO] socketio async_mode set to {async_mode_choice}")
-
-            socketio = SocketIO(app, **socketio_kwargs)
+            socketio = SocketIO(app, cors_allowed_origins="*", logger=False, engineio_logger=False)
             websocket_manager = WebSocketManager(socketio)
             # Делаем доступным через current_app.config
             app.config['websocket_manager'] = websocket_manager
@@ -238,12 +213,6 @@ if OPTIMIZATIONS_AVAILABLE:
         
         # Система умной инвалидации кэша
         invalidator = SmartCacheInvalidator(cache_manager, websocket_manager)
-            
-        # Make invalidator available via app.config for blueprints/handlers
-        try:
-            app.config['invalidator'] = invalidator
-        except Exception:
-            pass
         
         # Оптимизированный Google Sheets менеджер
         try:
@@ -5516,13 +5485,6 @@ def api_vote_match():
             try:
                 db.add(MatchVote(home=home, away=away, date_key=date_key, user_id=uid, choice=choice))
                 db.commit()
-                # Immediately notify other instances / clients about vote change
-                try:
-                    inv = app.config.get('invalidator')
-                    if inv:
-                        inv.invalidate_for_change('vote_aggregates_update', {'home': home, 'away': away, 'date_key': date_key})
-                except Exception:
-                    pass
                 return jsonify({'status': 'ok'})
             except IntegrityError:
                 db.rollback()
