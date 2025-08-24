@@ -964,26 +964,12 @@ body.theme-blb .share-btn {
 .match-footer { margin-top: 10px; display: flex; justify-content: center; gap: 8px; }
 .details-btn {
     background: var(--accent1);
-    color: #0b1220;
+    color: #fff;
     border: none;
-    padding: 7px 12px;
-    border-radius: 12px;
-    font-weight: 800;
+    padding: 8px 14px;
+    border-radius: 10px;
+    font-weight: 700;
     cursor: pointer;
-    border: 1px solid rgba(255,255,255,0.06);
-    box-shadow: 0 8px 24px rgba(108,140,255,0.12), inset 0 -2px 6px rgba(0,0,0,0.08);
-    transition: transform .18s ease, box-shadow .18s ease, opacity .12s ease;
-    margin-left: 8px;
-}
-.details-btn:hover { transform: translateY(-2px); box-shadow: 0 12px 30px rgba(108,140,255,0.18); }
-.details-btn:active { transform: translateY(0); }
-.details-btn[disabled] { opacity: 0.7; cursor: not-allowed; box-shadow: none; }
-
-/* В теме BLB кнопка должна выглядеть более тёмной и золотистой */
-body.theme-blb .details-btn {
-    background: linear-gradient(90deg, #8d6e2f, #eebb11);
-    color: #0b0b0b;
-    box-shadow: 0 8px 20px rgba(238,187,17,0.12);
 }
 .schedule-loading, .schedule-empty, .schedule-error { color: var(--gray); padding: 10px; }
 
