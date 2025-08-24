@@ -69,6 +69,39 @@ document.addEventListener('DOMContentLoaded', () => {
     splash.style.opacity = '1';
     splash.style.display = 'flex';
     if (appContent) appContent.style.display = 'none';
+    // Запуск предзагрузки содержимого главной вкладки (рекламные щиты и "Игра недели")
+    // делаем это прямо во время отображения заставки, чтобы главный экран
+    // уже загружал данные и изображения пока виден сплеш.
+    (function startMainPreload(){
+        const tryStart = () => {
+            try {
+                // init carousel if available
+                if (window.AdsFeatured && typeof window.AdsFeatured.initHomeAdsCarousel === 'function') {
+                    try { window.AdsFeatured.initHomeAdsCarousel(); } catch(_) {}
+                }
+                // render top match (alias might be on window or on AdsFeatured)
+                if (typeof window.renderTopMatchOfWeek === 'function') {
+                    try { window.renderTopMatchOfWeek(); } catch(_) {}
+                } else if (window.AdsFeatured && typeof window.AdsFeatured.renderTopMatchOfWeek === 'function') {
+                    try { window.AdsFeatured.renderTopMatchOfWeek(); } catch(_) {}
+                }
+                info('Triggered main tab preload (ads / match-of-week)');
+                return true;
+            } catch (e) {
+                warn('main preload attempt failed', e && (e.stack || e.message || String(e)));
+                return false;
+            }
+        };
+
+        // попытка сразу и с несколькими повторениями, пока модули не инициализируются
+        tryStart();
+        let tries = 0;
+        const pid = setInterval(() => {
+            tries += 1;
+            const ok = tryStart();
+            if (ok || tries >= 6) clearInterval(pid);
+        }, 300);
+    })();
     // мгновенно сдвинем прогресс с 0 чтобы избежать визуального залипания
     try {
         if (loadingProgress) loadingProgress.style.width = '1%';
