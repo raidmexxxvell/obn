@@ -2,10 +2,26 @@
 // Extracted from legacy profile.js
 (function(){
   function openMatchScreen(match, details){
+    console.log('[MatchAdvanced] openMatchScreen called', match);
     try { window.__CURRENT_MATCH_KEY__ = `${(match?.home||'').toLowerCase().trim()}__${(match?.away||'').toLowerCase().trim()}__${((match?.datetime||match?.date||'').toString().slice(0,10))}`; } catch(_) {}
     const schedulePane = document.getElementById('ufo-schedule');
     const mdPane = document.getElementById('ufo-match-details');
-    if (!schedulePane || !mdPane) return;
+    if (!schedulePane || !mdPane) {
+      console.warn('[MatchAdvanced] expected DOM nodes missing: ufo-schedule or ufo-match-details not found. Rendering fallback modal.');
+      try {
+        // fallback minimal modal showing match + details
+        const overlay = document.createElement('div'); overlay.className='modal-overlay'; overlay.style.position='fixed'; overlay.style.inset='0'; overlay.style.background='rgba(0,0,0,0.6)'; overlay.style.zIndex='99999'; overlay.style.display='flex'; overlay.style.alignItems='center'; overlay.style.justifyContent='center';
+        const box = document.createElement('div'); box.style.background='var(--bg,#0b0f1a)'; box.style.border='1px solid rgba(255,255,255,0.06)'; box.style.borderRadius='12px'; box.style.width='min(92vw,640px)'; box.style.maxHeight='84vh'; box.style.overflow='auto'; box.style.padding='14px'; box.style.color='var(--light,#fff)';
+        const title = document.createElement('div'); title.style.fontWeight='800'; title.style.marginBottom='8px'; title.textContent = `${match?.home||''} — ${match?.away||''}`;
+        const meta = document.createElement('div'); meta.style.opacity='.9'; meta.style.marginBottom='10px'; meta.textContent = `${match?.date||''} ${match?.time||''}`;
+        const content = document.createElement('pre'); content.style.whiteSpace='pre-wrap'; content.style.fontSize='13px'; content.style.lineHeight='1.35'; try { content.textContent = JSON.stringify(details||{}, null, 2); } catch(_) { content.textContent = String(details||''); }
+        const closeRow = document.createElement('div'); closeRow.style.display='flex'; closeRow.style.justifyContent='flex-end';
+        const closeBtn = document.createElement('button'); closeBtn.className='app-btn neutral'; closeBtn.textContent='Закрыть'; closeBtn.style.marginLeft='8px'; closeBtn.onclick = ()=>{ try{ overlay.remove(); }catch(_){} };
+        closeRow.appendChild(closeBtn);
+        box.appendChild(title); box.appendChild(meta); box.appendChild(content); box.appendChild(closeRow); overlay.appendChild(box); document.body.appendChild(overlay);
+      } catch(e){ console.error('[MatchAdvanced] fallback modal failed', e); }
+      return;
+    }
     try {
       const tablePane = document.getElementById('ufo-table');
       const statsPaneLeague = document.getElementById('ufo-stats');
