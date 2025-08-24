@@ -3219,7 +3219,8 @@ def _build_schedule_payload_from_sheet():
             try:
                 if m.get('datetime'):
                     dt = datetime.fromisoformat(m['datetime'])
-                    if dt + timedelta(hours=3) >= now_local:
+                    # Убираем 3-часовой буфер: матч остаётся в расписании только до времени начала
+                    if dt >= now_local:
                         return True
                 elif m.get('date'):
                     if datetime.fromisoformat(m['date']).date() >= today:
@@ -3243,7 +3244,8 @@ def _build_schedule_payload_from_sheet():
                 keep = False
                 if m.get('datetime'):
                     dt = datetime.fromisoformat(m['datetime'])
-                    keep = (dt + timedelta(hours=3) >= now_local)
+                    # Убираем 3-часовой буфер: матч остаётся в расписании только до времени начала
+                    keep = (dt >= now_local)
                 elif m.get('date'):
                     d = datetime.fromisoformat(m['date']).date()
                     keep = (d >= today)
@@ -3346,10 +3348,22 @@ def _build_results_payload_from_sheet():
                 except Exception:
                     dt = None
 
-            now_local = datetime.now()
+            # now с учётом смещения расписания (как в _build_schedule_payload_from_sheet)
+            try:
+                _tz_min = int(os.environ.get('SCHEDULE_TZ_SHIFT_MIN') or '0')
+            except Exception:
+                _tz_min = 0
+            if _tz_min == 0:
+                try:
+                    _tz_h = int(os.environ.get('SCHEDULE_TZ_SHIFT_HOURS') or '0')
+                except Exception:
+                    _tz_h = 0
+                _tz_min = _tz_h * 60
+            now_local = datetime.now() + timedelta(minutes=_tz_min)
             is_past = False
             try:
                 if dt:
+                    # Матч считается прошедшим сразу после времени начала (без 3-часового буфера)
                     is_past = dt <= now_local
                 elif d:
                     is_past = d <= now_local.date()
