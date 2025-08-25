@@ -908,18 +908,26 @@ def api_betting_place():
         except Exception as e:
             app.logger.warning(f"Mirror after bet failed: {e}")
         def _present_selection(market, sel_val):
+            # Для рынка 1x2 возвращаем читабельное представление с названием команды
+            if market == '1x2':
+                if sel_val == 'draw':
+                    return 'Ничья'
+                if sel_val == 'home':
+                    return home or 'П1'
+                if sel_val == 'away':
+                    return away or 'П2'
+
             if market=='totals' and sel_val and '_' not in sel_val:
                 # O35/U35 -> Over 3.5 / Under 3.5
                 if sel_val[0] in ('O','U') and sel_val[1:] in ('35','45','55'):
                     side = 'Over' if sel_val[0]=='O' else 'Under'
-                    line = sel_val[1][0] if len(sel_val)>=3 else sel_val[1]
                     # проще напрямую по первой цифре
                     mapping={'35':'3.5','45':'4.5','55':'5.5'}
                     return f"{side} {mapping.get(sel_val[1:], sel_val[1:])}"
             if market=='totals' and '_' in (sel_val or ''):
                 try:
                     s,l = sel_val.split('_',1)
-                    return f"{'Over' if s=='over' else 'Under'} {l}"
+                    return f"{ 'Over' if s=='over' else 'Under'} {l}"
                 except Exception:
                     return sel_val
             return sel_val
@@ -5858,17 +5866,27 @@ def api_betting_my_bets():
                     return ('over' if sel_val[0]=='O' else 'under'), mapping.get(sel_val[1:], sel_val[1:])
                 return None, None
 
-            def _present(market, selection):
+            def _present(market, selection, home=None, away=None):
+                # Для рынка 1x2 показываем более читабельный формат:
+                # - для 'home'/'away' -> market: 'Победа', selection: название команды
+                # - для 'draw' -> market и selection: 'Ничья'
+                if market == '1x2':
+                    if selection == 'draw':
+                        return 'Ничья', 'Ничья'
+                    if selection == 'home':
+                        return 'Победа', home or 'П1'
+                    if selection == 'away':
+                        return 'Победа', away or 'П2'
+                    # fallback
+                    return 'Победа/Ничья', {'home':'П1','draw':'Х','away':'П2'}.get(selection, selection)
+
                 market_display = {
-                    '1x2': 'Победа/Ничья',
                     'totals': 'Тотал',
                     'penalty': 'Пенальти',
                     'redcard': 'Красная карточка'
                 }.get(market, market)
                 selection_display = selection
-                if market == '1x2':
-                    selection_display = {'home':'П1','draw':'Х','away':'П2'}.get(selection, selection)
-                elif market == 'totals':
+                if market == 'totals':
                     side, line = _decode_totals(selection)
                     if side and line:
                         selection_display = f"Больше {line}" if side=='over' else f"Меньше {line}"
@@ -5877,7 +5895,7 @@ def api_betting_my_bets():
                 return market_display, selection_display
 
             for b in rows:
-                mdisp, sdisp = _present(b.market, b.selection)
+                mdisp, sdisp = _present(b.market, b.selection, b.home, b.away)
                 data.append({
                     'id': b.id,
                     'tour': b.tour,
