@@ -935,6 +935,63 @@ body.theme-blb .share-btn {
     border-left: 4px solid #CD7F32;
 }
 
+/* ------------------------------------------------------------------
+   Сделаем так, чтобы таблица в подвкладке "Статистика" выглядела
+   идентично таблице в подвкладке "Таблица". Оба элемента в шаблоне
+   используют класс `league-table`, но добавим явные правила для
+   `#stats-table`, чтобы гарантировать одинаковое отображение.
+   ------------------------------------------------------------------ */
+
+#stats-table {
+    width: 100%;
+    border-collapse: collapse;
+    color: var(--light);
+    font-size: 14px;
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.15);
+}
+
+#stats-table tbody td {
+    padding: 10px 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.10);
+    border-right: 1px solid rgba(255,255,255,0.06);
+    text-align: center;
+    vertical-align: middle;
+}
+
+#stats-table tbody tr:nth-child(even) {
+    background: rgba(255,255,255,0.03);
+}
+
+#stats-table tbody tr:hover {
+    background: rgba(255,255,255,0.06);
+}
+
+#stats-table tbody td:first-child,
+#stats-table thead th:first-child {
+    width: 44px;
+    text-align: center;
+    color: var(--gray);
+}
+
+#stats-table tbody td:nth-child(2) {
+    font-weight: 600;
+}
+
+#stats-table tbody tr.rank-1 {
+    background: linear-gradient(90deg, rgba(255, 215, 0, 0.20), rgba(255, 215, 0, 0.10));
+    border-left: 4px solid #FFD700;
+}
+#stats-table tbody tr.rank-2 {
+    background: linear-gradient(90deg, rgba(192, 192, 192, 0.18), rgba(192, 192, 192, 0.08));
+    border-left: 4px solid #C0C0C0;
+}
+#stats-table tbody tr.rank-3 {
+    background: linear-gradient(90deg, rgba(205, 127, 50, 0.18), rgba(205, 127, 50, 0.08));
+    border-left: 4px solid #CD7F32;
+}
+
+
 /* --------- РАСПИСАНИЕ --------- */
 .tour-block { margin: 12px 10px 20px; }
 .tour-title {
