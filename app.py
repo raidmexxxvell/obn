@@ -8418,6 +8418,47 @@ def api_match_settle():
                     SCORERS_CACHE = { 'ts': time.time(), 'items': scorers }
                 except Exception as scorers_err:
                     app.logger.warning(f"Failed to cache scorers: {scorers_err}")
+                # --- Обновим snapshot stats-table из TeamPlayerStats (чтобы фронтенд видел игры) ---
+                try:
+                    header = ['Игрок', 'Матчи', 'Голы', 'Пасы', 'ЖК', 'КК', 'Очки']
+                    rows = db.query(TeamPlayerStats).all()
+                    # Сортируем по очкам (goals+assists), затем по голам
+                    rows_sorted = sorted(rows, key=lambda r: (-( (r.goals or 0) + (r.assists or 0) ), -(r.goals or 0) ))
+                    vals = []
+                    for r in rows_sorted[:10]:
+                        name = (r.player or '')
+                        matches = int(r.games or 0)
+                        goals = int(r.goals or 0)
+                        assists = int(r.assists or 0)
+                        yellows = int(r.yellows or 0)
+                        reds = int(r.reds or 0)
+                        points = goals + assists
+                        vals.append([name, matches, goals, assists, yellows, reds, points])
+                    # Дополняем до 10 строк, если нужно
+                    if len(vals) < 10:
+                        for i in range(len(vals)+1, 11):
+                            vals.append([f'Игрок {i}', 0, 0, 0, 0, 0, 0])
+                    stats_payload = {
+                        'range': 'A1:G11',
+                        'values': [header] + vals,
+                        'updated_at': datetime.now(timezone.utc).isoformat()
+                    }
+                    try:
+                        _snapshot_set(db, 'stats-table', stats_payload)
+                    except Exception:
+                        pass
+                    try:
+                        if cache_manager:
+                            cache_manager.invalidate('stats_table')
+                    except Exception:
+                        pass
+                    try:
+                        if websocket_manager:
+                            websocket_manager.notify_data_change('stats_table', stats_payload)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
             except Exception as agg_err:  # noqa: F841
                 try: 
                     app.logger.error(f"player stats aggregation failed: {agg_err}")
