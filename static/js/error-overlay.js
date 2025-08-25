@@ -41,4 +41,6 @@
   // Тестовая отметка
   console.log('[error-overlay] initialized');
   window.__ERROR_OVERLAY__ = true;
+  // Помечаем, что скрипт загружен
+  try { window.__ERROR_OVERLAY_LOADED__ = true; } catch(_){}
 })();

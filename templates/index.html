@@ -20,6 +20,8 @@
                 // Попытка взять user id из Telegram WebApp initData (доступно после загрузки sdk)
                 function loadOverlay(){
                     try {
+                        // Если уже инициализировано — выходим
+                        if (window.__ERROR_OVERLAY_INJECTED__) return;
                         const tg = window.Telegram && window.Telegram.WebApp;
                         let uid = null;
                         if (tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id){
@@ -30,9 +32,13 @@
                             try { uid = document.body.getAttribute('data-user-id'); } catch(_){ uid=null; }
                         }
                         if (uid && ADMIN_ID && uid === ADMIN_ID){
+                            // Защита от повторной вставки скрипта
+                            if (document.querySelector('script[src*="/static/js/error-overlay.js"]')) { window.__ERROR_OVERLAY_INJECTED__ = true; return; }
                             var s=document.createElement('script');
+                            s.id = 'error-overlay-loader';
                             s.src='/static/js/error-overlay.js?v={{ static_version }}';
                             document.head.appendChild(s);
+                            window.__ERROR_OVERLAY_INJECTED__ = true;
                         }
                     } catch(_){ /* silent */ }
                 }
