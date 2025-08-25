@@ -3060,22 +3060,44 @@ def _build_league_payload_from_sheet():
     return payload
 
 def _build_stats_payload_from_sheet():
-    ws = get_stats_sheet()
-    _metrics_inc('sheet_reads', 1)
+    # Build stats payload from DB (TeamPlayerStats). Returns same shape as previous Sheets payload.
+    header = ['Игрок', 'Матчи', 'Голы', 'Пасы', 'ЖК', 'КК', 'Очки']
+    rows_out = [header]
+    # Prefer DB as source
     try:
-        values = ws.get('A1:G11') or []
-    except Exception as e:
-        _metrics_note_rate_limit(e)
-        raise
-    normalized = []
-    for i in range(11):
-        row = values[i] if i < len(values) else []
-        row = list(row) + [''] * (7 - len(row))
-        normalized.append(row[:7])
+        if SessionLocal is not None:
+            db = get_db()
+            try:
+                rows = db.query(TeamPlayerStats).all()
+                # sort by goals+assists desc, then goals desc
+                rows_sorted = sorted(rows, key=lambda r: ( -((r.goals or 0) + (r.assists or 0)), -(r.goals or 0) ))
+                for r in rows_sorted[:10]:
+                    name = (r.player or '')
+                    matches = int(r.games or 0)
+                    goals = int(r.goals or 0)
+                    assists = int(r.assists or 0)
+                    yellows = int(r.yellows or 0)
+                    reds = int(r.reds or 0)
+                    points = goals + assists
+                    rows_out.append([name, matches, goals, assists, yellows, reds, points])
+            finally:
+                try:
+                    db.close()
+                except Exception:
+                    pass
+    except Exception:
+        # Fall back to empty placeholders if DB read fails
+        rows_out = [header]
+
+    # Ensure we have 10 player rows (header + 10 rows = 11)
+    while len(rows_out) < 11:
+        idx = len(rows_out)
+        rows_out.append([f'Игрок {idx}', 0, 0, 0, 0, 0, 0])
+
     payload = {
         'range': 'A1:G11',
         'updated_at': datetime.now(timezone.utc).isoformat(),
-        'values': normalized
+        'values': rows_out
     }
     return payload
 
@@ -6679,48 +6701,25 @@ def api_league_table_refresh():
         if not admin_id or user_id != admin_id:
             return jsonify({'error': 'forbidden'}), 403
 
-        # форс-обновление: игнорируем кеш
-        ws = get_table_sheet()
-        values = ws.get('A1:H10') or []
-        normalized = []
-        for i in range(10):
-            row = values[i] if i < len(values) else []
-            row = list(row) + [''] * (8 - len(row))
-            normalized.append(row[:8])
-        payload = {
-            'range': 'A1:H10',
-            'updated_at': datetime.now(timezone.utc).isoformat(),
-            'values': normalized
-        }
-        LEAGUE_TABLE_CACHE['data'] = payload
-        LEAGUE_TABLE_CACHE['ts'] = int(time.time())
+        # Форсируем синхронизацию через тот же код, что используется в фоновом sync —
+        # это гарантирует, что снапшоты будут построены из актуальных источников (БД/оптимизированных билдов),
+        # и выполнится инвалидация кэша и WebSocket-уведомления.
+        try:
+            _sync_league_table()
+        except Exception as _e:
+            app.logger.warning(f"league-table forced sync failed: {_e}")
+        updated_at = None
         if SessionLocal is not None:
-            db: Session = get_db()
+            db = get_db()
             try:
-                # Запишем снапшот, чтобы GET /api/league-table сразу отдавал обновлённые данные
-                try:
-                    _snapshot_set(db, 'league-table', payload)
-                except Exception as _e:
-                    app.logger.warning(f"snapshot set failed (league-table refresh): {_e}")
-                for idx, r in enumerate(normalized, start=1):
-                    row = db.get(LeagueTableRow, idx)
-                    when = datetime.now(timezone.utc)
-                    if not row:
-                        row = LeagueTableRow(
-                            row_index=idx,
-                            c1=str(r[0] or ''), c2=str(r[1] or ''), c3=str(r[2] or ''), c4=str(r[3] or ''),
-                            c5=str(r[4] or ''), c6=str(r[5] or ''), c7=str(r[6] or ''), c8=str(r[7] or ''),
-                            updated_at=when
-                        )
-                        db.add(row)
-                    else:
-                        row.c1, row.c2, row.c3, row.c4 = str(r[0] or ''), str(r[1] or ''), str(r[2] or ''), str(r[3] or '')
-                        row.c5, row.c6, row.c7, row.c8 = str(r[4] or ''), str(r[5] or ''), str(r[6] or ''), str(r[7] or '')
-                        row.updated_at = when
-                db.commit()
+                snap = _snapshot_get(db, 'league-table') or {}
+                payload = snap.get('payload') or {}
+                updated_at = payload.get('updated_at')
             finally:
                 db.close()
-        return jsonify({'status': 'ok', 'updated_at': payload['updated_at']})
+        if not updated_at:
+            updated_at = datetime.now(timezone.utc).isoformat()
+        return jsonify({'status': 'ok', 'updated_at': updated_at})
     except Exception as e:
         app.logger.error(f"Ошибка принудительного обновления лиги: {str(e)}")
         return jsonify({'error': 'Не удалось обновить таблицу'}), 500
@@ -6736,33 +6735,23 @@ def api_stats_table_refresh():
         admin_id = os.environ.get('ADMIN_USER_ID', '')
         if not admin_id or user_id != admin_id:
             return jsonify({'error': 'forbidden'}), 403
-        payload = _build_stats_payload_from_sheet()
+        # Используем тот же механизм, что и в фоне — вызов _sync_stats_table соберёт данные отовсюду и обновит снапшот
+        try:
+            _sync_stats_table()
+        except Exception as _e:
+            app.logger.warning(f"stats-table forced sync failed: {_e}")
+        updated_at = None
         if SessionLocal is not None:
-            db: Session = get_db()
+            db = get_db()
             try:
-                # снапшот
-                _snapshot_set(db, 'stats-table', payload)
-                # и реляционная таблица
-                normalized = payload.get('values') or []
-                when = datetime.now(timezone.utc)
-                for idx, r in enumerate(normalized, start=1):
-                    row = db.get(StatsTableRow, idx)
-                    if not row:
-                        row = StatsTableRow(
-                            row_index=idx,
-                            c1=str(r[0] or ''), c2=str(r[1] or ''), c3=str(r[2] or ''), c4=str(r[3] or ''),
-                            c5=str(r[4] or ''), c6=str(r[5] or ''), c7=str(r[6] or ''),
-                            updated_at=when
-                        )
-                        db.add(row)
-                    else:
-                        row.c1, row.c2, row.c3, row.c4 = str(r[0] or ''), str(r[1] or ''), str(r[2] or ''), str(r[3] or '')
-                        row.c5, row.c6, row.c7 = str(r[4] or ''), str(r[5] or ''), str(r[6] or '')
-                        row.updated_at = when
-                db.commit()
+                snap = _snapshot_get(db, 'stats-table') or {}
+                payload = snap.get('payload') or {}
+                updated_at = payload.get('updated_at')
             finally:
                 db.close()
-        return jsonify({'status': 'ok', 'updated_at': payload.get('updated_at')})
+        if not updated_at:
+            updated_at = datetime.now(timezone.utc).isoformat()
+        return jsonify({'status': 'ok', 'updated_at': updated_at})
     except Exception as e:
         app.logger.error(f"Ошибка принудительного обновления статистики: {e}")
         return jsonify({'error': 'Не удалось обновить статистику'}), 500
@@ -6778,49 +6767,23 @@ def api_schedule_refresh():
         admin_id = os.environ.get('ADMIN_USER_ID', '')
         if not admin_id or user_id != admin_id:
             return jsonify({'error': 'forbidden'}), 403
-        payload = _build_schedule_payload_from_sheet()
+        # Вызовем синхронизацию расписания, которая установит снапшот и выполнит инвалидацию/уведомления
+        try:
+            _sync_schedule()
+        except Exception as _e:
+            app.logger.warning(f"schedule forced sync failed: {_e}")
+        updated_at = None
         if SessionLocal is not None:
-            db: Session = get_db()
+            db = get_db()
             try:
-                _snapshot_set(db, 'schedule', payload)
-                # Синхронизация времени матчей у открытых ставок, если дата/время изменились
-                try:
-                    # Построим быстрый индекс расписания: (home,away) -> datetime
-                    sched_map = {}
-                    for t in payload.get('tours') or []:
-                        for m in (t.get('matches') or []):
-                            key = (m.get('home') or '', m.get('away') or '')
-                            dt = None
-                            try:
-                                if m.get('datetime'):
-                                    dt = datetime.fromisoformat(m['datetime'])
-                                elif m.get('date'):
-                                    d = datetime.fromisoformat(m['date']).date()
-                                    tm = datetime.strptime((m.get('time') or '00:00') or '00:00', '%H:%M').time()
-                                    dt = datetime.combine(d, tm)
-                            except Exception:
-                                dt = None
-                            sched_map[key] = dt
-                    # Обновим только открытые ставки
-                    open_bets = db.query(Bet).filter(Bet.status=='open').all()
-                    updates = 0
-                    for b in open_bets:
-                        new_dt = sched_map.get((b.home, b.away))
-                        if new_dt is None:
-                            continue
-                        # если поменялось — обновим
-                        if (b.match_datetime or None) != new_dt:
-                            b.match_datetime = new_dt
-                            b.updated_at = datetime.now(timezone.utc)
-                            updates += 1
-                    if updates:
-                        db.commit()
-                        app.logger.info(f"schedule/refresh: updated match_datetime for {updates} open bets")
-                except Exception as _e:
-                    app.logger.warning(f"schedule/refresh bet sync failed: {_e}")
+                snap = _snapshot_get(db, 'schedule') or {}
+                payload = snap.get('payload') or {}
+                updated_at = payload.get('updated_at')
             finally:
                 db.close()
-        return jsonify({'status': 'ok', 'updated_at': payload.get('updated_at')})
+        if not updated_at:
+            updated_at = datetime.now(timezone.utc).isoformat()
+        return jsonify({'status': 'ok', 'updated_at': updated_at})
     except Exception as e:
         app.logger.error(f"Ошибка принудительного обновления расписания: {e}")
         return jsonify({'error': 'Не удалось обновить расписание'}), 500
@@ -6836,14 +6799,22 @@ def api_results_refresh():
         admin_id = os.environ.get('ADMIN_USER_ID', '')
         if not admin_id or user_id != admin_id:
             return jsonify({'error': 'forbidden'}), 403
-        payload = _build_results_payload_from_sheet()
+        try:
+            _sync_results()
+        except Exception as _e:
+            app.logger.warning(f"results forced sync failed: {_e}")
+        updated_at = None
         if SessionLocal is not None:
-            db: Session = get_db()
+            db = get_db()
             try:
-                _snapshot_set(db, 'results', payload)
+                snap = _snapshot_get(db, 'results') or {}
+                payload = snap.get('payload') or {}
+                updated_at = payload.get('updated_at')
             finally:
                 db.close()
-        return jsonify({'status': 'ok', 'updated_at': payload.get('updated_at')})
+        if not updated_at:
+            updated_at = datetime.now(timezone.utc).isoformat()
+        return jsonify({'status': 'ok', 'updated_at': updated_at})
     except Exception as e:
         app.logger.error(f"Ошибка принудительного обновления результатов: {e}")
         return jsonify({'error': 'Не удалось обновить результаты'}), 500
@@ -6862,14 +6833,22 @@ def api_betting_tours_refresh():
         admin_id = os.environ.get('ADMIN_USER_ID', '')
         if not admin_id or user_id != admin_id:
             return jsonify({'error': 'forbidden'}), 403
-        payload = _build_betting_tours_payload()
+        try:
+            _sync_betting_tours()
+        except Exception as _e:
+            app.logger.warning(f"betting-tours forced sync failed: {_e}")
+        updated_at = None
         if SessionLocal is not None:
-            db: Session = get_db()
+            db = get_db()
             try:
-                _snapshot_set(db, 'betting-tours', payload)
+                snap = _snapshot_get(db, 'betting-tours') or {}
+                payload = snap.get('payload') or {}
+                updated_at = payload.get('updated_at')
             finally:
                 db.close()
-        return jsonify({'status': 'ok', 'updated_at': payload.get('updated_at')})
+        if not updated_at:
+            updated_at = datetime.now(timezone.utc).isoformat()
+        return jsonify({'status': 'ok', 'updated_at': updated_at})
     except Exception as e:
         app.logger.error(f"Ошибка принудительного обновления betting-tours: {e}")
         return jsonify({'error': 'Не удалось обновить туры для ставок'}), 500
