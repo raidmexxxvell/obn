@@ -5850,6 +5850,42 @@ def api_betting_my_bets():
         try:
             rows = db.query(Bet).filter(Bet.user_id == user_id).order_by(Bet.placed_at.desc()).limit(50).all()
             data = []
+            # Соберём карту текущих дат матчей из снапшота betting-tours (фоллбэк к листу)
+            match_dt_map = {}
+            try:
+                snap = _snapshot_get(db, 'betting-tours')
+                payload = snap and snap.get('payload')
+                tours_src = payload and payload.get('tours') or []
+            except Exception:
+                tours_src = []
+            if not tours_src:
+                try:
+                    tours_src = _load_all_tours_from_sheet() or []
+                except Exception:
+                    tours_src = []
+            for t in (tours_src or []):
+                tour_key = str(t.get('tour') or '')
+                for m in (t.get('matches') or []):
+                    try:
+                        h = (m.get('home') or '').strip().lower()
+                        a = (m.get('away') or '').strip().lower()
+                        dt = m.get('datetime')
+                        if not dt and m.get('date'):
+                            try:
+                                if m.get('time'):
+                                    dd = datetime.fromisoformat(m['date']).date()
+                                    tm = datetime.strptime(m.get('time') or '00:00', '%H:%M').time()
+                                    dt = datetime.combine(dd, tm).isoformat()
+                                else:
+                                    dt = datetime.fromisoformat(m['date']).date().isoformat()
+                            except Exception:
+                                dt = None
+                        if h and a and dt:
+                            match_dt_map[(h, a, tour_key)] = dt
+                            # также сохраняем без тура для простого поиска
+                            match_dt_map[(h, a, '')] = dt
+                    except Exception:
+                        continue
 
             def _decode_totals(sel_val: str):
                 if not sel_val:
@@ -5896,12 +5932,21 @@ def api_betting_my_bets():
 
             for b in rows:
                 mdisp, sdisp = _present(b.market, b.selection, b.home, b.away)
+                # попытка взять актуальную дату матча из карты
+                try:
+                    key_t = str(b.tour or '')
+                    k1 = ((b.home or '').strip().lower(), (b.away or '').strip().lower(), key_t)
+                    k2 = ((b.home or '').strip().lower(), (b.away or '').strip().lower(), '')
+                    cur_dt = match_dt_map.get(k1) or match_dt_map.get(k2)
+                except Exception:
+                    cur_dt = None
+                dt_out = cur_dt or (b.match_datetime.isoformat() if b.match_datetime else '')
                 data.append({
                     'id': b.id,
                     'tour': b.tour,
                     'home': b.home,
                     'away': b.away,
-                    'datetime': (b.match_datetime.isoformat() if b.match_datetime else ''),
+                    'datetime': dt_out,
                     'market': b.market,
                     'market_display': mdisp,
                     'selection': b.selection,  # сырое значение (для обратной совместимости)
