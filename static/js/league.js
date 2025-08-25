@@ -172,8 +172,10 @@
   function renderSchedule(pane, data) {
     if (!pane) return;
     const ds = data?.tours ? data : (data?.data || {});
-    const tours = ds?.tours || [];
-    if (!tours.length) { pane.innerHTML = '<div class="schedule-empty">Нет ближайших туров</div>'; return; }
+  let tours = ds?.tours || [];
+  // Убираем туры без матчей (чтобы не показывать пустые заголовки после переноса в Результаты)
+  tours = (Array.isArray(tours) ? tours.filter(t => Array.isArray(t.matches) && t.matches.length > 0) : []);
+  if (!tours.length) { pane.innerHTML = '<div class="schedule-empty">Нет ближайших туров</div>'; return; }
     pane.innerHTML = '';
     const nodes = [];
 
