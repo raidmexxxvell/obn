@@ -239,33 +239,83 @@
       if(market==='1x2') selText = {'home':'П1','draw':'Х','away':'П2'}[selection]||selection;
       else if(market==='totals') selText = (selection.startsWith('over')||selection.startsWith('under')) ? (selection.startsWith('over')?`Больше ${selection.split('_')[1]}`:`Меньше ${selection.split('_')[1]}`) : selText;
       else if(market==='penalty' || market==='redcard') selText = {'yes':'Да','no':'Нет'}[selection]||selection;
-      const stake = prompt(`Ставка на ${m.home} vs ${m.away}. Исход: ${selText}. Введите сумму:`,'100');
-      if (!stake) return Promise.resolve();
-      const amt = parseInt(String(stake).replace(/[^0-9]/g,''), 10) || 0;
-      if (amt <= 0) return Promise.resolve();
-      if (!tg || !tg.initDataUnsafe?.user) { try { alert('Нужен Telegram WebApp'); } catch(_) {} return Promise.resolve(); }
-      const fd = new FormData();
-      fd.append('initData', tg.initData || '');
-      if (tour != null) fd.append('tour', String(tour));
-      fd.append('home', m.home || '');
-      fd.append('away', m.away || '');
-      fd.append('selection', selection);
-      if (market) fd.append('market', market);
-      if (market === 'totals' && line != null) fd.append('line', String(line));
-      fd.append('stake', String(amt));
-      return fetch('/api/betting/place', { method: 'POST', body: fd })
-        .then(r => r.json())
-        .then(resp => {
-          if (resp?.error) { try { tg?.showAlert?.(resp.error); } catch(_) { alert(resp.error); } return; }
-          try { tg?.showAlert?.(`Ставка принята! Баланс: ${resp.balance}`); } catch(_) {}
-          // Обновим профильные кредиты на экране
-          const creditsEl = document.getElementById('credits');
-          if (creditsEl) creditsEl.textContent = (resp.balance||0).toLocaleString();
-          // обновим список ставок если открыт
-          const myPane = document.getElementById('pred-pane-mybets');
-          if (myPane && myPane.style.display !== 'none') loadMyBets();
-        })
-        .catch(err => {  try { tg?.showAlert?.('Ошибка размещения ставки'); } catch(_) {} });
+      // Покажем кастомную модалку вместо prompt
+      return showStakeModal(`Ставка на ${m.home} vs ${m.away}`, `Исход: ${selText}. Введите сумму:`, '100')
+        .then(stake => {
+          if (!stake) return Promise.resolve();
+          const amt = parseInt(String(stake).replace(/[^0-9]/g,''), 10) || 0;
+          if (amt <= 0) return Promise.resolve();
+          if (!tg || !tg.initDataUnsafe?.user) { try { alert('Нужен Telegram WebApp'); } catch(_) {} return Promise.resolve(); }
+          const fd = new FormData();
+          fd.append('initData', tg.initData || '');
+          if (tour != null) fd.append('tour', String(tour));
+          fd.append('home', m.home || '');
+          fd.append('away', m.away || '');
+          fd.append('selection', selection);
+          if (market) fd.append('market', market);
+          if (market === 'totals' && line != null) fd.append('line', String(line));
+          fd.append('stake', String(amt));
+          return fetch('/api/betting/place', { method: 'POST', body: fd })
+            .then(r => r.json())
+            .then(resp => {
+              if (resp?.error) { try { tg?.showAlert?.(resp.error); } catch(_) { alert(resp.error); } return; }
+              try { tg?.showAlert?.(`Ставка принята! Баланс: ${resp.balance}`); } catch(_) {}
+              // Обновим профильные кредиты на экране
+              const creditsEl = document.getElementById('credits');
+              if (creditsEl) creditsEl.textContent = (resp.balance||0).toLocaleString();
+              // обновим список ставок если открыт
+              const myPane = document.getElementById('pred-pane-mybets');
+              if (myPane && myPane.style.display !== 'none') loadMyBets();
+            })
+            .catch(err => {  try { tg?.showAlert?.('Ошибка размещения ставки'); } catch(_) {} });
+        });
+    }
+
+    // Показывает стилизованную модалку для ввода суммы ставки. Возвращает Promise<string|null> с введённой суммой (или null при отмене).
+    function showStakeModal(title, message, defaultValue) {
+      return new Promise(resolve => {
+        const modal = document.createElement('div'); modal.className = 'modal stake-modal show';
+        modal.innerHTML = `
+          <div class="modal-backdrop"></div>
+          <div class="modal-dialog">
+            <div class="modal-title">${escapeHtml(title)}</div>
+            <div class="modal-desc">${escapeHtml(message)}</div>
+            <input class="modal-input" type="text" inputmode="numeric" value="${String(defaultValue||'')}" />
+            <div class="modal-error"></div>
+            <div class="modal-actions">
+              <button class="btn btn-secondary modal-cancel" type="button">Отмена</button>
+              <button class="btn btn-primary modal-ok" type="button">OK</button>
+            </div>
+          </div>
+        `;
+        document.body.appendChild(modal);
+        const input = modal.querySelector('.modal-input');
+        const err = modal.querySelector('.modal-error');
+        const btnOk = modal.querySelector('.modal-ok');
+        const btnCancel = modal.querySelector('.modal-cancel');
+
+        function cleanup() { modal.classList.remove('show'); setTimeout(()=> { try { modal.remove(); } catch(_) {} }, 180); }
+
+        btnCancel.addEventListener('click', () => { cleanup(); resolve(null); });
+        btnOk.addEventListener('click', () => {
+          const val = String(input.value || '').replace(/[^0-9]/g, '');
+          const n = parseInt(val, 10) || 0;
+          if (n <= 0) { err.textContent = 'Введите корректную сумму'; input.focus(); return; }
+          cleanup(); resolve(String(n));
+        });
+        // Enter/Escape
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') { btnOk.click(); }
+          if (e.key === 'Escape') { btnCancel.click(); }
+        });
+        // focus
+        setTimeout(()=>{ try { input.focus(); input.select(); } catch(_){} }, 40);
+      });
+    }
+
+    // Простая экранизация текста для вставки в innerHTML (title/desc)
+    function escapeHtml(str) {
+      return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
 
     function loadMyBets() {

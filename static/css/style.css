@@ -189,6 +189,16 @@ body {
 .btn-secondary { background: transparent; color: var(--light); border-color: rgba(255,255,255,0.2); }
 .btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
+/* Стили для модалки ввода ставки */
+.stake-modal .modal-dialog { width: min(420px, calc(100% - 32px)); top: 28vh; border-radius: 12px; padding: 14px; }
+.stake-modal .modal-title { font-size: 15px; margin-bottom: 6px; }
+.stake-modal .modal-desc { font-size: 13px; color: var(--gray); margin-bottom: 10px; }
+.stake-modal .modal-input { font-size: 18px; padding: 12px 14px; border-radius: 10px; text-align: center; font-weight:800; letter-spacing:1px; }
+.stake-modal .modal-actions { justify-content: space-between; margin-top: 14px; }
+.stake-modal .modal-actions .btn-secondary { background: transparent; border-color: rgba(255,255,255,0.06); }
+.stake-modal .modal-actions .btn-primary { background: var(--primary); border-color: transparent; color: #061028; }
+.stake-modal .modal-error { color: var(--danger); font-size: 13px; min-height: 18px; text-align:center; margin-top:8px; }
+
 /* --- Трансляция VK --- */
 .stream-wrap { width: 100%; border-radius: 12px; overflow: hidden; background: rgba(2,6,23,0.6); border: 1px solid rgba(255,255,255,0.08); }
 .stream-aspect {
@@ -934,124 +944,6 @@ body.theme-blb .share-btn {
     background: linear-gradient(90deg, rgba(205, 127, 50, 0.18), rgba(205, 127, 50, 0.08));
     border-left: 4px solid #CD7F32;
 }
-
-/* ------------------------------------------------------------------
-   Сделаем так, чтобы таблица в подвкладке "Статистика" выглядела
-   идентично таблице в подвкладке "Таблица". Оба элемента в шаблоне
-   используют класс `league-table`, но добавим явные правила для
-   `#stats-table`, чтобы гарантировать одинаковое отображение.
-   ------------------------------------------------------------------ */
-
-#stats-table {
-    width: 100%;
-    border-collapse: collapse;
-    color: var(--light);
-    font-size: 14px;
-    background: transparent;
-    border: 1px solid rgba(255,255,255,0.15);
-}
-
-#stats-table tbody td {
-    padding: 10px 8px;
-    border-bottom: 1px solid rgba(255,255,255,0.10);
-    border-right: 1px solid rgba(255,255,255,0.06);
-    text-align: center;
-    vertical-align: middle;
-}
-
-#stats-table tbody tr:nth-child(even) {
-    background: rgba(255,255,255,0.03);
-}
-
-#stats-table tbody tr:hover {
-    background: rgba(255,255,255,0.06);
-}
-
-#stats-table tbody td:first-child,
-#stats-table thead th:first-child {
-    width: 44px;
-    text-align: center;
-    color: var(--gray);
-}
-
-#stats-table tbody td:nth-child(2) {
-    font-weight: 600;
-}
-
-#stats-table tbody tr.rank-1 {
-    background: linear-gradient(90deg, rgba(255, 215, 0, 0.20), rgba(255, 215, 0, 0.10));
-    border-left: 4px solid #FFD700;
-}
-#stats-table tbody tr.rank-2 {
-    background: linear-gradient(90deg, rgba(192, 192, 192, 0.18), rgba(192, 192, 192, 0.08));
-    border-left: 4px solid #C0C0C0;
-}
-#stats-table tbody tr.rank-3 {
-    background: linear-gradient(90deg, rgba(205, 127, 50, 0.18), rgba(205, 127, 50, 0.08));
-    border-left: 4px solid #CD7F32;
-}
-
-/* Сильный override на случай, если другие правила переопределяют стиль */
-table.league-table#stats-table,
-#ufo-stats table.league-table {
-    width: 100% !important;
-    border-collapse: collapse !important;
-    color: var(--light) !important;
-    font-size: 14px !important;
-    background: transparent !important;
-    border: 1px solid rgba(255,255,255,0.15) !important;
-}
-
-#ufo-stats table.league-table tbody td,
-table.league-table#stats-table tbody td {
-    padding: 10px 8px !important;
-    border-bottom: 1px solid rgba(255,255,255,0.10) !important;
-    border-right: 1px solid rgba(255,255,255,0.06) !important;
-    text-align: center !important;
-    vertical-align: middle !important;
-}
-
-table.league-table#stats-table tbody tr:nth-child(even),
-#ufo-stats table.league-table tbody tr:nth-child(even) {
-    background: rgba(255,255,255,0.03) !important;
-}
-
-table.league-table#stats-table tbody tr:hover,
-#ufo-stats table.league-table tbody tr:hover {
-    background: rgba(255,255,255,0.06) !important;
-}
-
-table.league-table#stats-table tbody td:first-child,
-table.league-table#stats-table thead th:first-child,
-#ufo-stats table.league-table tbody td:first-child,
-#ufo-stats table.league-table thead th:first-child {
-    width: 44px !important;
-    text-align: center !important;
-    color: var(--gray) !important;
-}
-
-table.league-table#stats-table tbody td:nth-child(2),
-#ufo-stats table.league-table tbody td:nth-child(2) {
-    font-weight: 600 !important;
-}
-
-table.league-table#stats-table tbody tr.rank-1,
-#ufo-stats table.league-table tbody tr.rank-1 {
-    background: linear-gradient(90deg, rgba(255, 215, 0, 0.20), rgba(255, 215, 0, 0.10)) !important;
-    border-left: 4px solid #FFD700 !important;
-}
-table.league-table#stats-table tbody tr.rank-2,
-#ufo-stats table.league-table tbody tr.rank-2 {
-    background: linear-gradient(90deg, rgba(192, 192, 192, 0.18), rgba(192, 192, 192, 0.08)) !important;
-    border-left: 4px solid #C0C0C0 !important;
-}
-table.league-table#stats-table tbody tr.rank-3,
-#ufo-stats table.league-table tbody tr.rank-3 {
-    background: linear-gradient(90deg, rgba(205, 127, 50, 0.18), rgba(205, 127, 50, 0.08)) !important;
-    border-left: 4px solid #CD7F32 !important;
-}
-
-
 
 /* --------- РАСПИСАНИЕ --------- */
 .tour-block { margin: 12px 10px 20px; }
