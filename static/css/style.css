@@ -379,13 +379,15 @@ body.allow-landscape #md-pane-stream.fs-mode * {
 }
 
 .profile-avatar {
-    width: 120px;
-    height: 120px;
+    width: 110px;
+    height: 110px;
     border-radius: 50%;
     overflow: hidden;
     margin: 0 auto;
     border: 3px solid var(--primary);
     box-shadow: 0 6px 14px rgba(0,0,0,0.45);
+    position: relative;
+    z-index: 3;
 }
 
 .profile-avatar img {
@@ -404,6 +406,7 @@ body.allow-landscape #md-pane-stream.fs-mode * {
 .profile-top-area {
     border-radius: 12px;
     overflow: hidden;
+    padding-top: 34px;
     padding-bottom: 12px;
     margin-bottom: 12px;
     position: relative;
@@ -412,8 +415,9 @@ body.allow-landscape #md-pane-stream.fs-mode * {
 }
 
 .shade-bg {
-    position: absolute; left:0; right:0; top:0; z-index:0; background-size: cover; background-position: center;
-    height: 220px; max-height: 50vh; /* constrain shade to header area */
+    position: absolute; left:0; right:0; top:60px; z-index:0; background-size: cover; background-position: center;
+    height: 160px; max-height: 44vh; /* constrain shade to header area and start below avatar */
+    border-radius: 12px;
 }
 .profile-top-area > * { position: relative; z-index: 2; }
 
@@ -425,11 +429,9 @@ body.allow-landscape #md-pane-stream.fs-mode * {
     pointer-events: none;
 }
 
-.profile-shade-btn { position: absolute; right: 10px; top: 10px; width: 32px; height: 28px; border-radius: 6px; background: rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.06); display:inline-block; cursor:pointer; }
+.profile-shade-btn { display:inline-block; width: 34px; height: 22px; margin-left:8px; vertical-align: middle; border-radius:6px; background: rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.06); cursor:pointer; }
 .profile-shade-btn:focus { outline:none; box-shadow:0 0 0 2px rgba(108,140,255,0.10); }
-.profile-shade-btn::before, .profile-shade-btn::after { content:''; position:absolute; left:6px; right:6px; height:2px; background: rgba(255,255,255,0.95); border-radius:1px; }
-.profile-shade-btn::before { top:8px; }
-.profile-shade-btn::after { bottom:8px; }
+.profile-shade-btn::before, .profile-shade-btn::after { content:''; display:block; width:60%; height:2px; margin:3px auto; background: rgba(255,255,255,0.95); border-radius:1px; }
 
 /* modal thin tweaks for shade list */
 #shade-list img { width:64px; height:64px; object-fit:cover; border-radius:8px; cursor:pointer; border:2px solid transparent; }
