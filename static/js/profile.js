@@ -28,60 +28,7 @@
 
     // handleCheckin вынесен в profile-checkin.js
 
-    function handleNameChange() {
-        if (!elements.userName) return;
-        // Открываем модалку
-        const modal = document.getElementById('name-modal');
-        const input = document.getElementById('name-input');
-        const btnSave = document.getElementById('name-save');
-        const btnCancel = document.getElementById('name-cancel');
-        const errBox = document.getElementById('name-modal-error');
-        if (!modal || !input || !btnSave || !btnCancel) return;
-        input.value = elements.userName.textContent || '';
-        errBox.textContent = '';
-        modal.classList.add('show');
-        modal.style.display = 'block';
-        setTimeout(()=>{ try { input.focus(); input.select(); } catch(_){} }, 0);
-
-        const close = () => { modal.classList.remove('show'); modal.style.display = 'none'; btnSave.disabled = false; };
-        const cleanup = () => {
-            modal.querySelector('.modal-backdrop')?.removeEventListener('click', onBackdrop);
-            btnCancel.removeEventListener('click', onCancel);
-            btnSave.removeEventListener('click', onSave);
-            input.removeEventListener('keydown', onKey);
-        };
-        const onBackdrop = (e) => { if (e.target?.dataset?.close) { close(); cleanup(); } };
-        const onCancel = () => { close(); cleanup(); };
-        const onKey = (e) => { if (e.key === 'Enter') { onSave(); } if (e.key === 'Escape') { onCancel(); } };
-        const onSave = async () => {
-            const newName = (input.value || '').trim();
-            errBox.textContent = '';
-            if (!newName) { errBox.textContent = 'Введите имя.'; return; }
-            if (newName === elements.userName.textContent) { errBox.textContent = 'Имя не изменилось.'; return; }
-            if (!tg || !tg.initDataUnsafe?.user) { errBox.textContent = 'Нет авторизации Telegram.'; return; }
-            btnSave.disabled = true;
-            try {
-                const formData = new FormData();
-                formData.append('initData', tg.initData || '');
-                formData.append('new_name', newName);
-                const res = await fetch('/api/update-name', { method:'POST', body: formData });
-                const d = await res.json().catch(()=>({}));
-                if (!res.ok) { const msg = d?.message || 'Не удалось изменить имя'; throw new Error(msg); }
-                elements.userName.textContent = d.display_name || newName;
-                close(); cleanup();
-            } catch (err) {
-                console.error('update name err', err);
-                const m = err?.message || 'Не удалось изменить имя';
-                errBox.textContent = m;
-                btnSave.disabled = false;
-            }
-        };
-
-        modal.querySelector('.modal-backdrop')?.addEventListener('click', onBackdrop);
-        btnCancel.addEventListener('click', onCancel);
-        btnSave.addEventListener('click', onSave);
-        input.addEventListener('keydown', onKey);
-    }
+    // Name change feature intentionally removed: name is taken from Telegram and cannot be changed in-app.
 
     function showError(msg) { if (elements.checkinStatus) { elements.checkinStatus.textContent = msg; elements.checkinStatus.style.color = 'var(--danger)'; setTimeout(()=>{ elements.checkinStatus.textContent=''; elements.checkinStatus.style.color=''; },3000);} else console.warn(msg); }
     function showSuccessMessage(msg) { if (elements.checkinStatus) { elements.checkinStatus.textContent = msg; elements.checkinStatus.style.color = 'var(--success)'; setTimeout(()=>{ elements.checkinStatus.textContent=''; elements.checkinStatus.style.color=''; },2000);} else console.log(msg); }
@@ -90,7 +37,8 @@
 
     function setupEventListeners() {
     // обработчик чек-ина перенесён в profile-checkin.js
-        if (elements.editName) { elements.editName.style.cursor='pointer'; elements.editName.addEventListener('click', handleNameChange); }
+    // remove any edit-name UI binding: name is read-only from Telegram
+    if (elements.editName) { elements.editName.style.display = 'none'; }
         // помечаем элементы для троттлинга кликов
     // троттлинг чек-ина перенесён в profile-checkin.js
         if (elements.editName) elements.editName.setAttribute('data-throttle', '1500');
@@ -120,6 +68,8 @@
                         const st = document.getElementById('ufo-subtabs'); if (st) st.style.display = '';
                     }
                 } catch(_) {}
+                // если уходим с профиля — вернуть верхнюю панель
+                try { const cont = document.querySelector('.container'); if (cont) cont.classList.remove('profile-hide-top'); const ph = document.querySelector('.profile-header'); if (ph) ph.classList.remove('profile-centered'); } catch(_) {}
                 // Обработка двойного тапа для НЛО
         if (tab === 'ufo') {
                     const now = Date.now();
@@ -143,7 +93,15 @@
     const admin = document.getElementById('tab-admin');
     [home, prof, ufo, preds, lead, shop, admin].forEach(el => { if (el) el.style.display = 'none'; });
     if (tab === 'home' && home) home.style.display = '';
-    if (tab === 'profile' && prof) prof.style.display = '';
+                if (tab === 'profile' && prof) {
+                    prof.style.display = '';
+                    try {
+                        // спрячем общую шапку лиги и центрируем профиль для мобильного вида
+                        const cont = document.querySelector('.container');
+                        if (cont) cont.classList.add('profile-hide-top');
+                        const ph = document.querySelector('.profile-header'); if (ph) ph.classList.add('profile-centered');
+                    } catch(_) {}
+                }
     if (tab === 'ufo' && ufo) {
         ufo.style.display = '';
         // Показ контента по активной лиге (без автопоказа оверлея)
@@ -205,7 +163,7 @@
             // Открываем полку выбора лиг по нажатию на мини-кнопку
             try { openLeagueDrawer(); } catch(_) {}
         });
-        // Стартовая вкладка: Главная
+            // Стартовая вкладка: Главная
         try {
             document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
             const homeItem = document.querySelector('.nav-item[data-tab="home"]');

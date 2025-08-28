@@ -365,10 +365,10 @@ body.allow-landscape #md-pane-stream.fs-mode * {
 .profile-header {
     display: flex;
     align-items: center;
-    margin-bottom: 20px;
-    padding-bottom: 15px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    gap: 16px;
+    margin-bottom: 18px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    gap: 12px;
 }
 
 .profile-info {
@@ -379,13 +379,13 @@ body.allow-landscape #md-pane-stream.fs-mode * {
 }
 
 .profile-avatar {
-    width: 96px;
-    height: 96px;
+    width: 120px;
+    height: 120px;
     border-radius: 50%;
     overflow: hidden;
-    margin-left: 20px;
-    border: 2px solid var(--primary);
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+    margin: 0 auto;
+    border: 3px solid var(--primary);
+    box-shadow: 0 6px 14px rgba(0,0,0,0.45);
 }
 
 .profile-avatar img {
@@ -394,24 +394,14 @@ body.allow-landscape #md-pane-stream.fs-mode * {
     object-fit: cover;
 }
 
-.profile-info { display: flex; flex-direction: column; gap: 6px; }
-.profile-info .name-row { display: flex; align-items: center; gap: 6px; }
-.profile-info h2 { font-size: 22px; margin: 0; }
-.edit-name {
-    cursor: pointer;
-    opacity: 0.7;
-    font-size: 16px;
-    transition: var(--transition);
-    color: var(--secondary);
-    padding: 2px 6px;
-    border-radius: 10px;
-    background: rgba(255, 255, 255, 0.1);
-}
+.profile-info { display: flex; flex-direction: column; gap: 6px; text-align: center; }
+.profile-info h2 { font-size: 22px; margin: 6px 0 0 0; }
 
-.edit-name:hover {
-    opacity: 1;
-    background: rgba(255, 255, 255, 0.2);
-}
+/* centered variant used on mobile profile screen */
+.profile-header.profile-centered { flex-direction: column; padding-top: 12px; }
+
+/* hide the app top-bar when profile is visible */
+.container.profile-hide-top .top-bar { display: none; }
 
 /* Любимый клуб — селект */
 #favorite-team {
