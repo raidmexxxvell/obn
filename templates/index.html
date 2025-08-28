@@ -89,12 +89,16 @@
             </div>
         </div>
     <div id="tab-profile" style="display:none;">
+        <div class="profile-top-area" id="profile-top-area">
         <div class="profile-header profile-centered">
             <div class="profile-avatar" id="user-avatar">
                 <img src="" alt="Аватар">
             </div>
             <div class="profile-info">
-                <h2 id="user-name">Загрузка...</h2>
+                <div style="display:flex; align-items:center; justify-content:center; gap:8px;">
+                    <h2 id="user-name">Загрузка...</h2>
+                    <button id="profile-shade-btn" class="profile-shade-btn" title="Выбрать фон профиля" aria-label="Выбрать фон"></button>
+                </div>
                 <div class="favorite-team-row" style="margin-top:6px;">
                     <label for="favorite-team" style="font-size:12px; color:var(--gray); margin-right:8px;">Любимый клуб:</label>
                     <select id="favorite-team" style="min-width:160px; max-width:240px;"><option value="">— выбрать —</option></select>
@@ -163,6 +167,21 @@
             </div>
         </div>
         </div>
+
+        <!-- Shade selection modal -->
+    <div id="shade-modal" class="modal" style="display:none;">
+        <div class="modal-backdrop" data-close="true"></div>
+        <div class="modal-dialog" role="dialog" aria-labelledby="shade-modal-title" aria-modal="true">
+            <div class="modal-title" id="shade-modal-title">Выбор фона профиля</div>
+            <div class="modal-desc">Загрузите изображение или выберите ранее сохранённый фон.</div>
+            <input id="shade-upload" class="modal-input" type="file" accept="image/*">
+            <div id="shade-list" style="display:flex; gap:8px; margin-top:10px; overflow-x:auto; padding-bottom:6px;"></div>
+            <div class="modal-actions">
+                <button id="shade-cancel" class="btn btn-secondary" type="button">Закрыть</button>
+                <button id="shade-set" class="btn btn-primary" type="button">Set as Profile Shade</button>
+            </div>
+        </div>
+    </div>
 
         <!-- Вкладка НЛО -->
     <div id="tab-ufo" style="display:none;">

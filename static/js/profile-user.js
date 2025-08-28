@@ -121,3 +121,51 @@
   window.ProfileUser = { fetchUserData, renderUserProfile, initFavoriteTeamUI, withTeamCount, getLastUser };
   try { window.ensureAdminUI = ensureAdminUI; } catch(_) {}
 })();
+
+// --- Profile shade handling: allow user to pick/upload a background image for profile top area ---
+(function(){
+  try {
+    const modal = document.getElementById('shade-modal');
+    const btn = document.getElementById('profile-shade-btn');
+    const upload = document.getElementById('shade-upload');
+    const shadeList = document.getElementById('shade-list');
+    const btnSet = document.getElementById('shade-set');
+    const btnCancel = document.getElementById('shade-cancel');
+    const topArea = document.getElementById('profile-top-area');
+    const STORAGE_KEY = 'profile:shade';
+
+    function applyShade(url){
+      try { if (!topArea) return; if (!url) { topArea.style.backgroundImage=''; return; } topArea.style.backgroundImage = `url(${url})`; } catch(_){}
+    }
+
+    // load saved shade
+    try { const saved = localStorage.getItem(STORAGE_KEY); if (saved) applyShade(saved); } catch(_){}
+
+    if (!btn || !modal) return;
+    btn.addEventListener('click', ()=>{ modal.style.display = 'block'; modal.classList.add('show'); // populate shade list from storage
+      try { shadeList.innerHTML=''; const saved = localStorage.getItem(STORAGE_KEY); if (saved){ const img = document.createElement('img'); img.src=saved; img.className='saved-shade'; img.addEventListener('click', ()=>{ document.querySelectorAll('#shade-list img').forEach(i=>i.classList.remove('selected')); img.classList.add('selected'); }); shadeList.appendChild(img); } } catch(_){}}
+    );
+
+    // upload handler
+    upload?.addEventListener('change', (e)=>{
+      const f = e.target.files && e.target.files[0]; if (!f) return; const reader = new FileReader(); reader.onload = function(ev){ const url = ev.target.result; // preview
+        try { const img = document.createElement('img'); img.src = url; img.addEventListener('click', ()=>{ document.querySelectorAll('#shade-list img').forEach(i=>i.classList.remove('selected')); img.classList.add('selected'); }); shadeList.prepend(img); } catch(_){}
+      }; reader.readAsDataURL(f);
+    });
+
+    btnCancel?.addEventListener('click', ()=>{ modal.classList.remove('show'); modal.style.display='none'; });
+    btnSet?.addEventListener('click', ()=>{
+      try {
+        const sel = document.querySelector('#shade-list img.selected') || document.querySelector('#shade-list img');
+        if (!sel) { alert('Выберите фон или загрузите изображение.'); return; }
+        const url = sel.src;
+        try { localStorage.setItem(STORAGE_KEY, url); } catch(_){}
+        applyShade(url);
+        modal.classList.remove('show'); modal.style.display='none';
+      } catch(err){ console.error(err); }
+    });
+
+    // close on backdrop
+    modal?.querySelector('.modal-backdrop')?.addEventListener('click', (e)=>{ if (e.target?.dataset?.close) { modal.classList.remove('show'); modal.style.display='none'; } });
+  } catch(_){}
+})();

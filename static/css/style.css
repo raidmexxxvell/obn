@@ -400,6 +400,49 @@ body.allow-landscape #md-pane-stream.fs-mode * {
 /* centered variant used on mobile profile screen */
 .profile-header.profile-centered { flex-direction: column; padding-top: 12px; }
 
+/* Background area behind avatar/name/stats (profile shade) */
+.profile-top-area {
+    border-radius: 12px;
+    overflow: hidden;
+    padding-bottom: 12px;
+    margin-bottom: 12px;
+    position: relative;
+    background-size: cover;
+    background-position: center;
+}
+
+.profile-top-area::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(0,0,0,0.08) 0%, rgba(0,0,0,0.35) 100%);
+    pointer-events: none;
+}
+
+.profile-shade-btn { display:none; }
+.profile-shade-btn:focus { outline: none; }
+.profile-shade-btn::after { content: ''; }
+
+/* removed empty rule */
+
+.profile-shade-btn {
+    width: 36px; height: 36px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(0,0,0,0.35); display:inline-block; cursor:pointer;
+    position: relative;
+}
+.profile-shade-btn::before {
+    content: '';
+    position: absolute; left: 9px; top: 9px; right: 9px; height: 2px; background: rgba(255,255,255,0.85); border-radius:2px; transform: translateY(-4px);
+}
+.profile-shade-btn::after {
+    content: '';
+    position: absolute; left: 9px; bottom: 9px; right: 9px; height: 2px; background: rgba(255,255,255,0.85); border-radius:2px; transform: translateY(4px);
+}
+
+/* modal thin tweaks for shade list */
+#shade-list img { width:64px; height:64px; object-fit:cover; border-radius:8px; cursor:pointer; border:2px solid transparent; }
+#shade-list img.selected { border-color: var(--primary); }
+
 /* hide the app top-bar when profile is visible */
 .container.profile-hide-top .top-bar { display: none; }
 
