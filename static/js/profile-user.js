@@ -131,30 +131,66 @@
     const shadeList = document.getElementById('shade-list');
     const btnSet = document.getElementById('shade-set');
     const btnCancel = document.getElementById('shade-cancel');
-    const topArea = document.getElementById('profile-top-area');
+  const topArea = document.getElementById('profile-top-area');
+  const shadeBg = document.getElementById('shade-bg');
     const STORAGE_KEY = 'profile:shade';
 
     function applyShade(url){
-      try { if (!topArea) return; if (!url) { topArea.style.backgroundImage=''; return; } topArea.style.backgroundImage = `url(${url})`; } catch(_){}
+      try {
+        if (shadeBg) {
+          if (!url) { shadeBg.style.backgroundImage=''; return; }
+          shadeBg.style.backgroundImage = `url(${url})`;
+        } else if (topArea) {
+          if (!url) { topArea.style.backgroundImage=''; return; }
+          topArea.style.backgroundImage = `url(${url})`;
+        }
+      } catch(_){}
     }
 
-    // load saved shade
-    try { const saved = localStorage.getItem(STORAGE_KEY); if (saved) applyShade(saved); } catch(_){}
+  // load saved shade or default preset
+  try { const saved = localStorage.getItem(STORAGE_KEY); if (saved) applyShade(saved); else { try { applyShade(PRESETS[0]); } catch(_){} } } catch(_){}
 
     if (!btn || !modal) return;
-    btn.addEventListener('click', ()=>{ modal.style.display = 'block'; modal.classList.add('show'); // populate shade list from storage
-      try { shadeList.innerHTML=''; const saved = localStorage.getItem(STORAGE_KEY); if (saved){ const img = document.createElement('img'); img.src=saved; img.className='saved-shade'; img.addEventListener('click', ()=>{ document.querySelectorAll('#shade-list img').forEach(i=>i.classList.remove('selected')); img.classList.add('selected'); }); shadeList.appendChild(img); } } catch(_){}}
-    );
+    // preset shades (png). Add your files to /static/img/profile-shades/ and they will appear here.
+    const PRESETS = [
+      '/static/img/profile-shades/shade1.png',
+      '/static/img/profile-shades/shade2.png',
+      '/static/img/profile-shades/shade3.png'
+    ];
+
+    function populateShadeList(){
+      try {
+        shadeList.innerHTML='';
+        // saved first
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved){ const img = document.createElement('img'); img.src=saved; img.className='saved-shade selected'; img.addEventListener('click', ()=>{ document.querySelectorAll('#shade-list img').forEach(i=>i.classList.remove('selected')); img.classList.add('selected'); }); shadeList.appendChild(img); }
+        // presets
+        PRESETS.forEach(p => {
+          const img = document.createElement('img'); img.src=p; img.alt='preset'; img.addEventListener('error', ()=>{ img.style.display='none'; });
+          img.addEventListener('click', ()=>{ document.querySelectorAll('#shade-list img').forEach(i=>i.classList.remove('selected')); img.classList.add('selected'); });
+          shadeList.appendChild(img);
+        });
+        // if nothing selected, select first preset
+        if (!document.querySelector('#shade-list img.selected')) {
+          const first = shadeList.querySelector('img'); if (first) first.classList.add('selected');
+        }
+      } catch(_){}
+    }
+
+    btn.addEventListener('click', ()=>{ populateShadeList(); modal.style.display = 'block'; modal.classList.add('show'); });
 
     // upload handler
     upload?.addEventListener('change', (e)=>{
-      const f = e.target.files && e.target.files[0]; if (!f) return; const reader = new FileReader(); reader.onload = function(ev){ const url = ev.target.result; // preview
-        try { const img = document.createElement('img'); img.src = url; img.addEventListener('click', ()=>{ document.querySelectorAll('#shade-list img').forEach(i=>i.classList.remove('selected')); img.classList.add('selected'); }); shadeList.prepend(img); } catch(_){}
+      const f = e.target.files && e.target.files[0]; if (!f) return;
+      // allow only png
+      if (!/\.png$/i.test(f.name) && f.type !== 'image/png') { alert('Только PNG файлы разрешены.'); return; }
+      const reader = new FileReader(); reader.onload = function(ev){ const url = ev.target.result; // preview
+        try { const img = document.createElement('img'); img.src = url; img.addEventListener('click', ()=>{ document.querySelectorAll('#shade-list img').forEach(i=>i.classList.remove('selected')); img.classList.add('selected'); }); shadeList.prepend(img); img.classList.add('selected'); } catch(_){}
       }; reader.readAsDataURL(f);
     });
 
     btnCancel?.addEventListener('click', ()=>{ modal.classList.remove('show'); modal.style.display='none'; });
-    btnSet?.addEventListener('click', ()=>{
+  btnSet?.addEventListener('click', ()=>{
       try {
         const sel = document.querySelector('#shade-list img.selected') || document.querySelector('#shade-list img');
         if (!sel) { alert('Выберите фон или загрузите изображение.'); return; }
