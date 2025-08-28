@@ -412,8 +412,8 @@ body.allow-landscape #md-pane-stream.fs-mode * {
 }
 
 .shade-bg {
-    position:absolute; inset:0 0 auto 0; height: calc(100% - 160px); /* leave space at bottom for stats */
-    background-size: cover; background-position: center; z-index:0;
+    position: absolute; left:0; right:0; top:0; z-index:0; background-size: cover; background-position: center;
+    height: 220px; max-height: 50vh; /* constrain shade to header area */
 }
 .profile-top-area > * { position: relative; z-index: 2; }
 
@@ -425,11 +425,11 @@ body.allow-landscape #md-pane-stream.fs-mode * {
     pointer-events: none;
 }
 
-.profile-shade-btn { width:34px; height:34px; border-radius:50%; background: rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); display:inline-block; cursor:pointer; position:relative; }
-.profile-shade-btn:focus { outline:none; box-shadow:0 0 0 2px rgba(108,140,255,0.12); }
-.profile-shade-btn::before, .profile-shade-btn::after { content:''; position:absolute; left:7px; right:7px; height:2px; background: rgba(255,255,255,0.9); border-radius:1px; }
-.profile-shade-btn::before { top:10px; }
-.profile-shade-btn::after { bottom:10px; }
+.profile-shade-btn { position: absolute; right: 10px; top: 10px; width: 32px; height: 28px; border-radius: 6px; background: rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.06); display:inline-block; cursor:pointer; }
+.profile-shade-btn:focus { outline:none; box-shadow:0 0 0 2px rgba(108,140,255,0.10); }
+.profile-shade-btn::before, .profile-shade-btn::after { content:''; position:absolute; left:6px; right:6px; height:2px; background: rgba(255,255,255,0.95); border-radius:1px; }
+.profile-shade-btn::before { top:8px; }
+.profile-shade-btn::after { bottom:8px; }
 
 /* modal thin tweaks for shade list */
 #shade-list img { width:64px; height:64px; object-fit:cover; border-radius:8px; cursor:pointer; border:2px solid transparent; }

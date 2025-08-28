@@ -180,20 +180,13 @@
     btn.addEventListener('click', ()=>{ populateShadeList(); modal.style.display = 'block'; modal.classList.add('show'); });
 
     // upload handler
-    upload?.addEventListener('change', (e)=>{
-      const f = e.target.files && e.target.files[0]; if (!f) return;
-      // allow only png
-      if (!/\.png$/i.test(f.name) && f.type !== 'image/png') { alert('Только PNG файлы разрешены.'); return; }
-      const reader = new FileReader(); reader.onload = function(ev){ const url = ev.target.result; // preview
-        try { const img = document.createElement('img'); img.src = url; img.addEventListener('click', ()=>{ document.querySelectorAll('#shade-list img').forEach(i=>i.classList.remove('selected')); img.classList.add('selected'); }); shadeList.prepend(img); img.classList.add('selected'); } catch(_){}
-      }; reader.readAsDataURL(f);
-    });
+  // file upload disabled: only presets allowed
 
     btnCancel?.addEventListener('click', ()=>{ modal.classList.remove('show'); modal.style.display='none'; });
-  btnSet?.addEventListener('click', ()=>{
+    btnSet?.addEventListener('click', ()=>{
       try {
         const sel = document.querySelector('#shade-list img.selected') || document.querySelector('#shade-list img');
-        if (!sel) { alert('Выберите фон или загрузите изображение.'); return; }
+        if (!sel) { alert('Выберите фон.'); return; }
         const url = sel.src;
         try { localStorage.setItem(STORAGE_KEY, url); } catch(_){}
         applyShade(url);
