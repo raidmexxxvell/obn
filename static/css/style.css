@@ -376,6 +376,7 @@ body.allow-landscape #md-pane-stream.fs-mode * {
     flex-direction: column; 
     gap: 6px; 
     flex: 1;
+    z-index: 3;
 }
 
 .profile-avatar {
@@ -404,7 +405,6 @@ body.allow-landscape #md-pane-stream.fs-mode * {
 
 /* Background area behind avatar/name/stats (profile shade) */
 .profile-top-area {
-    border-radius: 12px;
     overflow: hidden;
     padding-top: 34px;
     padding-bottom: 12px;
@@ -427,7 +427,7 @@ body.allow-landscape #md-pane-stream.fs-mode * {
     background-position: center;
     height: auto;
 }
-.profile-top-area > * { position: relative; z-index: 2; }
+.profile-top-area > * { z-index: 1; }
 
 .profile-top-area::before {
     content: '';

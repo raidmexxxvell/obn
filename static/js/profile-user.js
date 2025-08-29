@@ -155,7 +155,7 @@
     const PRESETS = [
       '/static/img/profile-shades/shade1.png',
       '/static/img/profile-shades/shade2.png',
-      '/static/img/profile-shades/shade3.png'
+      '/static/img/profile-shades/shade3.webp'
     ];
 
     function populateShadeList(){
