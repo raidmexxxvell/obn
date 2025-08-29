@@ -6,8 +6,6 @@
   const badgesContainer = document.getElementById('badges');
   const achievementPlaceholder = document.getElementById('achievement-placeholder');
   let _loadedOnce = false;
-  // prevent concurrent duplicate requests
-  let _inFlightPromise = null;
 
   function renderAchievements(achievements){
     if (achievementPlaceholder) achievementPlaceholder.remove();
@@ -177,7 +175,6 @@
   
   function fetchAchievements(){
     if(_loadedOnce) return Promise.resolve([]);
-    if(_inFlightPromise) return _inFlightPromise;
     const send=(init)=> fetch('/api/achievements',{ method:'POST', body: init })
       .then(r=>r.json())
       .then(data=>{ 
@@ -188,16 +185,11 @@
           });
         }
         _loadedOnce=true; 
-        _inFlightPromise = null;
         renderAchievements(data.achievements||[]); 
         return data.achievements||[]; 
-      }).catch(err=>{
-        _inFlightPromise = null;
-        throw err;
       });
-    const fd=new FormData(); fd.append('initData', (tg && (tg.initData||tg.initDataUnsafe?.user ? tg.initData : tg?.initData)) || '');
-    _inFlightPromise = send(fd).catch(err=>{ console.error('achievements load error',err); renderAchievements([]); return []; });
-    return _inFlightPromise;
+    if(!tg || !tg.initDataUnsafe?.user){ const fd=new FormData(); fd.append('initData', tg?.initData||''); return send(fd).catch(err=>{ console.error('achievements load error (no tg user)',err); renderAchievements([]); return []; }); }
+    const fd=new FormData(); fd.append('initData', tg.initData||''); return send(fd).catch(err=>{ console.error('achievements load error',err); renderAchievements([]); return []; });
   }
   // Автозагрузка при готовности профиля и при клике на вкладку "Достижения"
   window.addEventListener('profile:user-loaded', ()=>{ try { const active = document.querySelector('.subtab-item.active[data-psub="badges"]'); if(active) fetchAchievements(); } catch(_) {} });
