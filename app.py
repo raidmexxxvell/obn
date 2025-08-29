@@ -5050,28 +5050,74 @@ def get_achievements():
         invited_tier = compute_tier(invited_count, invited_thresholds)
 
         bet_stats = {'total':0,'won':0,'max_win_odds':0.0,'markets_used':set(),'weeks_active':set()}
+        markets_count = 0
+        weeks_count = 0
         if SessionLocal is not None:
             db = get_db();
             try:
-                for b in db.query(Bet).filter(Bet.user_id==int(user_id)).all():
-                    bet_stats['total'] += 1
+                # Try to compute aggregates in the DB to avoid fetching all rows into Python
+                try:
+                    totals = db.query(
+                        func.count(Bet.id).label('total'),
+                        func.sum(case([(func.lower(Bet.status)== 'won', 1)], else_=0)).label('won'),
+                        func.max(Bet.odds).label('max_odds_str')
+                    ).filter(Bet.user_id==int(user_id)).one()
+                    bet_stats['total'] = int(totals.total or 0)
+                    bet_stats['won'] = int(totals.won or 0)
                     try:
-                        if (b.status or '').lower()=='won':
-                            bet_stats['won'] += 1
-                            k=float((b.odds or '0').replace(',','.'))
-                            if k>bet_stats['max_win_odds']: bet_stats['max_win_odds']=k
-                    except Exception: pass
-                    mk=(b.market or '1x2').lower();
-                    if mk in ('penalty','redcard'): mk='specials'
-                    bet_stats['markets_used'].add(mk)
-                    if b.placed_at:
+                        bet_stats['max_win_odds'] = float((totals.max_odds_str or '0').replace(',','.'))
+                    except Exception:
+                        bet_stats['max_win_odds'] = 0.0
+
+                    # distinct markets count (case-insensitive)
+                    try:
+                        markets_count = int(db.query(func.count(func.distinct(func.lower(Bet.market)))).filter(Bet.user_id==int(user_id)).scalar() or 0)
+                    except Exception:
+                        markets_count = 0
+
+                    # weeks_count is DB-dependent (date_trunc availability). Try a DB-side approach first.
+                    try:
+                        weeks_count = int(db.query(func.count(func.distinct(func.date_trunc('week', func.timezone('UTC', Bet.placed_at))))).filter(Bet.user_id==int(user_id), Bet.placed_at!=None).scalar() or 0)
+                    except Exception:
+                        weeks_count = 0
+
+                    # If the DB-side weeks_count failed or markets_count is zero but data exists, fallback to streaming a small projection
+                    if (bet_stats['total'] == 0 and bet_stats['won'] == 0 and bet_stats['max_win_odds'] == 0.0) or (markets_count == 0 and weeks_count == 0 and bet_stats['total']>0):
+                        raise Exception('Fallback to streaming')
+                except Exception:
+                    # Fallback: stream only needed columns and compute in Python but in a streaming manner (yield_per)
+                    markets_set = set()
+                    weeks_set = set()
+                    for mkt, placed_at in db.query(Bet.market, Bet.placed_at).filter(Bet.user_id==int(user_id)).yield_per(200):
+                        mk = (mkt or '1x2').lower()
+                        if mk in ('penalty','redcard'): mk = 'specials'
+                        markets_set.add(mk)
+                        if placed_at:
+                            try:
+                                start = _week_period_start_msk_to_utc(placed_at.astimezone(timezone.utc))
+                                weeks_set.add(start.date().isoformat())
+                            except Exception:
+                                pass
+                    markets_count = len(markets_set)
+                    weeks_count = len(weeks_set)
+                    # Recompute simple aggregates via lightweight DB queries
+                    try:
+                        bet_stats['total'] = int(db.query(func.count(Bet.id)).filter(Bet.user_id==int(user_id)).scalar() or 0)
+                        bet_stats['won'] = int(db.query(func.count()).filter(Bet.user_id==int(user_id), func.lower(Bet.status)=='won').scalar() or 0)
+                        max_odds_str = db.query(func.max(Bet.odds)).filter(Bet.user_id==int(user_id)).scalar() or '0'
                         try:
-                            start=_week_period_start_msk_to_utc(b.placed_at.astimezone(timezone.utc))
-                            bet_stats['weeks_active'].add(start.date().isoformat())
-                        except Exception: pass
+                            bet_stats['max_win_odds'] = float(str(max_odds_str).replace(',','.'))
+                        except Exception:
+                            bet_stats['max_win_odds'] = 0.0
+                    except Exception:
+                        pass
             finally:
                 db.close()
-        betcount_tier=compute_tier(bet_stats['total'], betcount_thresholds); betwins_tier=compute_tier(bet_stats['won'], betwins_thresholds); bigodds_tier=compute_tier(bet_stats['max_win_odds'], bigodds_thresholds); markets_tier=compute_tier(len(bet_stats['markets_used']), markets_thresholds); weeks_tier=compute_tier(len(bet_stats['weeks_active']), weeks_thresholds)
+    betcount_tier = compute_tier(bet_stats['total'], betcount_thresholds)
+    betwins_tier = compute_tier(bet_stats['won'], betwins_thresholds)
+    bigodds_tier = compute_tier(bet_stats['max_win_odds'], bigodds_thresholds)
+    markets_tier = compute_tier(markets_count or len(bet_stats.get('markets_used', [])), markets_thresholds)
+    weeks_tier = compute_tier(weeks_count or len(bet_stats.get('weeks_active', [])), weeks_thresholds)
 
         ach_row, ach = get_user_achievements_row(user_id); updates=[]; now_iso=datetime.now(timezone.utc).isoformat()
         def upd(cond, rng_val_pairs):
