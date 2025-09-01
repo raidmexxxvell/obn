@@ -110,7 +110,7 @@ check_required_environment_variables()
 
 # Импорты для новой системы БД
 try:
-    from database.database_models import db_manager, db_ops, Base
+    from database.database_models import db_manager, db_ops, Base, News
     from database.database_api import db_api
     DATABASE_SYSTEM_AVAILABLE = True
     print("[INFO] New database system initialized")
@@ -7873,6 +7873,200 @@ def api_admin_bulk_lineups():
     except Exception as e:
         app.logger.error(f"bulk-lineups error: {e}")
         return jsonify({'error': 'Ошибка при импорте составов'}), 500
+
+# Новости API
+@app.route('/api/admin/news', methods=['GET'])
+def api_admin_news_list():
+    """Получить список новостей для админа"""
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.args.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'Доступ запрещен'}), 403
+            
+        if not SessionLocal:
+            return jsonify({'error': 'База данных недоступна'}), 500
+            
+        db = get_db()
+        try:
+            news = db.query(News).order_by(News.created_at.desc()).all()
+            news_list = []
+            for n in news:
+                news_list.append({
+                    'id': n.id,
+                    'title': n.title,
+                    'content': n.content,
+                    'author_id': n.author_id,
+                    'created_at': n.created_at.isoformat() if n.created_at else None,
+                    'updated_at': n.updated_at.isoformat() if n.updated_at else None
+                })
+            return jsonify({'news': news_list})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"news list error: {e}")
+        return jsonify({'error': 'Ошибка при получении новостей'}), 500
+
+@app.route('/api/admin/news', methods=['POST'])
+def api_admin_news_create():
+    """Создать новость"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Неверные данные'}), 400
+            
+        parsed = parse_and_verify_telegram_init_data(data.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'Доступ запрещен'}), 403
+            
+        title = data.get('title', '').strip()
+        content = data.get('content', '').strip()
+        
+        if not title or not content:
+            return jsonify({'error': 'Заголовок и содержание обязательны'}), 400
+            
+        if not SessionLocal:
+            return jsonify({'error': 'База данных недоступна'}), 500
+            
+        db = get_db()
+        try:
+            news = News(
+                title=title,
+                content=content,
+                author_id=int(user_id)
+            )
+            db.add(news)
+            db.commit()
+            
+            return jsonify({
+                'status': 'success',
+                'id': news.id,
+                'title': news.title,
+                'content': news.content
+            })
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"news create error: {e}")
+        return jsonify({'error': 'Ошибка при создании новости'}), 500
+
+@app.route('/api/admin/news/<int:news_id>', methods=['PUT'])
+def api_admin_news_update(news_id):
+    """Обновить новость"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Неверные данные'}), 400
+            
+        parsed = parse_and_verify_telegram_init_data(data.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'Доступ запрещен'}), 403
+            
+        if not SessionLocal:
+            return jsonify({'error': 'База данных недоступна'}), 500
+            
+        db = get_db()
+        try:
+            news = db.query(News).filter(News.id == news_id).first()
+            if not news:
+                return jsonify({'error': 'Новость не найдена'}), 404
+                
+            title = data.get('title', '').strip()
+            content = data.get('content', '').strip()
+            
+            if title:
+                news.title = title
+            if content:
+                news.content = content
+            news.updated_at = datetime.now(timezone.utc)
+            
+            db.commit()
+            
+            return jsonify({
+                'status': 'success',
+                'id': news.id,
+                'title': news.title,
+                'content': news.content
+            })
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"news update error: {e}")
+        return jsonify({'error': 'Ошибка при обновлении новости'}), 500
+
+@app.route('/api/admin/news/<int:news_id>', methods=['DELETE'])
+def api_admin_news_delete(news_id):
+    """Удалить новость"""
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.args.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'Доступ запрещен'}), 403
+            
+        if not SessionLocal:
+            return jsonify({'error': 'База данных недоступна'}), 500
+            
+        db = get_db()
+        try:
+            news = db.query(News).filter(News.id == news_id).first()
+            if not news:
+                return jsonify({'error': 'Новость не найдена'}), 404
+                
+            db.delete(news)
+            db.commit()
+            
+            return jsonify({'status': 'success'})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"news delete error: {e}")
+        return jsonify({'error': 'Ошибка при удалении новости'}), 500
+
+@app.route('/api/news', methods=['GET'])
+def api_news_public():
+    """Публичный API для получения новостей"""
+    try:
+        if not SessionLocal:
+            return jsonify({'error': 'База данных недоступна'}), 500
+            
+        db = get_db()
+        try:
+            limit = min(int(request.args.get('limit', 10)), 50)
+            offset = max(int(request.args.get('offset', 0)), 0)
+            
+            news = db.query(News).order_by(News.created_at.desc()).offset(offset).limit(limit).all()
+            news_list = []
+            for n in news:
+                news_list.append({
+                    'id': n.id,
+                    'title': n.title,
+                    'content': n.content,
+                    'created_at': n.created_at.isoformat() if n.created_at else None
+                })
+            return jsonify({'news': news_list})
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.error(f"public news error: {e}")
+        return jsonify({'error': 'Ошибка при получении новостей'}), 500
 
 @app.route('/api/stats-table', methods=['GET'])
 def api_stats_table():

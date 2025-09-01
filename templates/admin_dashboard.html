@@ -29,6 +29,7 @@
             <div id="admin-subtabs" class="subtabs">
                 <div class="subtab-item active" data-atab="matches">Матчи и составы</div>
                 <div class="subtab-item" data-atab="players">Управление игроками</div>
+                <div class="subtab-item" data-atab="news">Новости</div>
                 <div class="subtab-item" data-atab="service">Сервис</div>
                 <div class="subtab-item" data-atab="stats">Статистика</div>
             </div>
@@ -183,6 +184,46 @@
                 </div>
             </div>
 
+            <!-- News Management Pane -->
+            <div id="admin-pane-news" class="admin-pane" style="display: none;">
+                <div class="admin-section">
+                    <h3>Управление новостями</h3>
+                    <div class="news-controls">
+                        <button id="add-new-news-btn" class="action-btn" onclick="window.AdminEnhanced.openNewsModal()">+ Создать новость</button>
+                    </div>
+                    
+                    <div id="news-list" class="news-container">
+                        <!-- Динамически заполняется новостями -->
+                    </div>
+                </div>
+
+                <!-- Add/Edit News Modal -->
+                <div id="news-modal" class="modal" style="display: none;">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h3 id="news-modal-title">Создать новость</h3>
+                            <button class="modal-close" onclick="window.AdminEnhanced.closeNewsModal()">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <form id="news-form">
+                                <div class="form-group">
+                                    <label for="news-title">Заголовок:</label>
+                                    <input type="text" id="news-title" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="news-content">Содержание:</label>
+                                    <textarea id="news-content" rows="8" required></textarea>
+                                </div>
+                                <div class="modal-actions">
+                                    <button type="button" id="save-news-btn" class="action-btn" onclick="window.AdminEnhanced.saveNews()">Сохранить</button>
+                                    <button type="button" class="cancel-btn" onclick="window.AdminEnhanced.closeNewsModal()">Отмена</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Service Pane -->
             <div id="admin-pane-service" class="admin-pane" style="display: none;">
                 <div class="admin-section">
@@ -207,271 +248,6 @@
 
     <!-- Scripts -->
     <script src="/static/js/telegram-patch.js"></script>
-    <script src="/static/js/admin.js"></script>
-    <script>
-        // Lineup Management Functions
-        let currentMatchId = null;
-        let currentLineups = { home: { main: [], sub: [] }, away: { main: [], sub: [] } };
-
-        function openMatchModal(matchId, homeTeam, awayTeam) {
-            currentMatchId = matchId;
-            document.getElementById('match-details-title').textContent = `${homeTeam} vs ${awayTeam} - Составы`;
-            document.getElementById('home-team-name').textContent = homeTeam;
-            document.getElementById('away-team-name').textContent = awayTeam;
-            
-            // Load existing lineups
-            loadLineups(matchId);
-            
-            document.getElementById('match-details-modal').style.display = 'flex';
-        }
-
-        function closeMatchModal() {
-            document.getElementById('match-details-modal').style.display = 'none';
-            currentMatchId = null;
-        }
-
-        function loadLineups(matchId) {
-            // Load lineups from server
-            const fd = new FormData();
-            fd.append('initData', window.Telegram?.WebApp?.initData || '');
-            
-            fetch(`/api/admin/match/${matchId}/lineups`, {
-                method: 'POST',
-                body: fd
-            })
-            .then(r => r.json())
-            .then(data => {
-                currentLineups = data.lineups || { home: { main: [], sub: [] }, away: { main: [], sub: [] } };
-                renderLineups();
-            })
-            .catch(err => {
-                console.error('Error loading lineups:', err);
-                currentLineups = { home: { main: [], sub: [] }, away: { main: [], sub: [] } };
-                renderLineups();
-            });
-        }
-
-        function renderLineups() {
-            ['home', 'away'].forEach(team => {
-                ['main', 'sub'].forEach(type => {
-                    const container = document.getElementById(`${team}-${type}-lineup`);
-                    container.innerHTML = '';
-                    
-                    currentLineups[team][type].forEach((player, index) => {
-                        const playerEl = document.createElement('div');
-                        playerEl.className = 'player-item';
-                        playerEl.innerHTML = `
-                            <div class="player-info">
-                                <span class="player-name">${player.name}</span>
-                                <span class="player-details">#${player.number || '-'} • ${player.position || 'N/A'}</span>
-                            </div>
-                            <button class="remove-player" onclick="removePlayer('${team}', '${type}', ${index})">×</button>
-                        `;
-                        container.appendChild(playerEl);
-                    });
-                });
-            });
-        }
-
-        function addPlayerToLineup(team, type) {
-            const playerName = prompt('Введите имя игрока:');
-            if (!playerName) return;
-            
-            const playerNumber = prompt('Введите номер игрока (или оставьте пустым):');
-            const playerPosition = prompt('Введите позицию (GK/DEF/MID/FWD):');
-            
-            const player = {
-                name: playerName.trim(),
-                number: playerNumber ? parseInt(playerNumber) : null,
-                position: playerPosition ? playerPosition.toUpperCase() : null
-            };
-            
-            currentLineups[team][type].push(player);
-            renderLineups();
-        }
-
-        function removePlayer(team, type, index) {
-            currentLineups[team][type].splice(index, 1);
-            renderLineups();
-        }
-
-        function saveLineups() {
-            if (!currentMatchId) return;
-            
-            const btn = document.getElementById('save-lineups-btn');
-            btn.disabled = true;
-            btn.textContent = 'Сохранение...';
-            
-            const fd = new FormData();
-            fd.append('initData', window.Telegram?.WebApp?.initData || '');
-            fd.append('lineups', JSON.stringify(currentLineups));
-            
-            fetch(`/api/admin/match/${currentMatchId}/lineups/save`, {
-                method: 'POST',
-                body: fd
-            })
-            .then(r => r.json())
-            .then(data => {
-                if (data.success) {
-                    alert('Составы сохранены!');
-                    closeMatchModal();
-                    loadMatches(); // Refresh matches list
-                } else {
-                    alert('Ошибка сохранения: ' + (data.error || 'Неизвестная ошибка'));
-                }
-            })
-            .catch(err => {
-                console.error('Error saving lineups:', err);
-                alert('Ошибка сохранения составов');
-            })
-            .finally(() => {
-                btn.disabled = false;
-                btn.textContent = 'Сохранить составы';
-            });
-        }
-
-        function loadMatches() {
-            const container = document.getElementById('matches-list');
-            container.innerHTML = '<div class="status-text">Загрузка матчей...</div>';
-            
-            const fd = new FormData();
-            fd.append('initData', window.Telegram?.WebApp?.initData || '');
-            
-            fetch('/api/admin/matches/upcoming', {
-                method: 'POST',
-                body: fd
-            })
-            .then(r => r.json())
-            .then(data => {
-                container.innerHTML = '';
-                
-                if (!data.matches || data.matches.length === 0) {
-                    container.innerHTML = '<div class="status-text">Нет предстоящих матчей</div>';
-                    return;
-                }
-                
-                data.matches.forEach(match => {
-                    const matchEl = document.createElement('div');
-                    matchEl.className = 'match-item';
-                    
-                    const lineupStatus = getLineupStatus(match.lineups);
-                    
-                    matchEl.innerHTML = `
-                        <div class="match-info">
-                            <div>
-                                <div class="match-teams">${match.home_team} vs ${match.away_team}</div>
-                                <div class="match-date">${new Date(match.match_date).toLocaleString()}</div>
-                            </div>
-                            <div class="lineup-status ${lineupStatus.class}">${lineupStatus.text}</div>
-                        </div>
-                    `;
-                    
-                    matchEl.onclick = () => openMatchModal(match.id, match.home_team, match.away_team);
-                    container.appendChild(matchEl);
-                });
-            })
-            .catch(err => {
-                console.error('Error loading matches:', err);
-                container.innerHTML = '<div class="status-text">Ошибка загрузки матчей</div>';
-            });
-        }
-
-        function getLineupStatus(lineups) {
-            if (!lineups) return { class: 'lineup-empty', text: 'Нет составов' };
-            
-            const homeMain = lineups.home?.main?.length || 0;
-            const awayMain = lineups.away?.main?.length || 0;
-            
-            if (homeMain >= 11 && awayMain >= 11) {
-                return { class: 'lineup-complete', text: 'Составы готовы' };
-            } else if (homeMain > 0 || awayMain > 0) {
-                return { class: 'lineup-partial', text: 'Частично' };
-            } else {
-                return { class: 'lineup-empty', text: 'Нет составов' };
-            }
-        }
-
-        // Player Management Functions
-        function openPlayerModal(playerId = null) {
-            document.getElementById('player-modal-title').textContent = playerId ? 'Редактировать игрока' : 'Добавить игрока';
-            document.getElementById('player-modal').style.display = 'flex';
-            
-            if (playerId) {
-                // Load player data
-                loadPlayerData(playerId);
-            } else {
-                // Reset form
-                document.getElementById('player-form').reset();
-            }
-        }
-
-        function closePlayerModal() {
-            document.getElementById('player-modal').style.display = 'none';
-        }
-
-        function loadPlayerData(playerId) {
-            // Implementation for loading specific player data
-        }
-
-        function loadPlayers() {
-            // Implementation for loading players list
-        }
-
-        // Initialize admin dashboard when DOM is loaded
-        document.addEventListener('DOMContentLoaded', function() {
-            // Set initial theme based on Telegram
-            if (window.Telegram?.WebApp) {
-                const tg = window.Telegram.WebApp;
-                tg.ready();
-                tg.expand();
-                
-                // Apply theme
-                if (tg.colorScheme === 'dark') {
-                    document.body.classList.add('dark-theme');
-                }
-            }
-            
-            // Initialize tab switching
-            const tabs = document.querySelectorAll('#admin-subtabs .subtab-item');
-            const panes = {
-                'matches': document.getElementById('admin-pane-matches'),
-                'players': document.getElementById('admin-pane-players'),
-                'service': document.getElementById('admin-pane-service'),
-                'stats': document.getElementById('admin-pane-stats')
-            };
-            
-            tabs.forEach(tab => {
-                tab.addEventListener('click', () => {
-                    const targetPane = tab.getAttribute('data-atab');
-                    
-                    // Update active tab
-                    tabs.forEach(t => t.classList.remove('active'));
-                    tab.classList.add('active');
-                    
-                    // Show/hide panes
-                    Object.keys(panes).forEach(key => {
-                        if (panes[key]) {
-                            panes[key].style.display = key === targetPane ? 'block' : 'none';
-                        }
-                    });
-                    
-                    // Load data for active pane
-                    if (targetPane === 'matches') {
-                        loadMatches();
-                    } else if (targetPane === 'players') {
-                        loadPlayers();
-                    }
-                });
-            });
-            
-            // Load initial data
-            loadMatches();
-            
-            // Event listeners
-            document.getElementById('admin-matches-refresh')?.addEventListener('click', loadMatches);
-            document.getElementById('save-lineups-btn')?.addEventListener('click', saveLineups);
-            document.getElementById('add-new-player-btn')?.addEventListener('click', () => openPlayerModal());
-        });
-    </script>
+    <script src="/static/js/admin-enhanced.js"></script>
 </body>
 </html>

@@ -381,12 +381,24 @@ class DatabaseOperations:
             session.commit()
             return composition.id
 
+class News(Base):
+    __tablename__ = 'news'
+    
+    id = Column(Integer, primary_key=True)
+    title = Column(String(500), nullable=False)
+    content = Column(Text, nullable=False)
+    author_id = Column(BigInteger)  # Telegram user ID
+    is_published = Column(Boolean, default=True)
+    news_type = Column(String(50), default='general')  # general, match_announcement, transfer, etc.
+    created_at = Column(DateTime, default=func.current_timestamp())
+    updated_at = Column(DateTime, default=func.current_timestamp(), onupdate=func.current_timestamp())
+
 # Initialize database manager
 db_manager = DatabaseManager()
 db_ops = DatabaseOperations(db_manager)
 
 # Export for use in main app
 __all__ = [
-    'Tournament', 'Team', 'Player', 'Match', 'TeamComposition', 'MatchEvent', 'PlayerStatistics',
+    'Tournament', 'Team', 'Player', 'Match', 'TeamComposition', 'MatchEvent', 'PlayerStatistics', 'News',
     'DatabaseManager', 'DatabaseOperations', 'db_manager', 'db_ops', 'Base'
 ]
