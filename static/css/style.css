@@ -1202,3 +1202,16 @@ body.theme-blb .share-btn {
     border-radius: 999px;
     font-size: 12px;
 }
+
+/* ===== Новости (главная) ===== */
+.news-list { display:flex; flex-direction:column; gap:12px; margin: 4px 0 4px; }
+.news-item { position:relative; background: var(--card); border:1px solid rgba(255,255,255,0.08); border-radius:14px; padding:12px 14px 12px; box-shadow: 0 4px 10px -2px rgba(0,0,0,0.4); overflow:hidden; transition: transform .18s ease, border-color .25s ease, background .25s ease; }
+.news-item::before { content:""; position:absolute; inset:0; background: linear-gradient(135deg, rgba(255,255,255,0.04), rgba(255,255,255,0.00)); pointer-events:none; }
+.news-item:hover { transform: translateY(-2px); border-color: rgba(255,255,255,0.18); }
+.news-head { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; margin:0 0 4px; }
+.news-title { font-weight:800; font-size:14px; line-height:1.3; letter-spacing:.2px; flex:1; }
+.news-date { font-size:11px; color: var(--gray); white-space:nowrap; opacity:.9; }
+.news-content { font-size:13px; line-height:1.45; color: var(--light); word-wrap:break-word; }
+.news-loading, .news-empty, .news-error { color: var(--gray); font-size:13px; text-align:center; padding:10px 0; }
+.news-error { color: var(--danger); }
+@media (max-width:480px){ .news-item { padding:11px 12px 11px; } .news-title { font-size:13px; } .news-content { font-size:12.5px; } }

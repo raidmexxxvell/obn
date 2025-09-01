@@ -381,6 +381,49 @@
         apply();
     }
 
+    // ===== Новости =====
+    async function loadNews() {
+        const list = document.getElementById('news-list');
+        if (!list) return;
+        list.classList.add('news-loading-state');
+        list.innerHTML = '<div class="news-loading">Загрузка новостей...</div>';
+        try {
+            const res = await fetch('/api/news?limit=5&_=' + Date.now());
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const data = await res.json();
+            const items = data?.news || [];
+            if (!items.length) {
+                list.innerHTML = '<div class="news-empty">Пока нет новостей</div>';
+                return;
+            }
+            list.innerHTML = '';
+            items.forEach(n => {
+                const div = document.createElement('div');
+                div.className = 'news-item';
+                const dt = n.created_at ? new Date(n.created_at) : null;
+                const dateText = dt ? dt.toLocaleString(undefined, {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}) : '';
+                // Обрезаем контент
+                const content = (n.content || '').trim();
+                const short = content.length > 160 ? content.slice(0,160) + '…' : content;
+                div.innerHTML = `
+                    <div class="news-head">
+                        <div class="news-title">${escapeHtml(n.title || 'Без заголовка')}</div>
+                        <div class="news-date">${dateText}</div>
+                    </div>
+                    <div class="news-content">${escapeHtml(short)}</div>
+                `;
+                list.appendChild(div);
+            });
+        } catch(e) {
+            list.innerHTML = '<div class="news-error">Ошибка загрузки новостей</div>';
+            console.error('[News] load error', e);
+        }
+    }
+
+    function escapeHtml(s){
+        return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
+    }
+
     // Блок «Топ матч недели» под рекламой на Главной
     async function renderTopMatchOfWeek() {
         try {
@@ -1189,6 +1232,7 @@
                     try { loadSchedule(); } catch(_) {}
                     try { loadResults(); } catch(_) {}
                     try { renderTopMatchOfWeek(); } catch(_) {}
+                    try { loadNews(); } catch(_) {}
                 }, 1000);
                 window.removeEventListener('league:transition-covered', onCovered);
             };
@@ -1223,6 +1267,7 @@
         if (!animate) { window.removeEventListener('league:transition-covered', showBLB); showBLB(); }
     // Обновим «Матч недели» на Главной в соответствии с активной лигой
     try { renderTopMatchOfWeek(); } catch(_) {}
+    try { loadNews(); } catch(_) {}
     if (animate) {
         // Показать подсказку после завершения анимации (один раз для пользователя)
         const onEnd = () => { try { showLeagueHint(); } catch(_) {} };

@@ -7946,6 +7946,14 @@ def api_admin_news_create():
             )
             db.add(news)
             db.commit()
+
+            # Инвалидация кэша новостей (все варианты limit/offset)
+            try:
+                from optimizations.multilevel_cache import get_cache
+                cache = get_cache()
+                cache.invalidate_pattern('cache:news')
+            except Exception as _e:
+                app.logger.warning(f"news cache invalidate (create) failed: {_e}")
             
             return jsonify({
                 'status': 'success',
@@ -7995,6 +8003,14 @@ def api_admin_news_update(news_id):
             news.updated_at = datetime.now(timezone.utc)
             
             db.commit()
+
+            # Инвалидация кэша новостей
+            try:
+                from optimizations.multilevel_cache import get_cache
+                cache = get_cache()
+                cache.invalidate_pattern('cache:news')
+            except Exception as _e:
+                app.logger.warning(f"news cache invalidate (update) failed: {_e}")
             
             return jsonify({
                 'status': 'success',
@@ -8032,6 +8048,14 @@ def api_admin_news_delete(news_id):
                 
             db.delete(news)
             db.commit()
+
+            # Инвалидация кэша новостей
+            try:
+                from optimizations.multilevel_cache import get_cache
+                cache = get_cache()
+                cache.invalidate_pattern('cache:news')
+            except Exception as _e:
+                app.logger.warning(f"news cache invalidate (delete) failed: {_e}")
             
             return jsonify({'status': 'success'})
         finally:
@@ -8046,24 +8070,33 @@ def api_news_public():
     try:
         if not SessionLocal:
             return jsonify({'error': 'База данных недоступна'}), 500
-            
-        db = get_db()
-        try:
-            limit = min(int(request.args.get('limit', 10)), 50)
-            offset = max(int(request.args.get('offset', 0)), 0)
-            
-            news = db.query(News).order_by(News.created_at.desc()).offset(offset).limit(limit).all()
-            news_list = []
-            for n in news:
-                news_list.append({
-                    'id': n.id,
-                    'title': n.title,
-                    'content': n.content,
-                    'created_at': n.created_at.isoformat() if n.created_at else None
-                })
-            return jsonify({'news': news_list})
-        finally:
-            db.close()
+        # Ключ кэша зависит только от limit (offset для первых 50 не используем в кэше чтобы упростить)
+        from optimizations.multilevel_cache import get_cache
+        cache = get_cache()
+        limit = min(int(request.args.get('limit', 5)), 50)
+        offset = max(int(request.args.get('offset', 0)), 0)
+
+        def load_news():
+            db = get_db()
+            try:
+                q = db.query(News).order_by(News.created_at.desc())
+                if offset:
+                    q = q.offset(offset)
+                q = q.limit(limit)
+                rows = q.all()
+                return [
+                    {
+                        'id': r.id,
+                        'title': r.title,
+                        'content': r.content,
+                        'created_at': r.created_at.isoformat() if r.created_at else None
+                    } for r in rows
+                ]
+            finally:
+                db.close()
+
+        news_list = cache.get('news', identifier=f"limit:{limit}:offset:{offset}", loader_func=load_news)
+        return jsonify({'news': news_list or []})
     except Exception as e:
         app.logger.error(f"public news error: {e}")
         return jsonify({'error': 'Ошибка при получении новостей'}), 500

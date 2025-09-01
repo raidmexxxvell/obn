@@ -35,6 +35,8 @@ class MultiLevelCache:
             'leaderboards': {'memory': 0, 'redis': 3600},
             'achievements': {'memory': 0, 'redis': 1800},
             'results': {'memory': 60, 'redis': 3600},
+            # Новости (легкие, можно держать в памяти коротко)
+            'news': {'memory': 120, 'redis': 300},  # 2 мин в памяти, 5 мин в Redis
         }
 
     def _make_key(self, cache_type: str, identifier: str = '') -> str:
