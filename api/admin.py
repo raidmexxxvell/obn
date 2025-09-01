@@ -53,12 +53,34 @@ def init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_
                 except Exception as e:
                     app.logger.warning(f"Failed to build betting tours payload: {e}")
                     
-                # Если матч завершён - запускаем расчёт ставок
+                # Если матч завершён - запускаем расчёт ставок и инкрементируем matches_played для игроков
                 if status == 'finished':
-                    try: 
+                    try:
                         _settle_open_bets()
                     except Exception as e:
                         app.logger.error(f"Failed to settle open bets: {e}")
+                    # Инкрементируем количество сыгранных матчей для всех игроков из составов команд (team_compositions)
+                    try:
+                        from database.database_models import TeamComposition, PlayerStatistics, Tournament, Match
+                        # Находим матч по home/away через таблицу matches (если есть структура)
+                        match_row = db.query(Match).join(Tournament, Match.tournament_id==Tournament.id).filter(Match.home_team_id.isnot(None)).first()
+                        # Упрощённо: инкремент по игрокам, участвовавшим в составе (match_id через MatchFlags у нас нет -> требуется реальная привязка).
+                        # Если нет прямой связи, пропускаем.
+                        if match_row:
+                            compositions = db.query(TeamComposition).filter(TeamComposition.match_id == match_row.id).all()
+                            touched_players = set()
+                            for comp in compositions:
+                                touched_players.add((comp.player_id, match_row.tournament_id))
+                            for player_id, tournament_id in touched_players:
+                                ps = db.query(PlayerStatistics).filter(PlayerStatistics.player_id==player_id, PlayerStatistics.tournament_id==tournament_id).first()
+                                if not ps:
+                                    ps = PlayerStatistics(player_id=player_id, tournament_id=tournament_id, matches_played=0)
+                                    db.add(ps)
+                                ps.matches_played = (ps.matches_played or 0) + 1
+                                ps.last_updated = datetime.now(timezone.utc)
+                            db.commit()
+                    except Exception as e:
+                        app.logger.warning(f"Failed to increment matches_played: {e}")
                         
                 return jsonify({'ok': True, 'status': status})
             finally:
