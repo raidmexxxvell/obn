@@ -7663,6 +7663,7 @@ def api_admin_season_rollover_inline():
         return jsonify({'error': f'advanced schema unavailable: {e}'}), 500
     dry_run = request.args.get('dry') in ('1','true','yes')
     soft_mode = request.args.get('soft') in ('1','true','yes')
+    deep_mode = (not soft_mode) and (request.args.get('deep') in ('1','true','yes'))  # deep только в full-reset
     adv_sess = adv_db_manager.get_session()
     from sqlalchemy import text as _sql_text
     import json as _json, hashlib as _hashlib
@@ -7686,6 +7687,27 @@ def api_admin_season_rollover_inline():
             return f"{a:02d}-{b:02d}"
         new_season = _compute_next(active.season if active else None)
         # rate-limit (10 мин) если не dry
+        # Попытка создать таблицу season_rollovers заранее (чтобы SELECT не падал)
+        try:
+            adv_sess.execute(_sql_text("""
+                CREATE TABLE IF NOT EXISTS season_rollovers (
+                    id SERIAL PRIMARY KEY,
+                    prev_tournament_id INT NULL,
+                    prev_season TEXT NULL,
+                    new_tournament_id INT NOT NULL,
+                    new_season TEXT NOT NULL,
+                    soft_mode BOOLEAN NOT NULL DEFAULT FALSE,
+                    legacy_cleanup_done BOOLEAN NOT NULL DEFAULT FALSE,
+                    pre_hash TEXT NULL,
+                    post_hash TEXT NULL,
+                    pre_meta TEXT NULL,
+                    post_meta TEXT NULL,
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                )"""))
+            adv_sess.commit()
+        except Exception:
+            try: adv_sess.rollback()
+            except Exception: pass
         if not dry_run:
             try:
                 last_row = adv_sess.execute(_sql_text("SELECT created_at FROM season_rollovers ORDER BY created_at DESC LIMIT 1")).fetchone()
@@ -7695,7 +7717,10 @@ def api_admin_season_rollover_inline():
                     if delta < 600:
                         return jsonify({'error':'rate_limited','retry_after_seconds': int(600-delta)}), 429
             except Exception as _rl_err:
-                app.logger.warning(f"season rollover rate-limit check failed: {_rl_err}")
+                # Обязательно откатываем сессию — иначе дальнейшие запросы 'InFailedSqlTransaction'
+                try: adv_sess.rollback()
+                except Exception: pass
+                app.logger.warning(f"season rollover rate-limit check failed (rollback applied): {_rl_err}")
         def _collect_summary():
             summary={}
             try:
@@ -7705,6 +7730,11 @@ def api_admin_season_rollover_inline():
                 summary['tournaments_total']=t_total
                 summary['tournaments_active']=t_active
                 summary['last_season']= last_season_row[0] if last_season_row else None
+                try:
+                    m_total = adv_sess.execute(_sql_text('SELECT COUNT(*) FROM matches')).scalar() or 0
+                    summary['matches_total']=m_total
+                except Exception as _me:
+                    summary['matches_total_error']=str(_me)
                 ps_rows = adv_sess.execute(_sql_text('SELECT COUNT(*) FROM player_statistics')).scalar() or 0
                 summary['player_statistics_rows']=ps_rows
             except Exception as _e:
@@ -7729,7 +7759,18 @@ def api_admin_season_rollover_inline():
             return summary
         pre_summary=_collect_summary()
         if dry_run:
-            return jsonify({'ok':True,'dry_run':True,'would_complete': active.season if active else None,'would_create': new_season,'soft_mode': soft_mode,'legacy_cleanup': [] if soft_mode else ['team_player_stats','match_scores','match_player_events','match_lineups','match_stats','match_flags'],'pre_hash': pre_summary.get('_hash'),'pre_summary': pre_summary})
+            return jsonify({
+                'ok':True,
+                'dry_run':True,
+                'would_complete': active.season if active else None,
+                'would_create': new_season,
+                'soft_mode': soft_mode,
+                'deep_mode': deep_mode,
+                'legacy_cleanup': [] if soft_mode else ['team_player_stats','match_scores','match_player_events','match_lineups','match_stats','match_flags'],
+                'advanced_cleanup': [] if (soft_mode or not deep_mode or not active) else ['matches','match_events','team_compositions','player_statistics'],
+                'pre_hash': pre_summary.get('_hash'),
+                'pre_summary': pre_summary
+            })
         prev_id = active.id if active else None
         prev_season = active.season if active else None
         from datetime import date as _date
@@ -7761,6 +7802,9 @@ def api_admin_season_rollover_inline():
         except Exception as _crt_err:
             app.logger.warning(f'season_rollovers create/alter failed: {_crt_err}')
         legacy_cleanup_done=False
+        advanced_cleanup_done=False
+        schedule_imported=0
+        schedule_errors=[]
         if not soft_mode:
             legacy_db = get_db()
             try:
@@ -7771,6 +7815,95 @@ def api_admin_season_rollover_inline():
             finally:
                 try: legacy_db.close()
                 except Exception: pass
+        # Deep advanced cleanup (старые матчи расширенной схемы + статистика) только если deep_mode
+        if deep_mode and active and not dry_run:
+            try:
+                # Удаляем зависимые сущности явно (на случай отсутствия CASCADE в БД)
+                adv_sess.execute(_sql_text('DELETE FROM match_events WHERE match_id IN (SELECT id FROM matches WHERE tournament_id=:tid)'), {'tid': active.id})
+                adv_sess.execute(_sql_text('DELETE FROM team_compositions WHERE match_id IN (SELECT id FROM matches WHERE tournament_id=:tid)'), {'tid': active.id})
+                adv_sess.execute(_sql_text('DELETE FROM player_statistics WHERE tournament_id=:tid'), {'tid': active.id})
+                adv_sess.execute(_sql_text('DELETE FROM matches WHERE tournament_id=:tid'), {'tid': active.id})
+                advanced_cleanup_done=True
+            except Exception as _adv_del_err:
+                app.logger.warning(f'advanced deep cleanup failed: {_adv_del_err}')
+        # Импорт расписания (первые 300 строк) для нового турнира если deep_mode + очистка колонок B,D (счета) до 300 строки
+        if deep_mode and not dry_run:
+            try:
+                import json as _jsonmod, os as _os, datetime as _dt
+                import gspread
+                from google.oauth2.service_account import Credentials as _Creds
+                creds_json = _os.environ.get('GOOGLE_SHEETS_CREDS_JSON','')
+                sheet_url = _os.environ.get('GOOGLE_SHEET_URL','')
+                if creds_json and sheet_url:
+                    try:
+                        creds_data = _jsonmod.loads(creds_json)
+                        scope=['https://www.googleapis.com/auth/spreadsheets','https://www.googleapis.com/auth/drive']
+                        creds=_Creds.from_service_account_info(creds_data, scopes=scope)
+                        client=gspread.authorize(creds)
+                        sh=client.open_by_url(sheet_url)
+                        target_ws=None
+                        for ws in sh.worksheets():
+                            ttl=ws.title.lower()
+                            if 'расписание' in ttl or 'schedule' in ttl:
+                                target_ws=ws; break
+                        if target_ws:
+                            # Очистка колонок B и D (до 300 строки) — предполагаем что там счета/разделитель
+                            try:
+                                # gspread batch_clear требует A1 диапазоны
+                                target_ws.batch_clear(["B2:B300","D2:D300"])
+                            except Exception as _clr_err:
+                                schedule_errors.append(f'clear_fail:{_clr_err}'[:120])
+                            values = target_ws.get_all_values()[:301]  # включая header (0..300)
+                            # Assume header row present -> parse rows after header
+                            header = values[0] if values else []
+                            # Heuristics: columns: [Дата, Дома, Гости, Время, Место ...]
+                            for row in values[1:]:
+                                if not row or len(row) < 3:
+                                    continue
+                                date_str = (row[0] or '').strip()
+                                home_team = (row[1] or '').strip()
+                                away_team = (row[2] or '').strip()
+                                time_str = (row[3] or '').strip() if len(row) > 3 else ''
+                                venue = (row[4] or '').strip() if len(row) > 4 else ''
+                                if not (date_str and home_team and away_team):
+                                    continue
+                                # parse date/time
+                                match_dt=None
+                                for fmt in ("%d.%m.%Y %H:%M","%d.%m.%Y","%Y-%m-%d %H:%M","%Y-%m-%d"):
+                                    try:
+                                        if time_str and '%H:%M' in fmt:
+                                            match_dt=_dt.datetime.strptime(f"{date_str} {time_str}", fmt)
+                                        else:
+                                            match_dt=_dt.datetime.strptime(date_str, fmt)
+                                        break
+                                    except ValueError:
+                                        continue
+                                if not match_dt:
+                                    schedule_errors.append(f'bad_date:{date_str}')
+                                    continue
+                                # ensure teams
+                                from database.database_models import Team, Match as AdvMatch
+                                home = adv_sess.query(Team).filter(Team.name==home_team).first()
+                                if not home:
+                                    home=Team(name=home_team,is_active=True)
+                                    adv_sess.add(home); adv_sess.flush()
+                                away = adv_sess.query(Team).filter(Team.name==away_team).first()
+                                if not away:
+                                    away=Team(name=away_team,is_active=True)
+                                    adv_sess.add(away); adv_sess.flush()
+                                exists = adv_sess.query(AdvMatch).filter(AdvMatch.tournament_id==new_tournament.id,AdvMatch.home_team_id==home.id,AdvMatch.away_team_id==away.id,AdvMatch.match_date==match_dt).first()
+                                if exists:
+                                    continue
+                                adv_sess.add(AdvMatch(tournament_id=new_tournament.id,home_team_id=home.id,away_team_id=away.id,match_date=match_dt,venue=venue,status='scheduled'))
+                                schedule_imported+=1
+                        else:
+                            schedule_errors.append('worksheet_not_found')
+                    except Exception as _sched_err:
+                        schedule_errors.append(str(_sched_err)[:200])
+                else:
+                    schedule_errors.append('creds_or_url_missing')
+            except Exception as _outer_sched_err:
+                schedule_errors.append(f'outer:{_outer_sched_err}')
         audit_id=None
         try:
             res = adv_sess.execute(_sql_text("""
@@ -7796,7 +7929,45 @@ def api_admin_season_rollover_inline():
                 except Exception: pass
         except Exception as _c_err:
             app.logger.warning(f'cache invalidate failed season rollover: {_c_err}')
-        return jsonify({'ok':True,'previous_season': prev_season,'new_season': new_season,'tournament_id': new_tournament.id,'soft_mode': soft_mode,'legacy_cleanup_done': (not soft_mode) and legacy_cleanup_done,'pre_hash': pre_summary.get('_hash'),'post_hash': post_summary.get('_hash')})
+        # Фоновый прогрев кэшей (best-effort) чтобы UI не увидел пустоту после инвалидции
+        try:
+            from threading import Thread
+            def _warm():
+                try:
+                    with app.app_context():
+                        # Поддерживаемые refresh endpoints если существуют
+                        import requests, os as _os
+                        base = _os.environ.get('SELF_BASE_URL') or ''  # можно задать для продакшена
+                        # Локально может не работать без полного URL — поэтому fallback пропускаем
+                        endpoints = [
+                            '/api/league-table','/api/stats-table','/api/schedule','/api/results','/api/betting/tours'
+                        ]
+                        for ep in endpoints:
+                            try:
+                                if base:
+                                    requests.get(base+ep, timeout=3)
+                            except Exception:
+                                pass
+                except Exception as _werr:
+                    app.logger.warning(f'cache warm failed: {_werr}')
+            Thread(target=_warm, daemon=True).start()
+        except Exception as _tw:  # не критично
+            app.logger.warning(f'failed to dispatch warm thread: {_tw}')
+        return jsonify({
+            'ok':True,
+            'previous_season': prev_season,
+            'new_season': new_season,
+            'tournament_id': new_tournament.id,
+            'soft_mode': soft_mode,
+            'deep_mode': deep_mode,
+            'legacy_cleanup_done': (not soft_mode) and legacy_cleanup_done,
+            'advanced_cleanup_done': advanced_cleanup_done,
+            'schedule_imported_matches': schedule_imported,
+            'schedule_errors': schedule_errors,
+            'pre_hash': pre_summary.get('_hash'),
+            'post_hash': post_summary.get('_hash'),
+            'cache_warm_dispatched': True
+        })
     except Exception as e:
         app.logger.error(f'Season rollover error (inline): {e}')
         return jsonify({'error':'season rollover failed'}), 500

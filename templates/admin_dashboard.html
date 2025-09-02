@@ -235,10 +235,13 @@
                     <h3>Сезон</h3>
                     <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
                         <button id="admin-season-dry" class="action-btn" style="background:#555;">План сброса (dry)</button>
-                        <button id="admin-season-soft" class="action-btn" style="background:#6a5acd;">Мягкий старт нового сезона</button>
-                        <button id="admin-season-roll" class="action-btn danger" style="background:#b22222;">Полный сброс сезона</button>
+                        <button id="admin-season-soft" class="action-btn" style="background:#6a5acd;">Мягкий старт</button>
+                        <button id="admin-season-roll" class="action-btn danger" style="background:#b22222;">Полный сброс</button>
+                        <label style="display:flex; align-items:center; gap:4px; font-size:12px; background:#222; padding:4px 8px; border-radius:6px;">
+                            <input type="checkbox" id="season-rollover-deep"> deep
+                        </label>
                     </div>
-                    <p class="help-text">Dry: без изменений, показывает план. Мягкий: не очищает legacy статистику матчей. Полный: очищает legacy таблицы матчей и агрегатов.</p>
+                    <p class="help-text">Dry: только план. Мягкий: без очистки legacy и матчей. Полный: чистит legacy. Deep + Полный: ДОПОЛНИТЕЛЬНО удаляет матчи прошлого турнира (adv) + импортирует новое расписание (до 300 строк).</p>
                     <pre id="season-rollover-log" style="max-height:160px; overflow:auto; font-size:12px; background:#111; padding:8px; border:1px solid #333; border-radius:6px; display:none;"></pre>
                 </div>
             </div>

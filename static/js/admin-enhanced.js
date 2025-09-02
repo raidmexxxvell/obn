@@ -404,6 +404,13 @@
     const initData = window.Telegram?.WebApp?.initData || '';
     let url='/api/admin/season/rollover';
     if(mode==='dry') url+='?dry=1'; else if(mode==='soft') url+='?soft=1';
+    else if(mode==='full') {
+      // Проверяем чекбокс deep
+      const deepCb = document.getElementById('season-rollover-deep');
+      if(deepCb && deepCb.checked){
+        url += (url.includes('?')?'&':'?')+'deep=1';
+      }
+    }
     const logEl=document.getElementById('season-rollover-log');
     if(logEl){ logEl.style.display='block'; logEl.textContent='Выполняю '+mode+'...'; }
     const fd=new FormData(); fd.append('initData', initData);
