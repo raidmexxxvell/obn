@@ -4507,6 +4507,23 @@ def parse_and_verify_telegram_init_data(init_data: str, max_age_seconds: int = 2
         return None
 
     if not init_data:
+        # Fallback: эмуляция admin пользователя по cookie (для браузерного входа без Telegram)
+        try:
+            from flask import request as _rq
+            cookie_token = _rq.cookies.get('admin_auth')
+            admin_id = os.environ.get('ADMIN_USER_ID','')
+            admin_pass = os.environ.get('ADMIN_PASSWORD','')
+            if cookie_token and admin_id and admin_pass:
+                expected = hmac.new(admin_pass.encode('utf-8'), admin_id.encode('utf-8'), hashlib.sha256).hexdigest()
+                if hmac.compare_digest(cookie_token, expected):
+                    # Возвращаем псевдо auth структуру
+                    return {
+                        'user': {'id': int(admin_id) if admin_id.isdigit() else admin_id, 'first_name': 'Admin', 'username': 'admin', 'auth_via': 'cookie'},
+                        'auth_date': int(time.time()),
+                        'raw': ''
+                    }
+        except Exception:
+            pass
         return None
 
     parsed = parse_qs(init_data)
@@ -7561,11 +7578,10 @@ def api_match_comments_add():
 
 @app.route('/admin')
 @app.route('/admin/')
-@require_telegram_auth()  # сначала Telegram auth чтобы заполнить g.user
-@require_admin()          # затем проверка, что это именно админ
-@rate_limit(max_requests=10, time_window=300)  # 10 запросов за 5 минут для админки
+@require_admin()          # теперь сам декоратор умеет принимать Telegram или cookie
+@rate_limit(max_requests=10, time_window=300)
 def admin_dashboard():
-    """Админ панель для управления БД"""
+    """Админ панель управления (cookie+Telegram)."""
     return render_template('admin_dashboard.html')
 
 @app.route('/admin/login', methods=['GET','POST'])
@@ -7579,12 +7595,13 @@ def admin_login_page():
                 'button{width:100%;padding:10px;background:#2563eb;color:#fff;border:0;border-radius:6px;font-weight:600;cursor:pointer}'
                 'button:hover{background:#1d4ed8}'
                 '.msg{margin-top:8px;font-size:12px;opacity:.85}'
-                '</style></head><body><form class="box" method="POST">'
+                'a{color:#93c5fd;text-decoration:none}a:hover{text-decoration:underline}'
+                '</style></head><body><form class="box" method="POST" autocomplete="off">'
                 '<h2 style="margin:0 0 12px">Admin Login</h2>'
                 '<input type="text" name="user" placeholder="Admin ID (Telegram)" required>'
                 '<input type="password" name="password" placeholder="Admin Password" required>'
                 '<button type="submit">Войти</button>'
-                '<div class="msg">Используйте Telegram WebApp для полной функциональности.</div>'
+                '<div class="msg">После входа откроется <a href="/admin">/admin</a>. <br>Используйте Telegram WebApp для автоматического входа.</div>'
                 '</form></body></html>')
     # POST
     user = (request.form.get('user') or '').strip()
@@ -7599,6 +7616,13 @@ def admin_login_page():
     token = hmac.new(admin_pass.encode('utf-8'), admin_id.encode('utf-8'), hashlib.sha256).hexdigest()
     resp = flask.make_response(flask.redirect('/admin'))
     resp.set_cookie('admin_auth', token, httponly=True, secure=False, samesite='Lax', max_age=3600*6)
+    return resp
+
+@app.route('/admin/logout')
+def admin_logout():
+    resp = flask.make_response(flask.redirect('/admin/login'))
+    # сбрасываем cookie
+    resp.delete_cookie('admin_auth')
     return resp
 
 @app.route('/test-themes')

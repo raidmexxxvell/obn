@@ -14,18 +14,38 @@ def init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_
                      MatchFlags, _snapshot_set, _build_betting_tours_payload, _settle_open_bets):
     """Initialize admin routes with dependencies"""
 
+    def _is_admin_request():
+        """Проверка: либо валидный Telegram initData, либо cookie admin_auth."""
+        admin_id_env = os.environ.get('ADMIN_USER_ID','')
+        if not admin_id_env:
+            return False
+        # Telegram
+        try:
+            parsed = parse_and_verify_telegram_init_data(request.form.get('initData','') or request.args.get('initData',''))
+            if parsed and parsed.get('user') and str(parsed['user'].get('id')) == admin_id_env:
+                return True
+        except Exception:
+            pass
+        # Cookie
+        try:
+            cookie_token = request.cookies.get('admin_auth')
+            admin_pass = os.environ.get('ADMIN_PASSWORD','')
+            if cookie_token and admin_pass:
+                expected = hashlib.sha256()
+                import hmac as _hmac
+                expected_val = _hmac.new(admin_pass.encode('utf-8'), admin_id_env.encode('utf-8'), hashlib.sha256).hexdigest()
+                if _hmac.compare_digest(cookie_token, expected_val):
+                    return True
+        except Exception:
+            pass
+        return False
+
     @admin_bp.route('/match/status/set', methods=['POST'])
     def api_match_status_set():
         """Установка статуса матча админом: scheduled|live|finished"""
         try:
-            parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
-            if not parsed or not parsed.get('user'):
+            if not _is_admin_request():
                 return jsonify({'error': 'Недействительные данные'}), 401
-
-            user_id = str(parsed['user'].get('id'))
-            admin_id = os.environ.get('ADMIN_USER_ID', '')
-            if not admin_id or user_id != admin_id:
-                return jsonify({'error': 'forbidden'}), 403
 
             home = (request.form.get('home') or '').strip()
             away = (request.form.get('away') or '').strip()
@@ -131,13 +151,9 @@ def init_admin_routes(app, get_db, SessionLocal, parse_and_verify_telegram_init_
           ?soft=1 — не очищать legacy таблицы, только переключить сезон
         Аудит пишется в season_rollovers."""
         try:
-            parsed = parse_and_verify_telegram_init_data(request.form.get('initData', ''))
-            if not parsed or not parsed.get('user'):
+            if not _is_admin_request():
                 return jsonify({'error': 'Недействительные данные'}), 401
-            user_id = str(parsed['user'].get('id'))
-            admin_id = os.environ.get('ADMIN_USER_ID', '')
-            if not admin_id or user_id != admin_id:
-                return jsonify({'error': 'forbidden'}), 403
+            admin_id = os.environ.get('ADMIN_USER_ID','')
 
             # Работаем с расширенной схемой (tournaments)
             try:
