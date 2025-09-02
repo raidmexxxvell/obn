@@ -5,6 +5,7 @@ Security, performance, and utility decorators
 import functools
 import time
 import os
+import hmac, hashlib
 from datetime import datetime, timezone
 from flask import request, jsonify, g
 from typing import Callable, Any, Dict, Optional
@@ -93,19 +94,28 @@ def require_admin():
     def decorator(f: Callable) -> Callable:
         @functools.wraps(f)
         def decorated_function(*args, **kwargs):
-            # Check if user is authenticated
-            if not hasattr(g, 'user') or not g.user:
-                return jsonify({'error': 'Authentication required'}), 401
-            
-            # Check admin status
-            user_id = str(g.user.get('id', ''))
-            admin_id = os.environ.get('ADMIN_USER_ID', '')
-            
-            if not admin_id or user_id != admin_id:
-                return jsonify({'error': 'Admin access required'}), 403
-            
-            return f(*args, **kwargs)
-        
+            admin_id_env = os.environ.get('ADMIN_USER_ID', '')
+            # 1. Telegram (g.user уже установлен require_telegram_auth)
+            if hasattr(g, 'user') and g.user:
+                user_id = str(g.user.get('id', ''))
+                if admin_id_env and user_id == admin_id_env:
+                    return f(*args, **kwargs)
+            # 2. Cookie fallback (парольная авторизация вне Telegram)
+            try:
+                cookie_token = request.cookies.get('admin_auth')
+                admin_pass = os.environ.get('ADMIN_PASSWORD', '')
+                if cookie_token and admin_pass and admin_id_env:
+                    expected = hmac.new(admin_pass.encode('utf-8'), admin_id_env.encode('utf-8'), hashlib.sha256).hexdigest()
+                    if hmac.compare_digest(cookie_token, expected):
+                        # Синтетический g.user для совместимости
+                        g.user = {'id': admin_id_env, 'first_name': 'Admin', 'username': 'admin'}
+                        return f(*args, **kwargs)
+            except Exception:
+                pass
+            # 3. Нет доступа
+            if not admin_id_env:
+                return jsonify({'error': 'Admin not configured'}), 500
+            return jsonify({'error': 'Authentication required'}), 401
         return decorated_function
     return decorator
 
