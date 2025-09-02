@@ -7561,11 +7561,45 @@ def api_match_comments_add():
 
 @app.route('/admin')
 @app.route('/admin/')
-@require_admin()
+@require_telegram_auth()  # сначала Telegram auth чтобы заполнить g.user
+@require_admin()          # затем проверка, что это именно админ
 @rate_limit(max_requests=10, time_window=300)  # 10 запросов за 5 минут для админки
 def admin_dashboard():
     """Админ панель для управления БД"""
     return render_template('admin_dashboard.html')
+
+@app.route('/admin/login', methods=['GET','POST'])
+def admin_login_page():
+    if request.method == 'GET':
+        # Простой HTML без внешних зависимостей
+        return ('<!doctype html><html><head><meta charset="utf-8"><title>Admin Login</title>'
+                '<style>body{font-family:system-ui;background:#0f1720;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}'
+                '.box{background:#111c28;padding:24px;border-radius:12px;min-width:320px;border:1px solid #243446}'
+                'input{width:100%;padding:10px;margin:8px 0;border:1px solid #33475a;background:#182635;color:#fff;border-radius:6px}'
+                'button{width:100%;padding:10px;background:#2563eb;color:#fff;border:0;border-radius:6px;font-weight:600;cursor:pointer}'
+                'button:hover{background:#1d4ed8}'
+                '.msg{margin-top:8px;font-size:12px;opacity:.85}'
+                '</style></head><body><form class="box" method="POST">'
+                '<h2 style="margin:0 0 12px">Admin Login</h2>'
+                '<input type="text" name="user" placeholder="Admin ID (Telegram)" required>'
+                '<input type="password" name="password" placeholder="Admin Password" required>'
+                '<button type="submit">Войти</button>'
+                '<div class="msg">Используйте Telegram WebApp для полной функциональности.</div>'
+                '</form></body></html>')
+    # POST
+    user = (request.form.get('user') or '').strip()
+    password = (request.form.get('password') or '').strip()
+    admin_id = os.environ.get('ADMIN_USER_ID','')
+    admin_pass = os.environ.get('ADMIN_PASSWORD','')
+    if not admin_id or not admin_pass:
+        return 'Admin not configured', 500
+    if user != admin_id or password != admin_pass:
+        return 'Invalid credentials', 401
+    # Выдать cookie (HMAC(admin_pass, admin_id))
+    token = hmac.new(admin_pass.encode('utf-8'), admin_id.encode('utf-8'), hashlib.sha256).hexdigest()
+    resp = flask.make_response(flask.redirect('/admin'))
+    resp.set_cookie('admin_auth', token, httponly=True, secure=False, samesite='Lax', max_age=3600*6)
+    return resp
 
 @app.route('/test-themes')
 def test_themes():
