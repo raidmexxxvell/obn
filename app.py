@@ -8282,225 +8282,219 @@ def api_admin_bulk_lineups():
         app.logger.error(f"bulk-lineups error: {e}")
         return jsonify({'error': 'Ошибка при импорте составов'}), 500
 
-# Новости API
+############################
+# Новости API (перезаписано)
+############################
+
+def _get_news_session():
+    """Возвращает SQLAlchemy session для модели News.
+    1) Пробуем взять advanced db_manager (если новая архитектура активна)
+    2) Иначе fallback на legacy get_db()
+    """
+    try:
+        from database.database_models import db_manager as _adv_db  # type: ignore
+        return _adv_db.get_session()
+    except Exception:
+        return get_db()
+
+
 @app.route('/api/admin/news', methods=['GET'])
 def api_admin_news_list():
-    """Получить список новостей для админа"""
+    """Список новостей (админ)."""
     try:
         if News is None:
-            return jsonify({'error':'Модель новостей недоступна'}), 500
+            return jsonify({'error': 'Модель новостей недоступна'}), 500
         parsed = parse_and_verify_telegram_init_data(request.args.get('initData', ''))
         if not parsed or not parsed.get('user'):
             return jsonify({'error': 'Недействительные данные'}), 401
-        
         user_id = str(parsed['user'].get('id'))
         admin_id = os.environ.get('ADMIN_USER_ID', '')
         if not admin_id or user_id != admin_id:
             return jsonify({'error': 'Доступ запрещен'}), 403
-            
         if not SessionLocal:
             return jsonify({'error': 'База данных недоступна'}), 500
-            
-        db = get_db()
+
+        db = _get_news_session()
         try:
-            news = db.query(News).order_by(News.created_at.desc()).all()
-            news_list = []
-            for n in news:
-                news_list.append({
-                    'id': n.id,
-                    'title': n.title,
-                    'content': n.content,
-                    'author_id': n.author_id,
-                    'created_at': n.created_at.isoformat() if n.created_at else None,
-                    'updated_at': n.updated_at.isoformat() if n.updated_at else None
-                })
-            return jsonify({'news': news_list})
+            rows = db.query(News).order_by(News.created_at.desc()).all()
+            return jsonify({'news': [
+                {
+                    'id': r.id,
+                    'title': r.title,
+                    'content': r.content,
+                    'author_id': r.author_id,
+                    'created_at': r.created_at.isoformat() if r.created_at else None,
+                    'updated_at': r.updated_at.isoformat() if r.updated_at else None
+                } for r in rows
+            ]})
         finally:
             db.close()
     except Exception as e:
         app.logger.error(f"news list error: {e}")
         return jsonify({'error': 'Ошибка при получении новостей'}), 500
 
+
 @app.route('/api/admin/news', methods=['POST'])
 def api_admin_news_create():
-    """Создать новость"""
+    """Создать новость (админ)."""
     try:
         if News is None:
-            return jsonify({'error':'Модель новостей недоступна'}), 500
-        data = request.get_json()
-        if not data:
-            return jsonify({'error': 'Неверные данные'}), 400
-            
+            return jsonify({'error': 'Модель новостей недоступна'}), 500
+        data = request.get_json() or {}
         parsed = parse_and_verify_telegram_init_data(data.get('initData', ''))
         if not parsed or not parsed.get('user'):
             return jsonify({'error': 'Недействительные данные'}), 401
-        
         user_id = str(parsed['user'].get('id'))
         admin_id = os.environ.get('ADMIN_USER_ID', '')
         if not admin_id or user_id != admin_id:
             return jsonify({'error': 'Доступ запрещен'}), 403
-            
-        title = data.get('title', '').strip()
-        content = data.get('content', '').strip()
-        
+
+        title = (data.get('title') or '').strip()
+        content = (data.get('content') or '').strip()
         if not title or not content:
             return jsonify({'error': 'Заголовок и содержание обязательны'}), 400
-            
         if not SessionLocal:
             return jsonify({'error': 'База данных недоступна'}), 500
-            
-        db = get_db()
+
+        db = _get_news_session()
         try:
-            news = News(
-                title=title,
-                content=content,
-                author_id=int(user_id)
-            )
+            news = News(title=title, content=content, author_id=int(user_id))
             db.add(news)
             db.commit()
 
-            # Инвалидация кэша новостей (все варианты limit/offset)
+            # Инвалидация + прогрев
             try:
                 from optimizations.multilevel_cache import get_cache
                 cache = get_cache()
                 cache.invalidate_pattern('cache:news')
-                # Прогрев стандартного набора (limit=5, offset=0)
                 try:
                     latest = db.query(News).order_by(News.created_at.desc()).limit(5).all()
-                    warmed = [
-                        {'id': r.id,'title': r.title,'content': r.content,'created_at': r.created_at.isoformat() if r.created_at else None}
-                        for r in latest
+                    warm_payload = [
+                        {
+                            'id': r.id,
+                            'title': r.title,
+                            'content': r.content,
+                            'created_at': r.created_at.isoformat() if r.created_at else None
+                        } for r in latest
                     ]
-                    cache.set('news', warmed, 'limit:5:offset:0')
-                except Exception:  # прогрев не критичен
+                    cache.set('news', warm_payload, 'limit:5:offset:0')
+                except Exception:
                     pass
             except Exception as _e:
                 app.logger.warning(f"news cache invalidate (create) failed: {_e}")
-            
-            return jsonify({
-                'status': 'success',
-                'id': news.id,
-                'title': news.title,
-                'content': news.content
-            })
+
+            return jsonify({'status': 'success', 'id': news.id, 'title': news.title, 'content': news.content})
         finally:
             db.close()
     except Exception as e:
         app.logger.error(f"news create error: {e}")
         return jsonify({'error': 'Ошибка при создании новости'}), 500
 
+
 @app.route('/api/admin/news/<int:news_id>', methods=['PUT'])
 def api_admin_news_update(news_id):
-    """Обновить новость"""
+    """Обновить новость (админ)."""
     try:
         if News is None:
-            return jsonify({'error':'Модель новостей недоступна'}), 500
-        data = request.get_json()
-        if not data:
-            return jsonify({'error': 'Неверные данные'}), 400
-            
+            return jsonify({'error': 'Модель новостей недоступна'}), 500
+        data = request.get_json() or {}
         parsed = parse_and_verify_telegram_init_data(data.get('initData', ''))
         if not parsed or not parsed.get('user'):
             return jsonify({'error': 'Недействительные данные'}), 401
-        
         user_id = str(parsed['user'].get('id'))
         admin_id = os.environ.get('ADMIN_USER_ID', '')
         if not admin_id or user_id != admin_id:
             return jsonify({'error': 'Доступ запрещен'}), 403
-            
         if not SessionLocal:
             return jsonify({'error': 'База данных недоступна'}), 500
-            
-        db = get_db()
+
+        db = _get_news_session()
         try:
             news = db.query(News).filter(News.id == news_id).first()
             if not news:
                 return jsonify({'error': 'Новость не найдена'}), 404
-                
-            title = data.get('title', '').strip()
-            content = data.get('content', '').strip()
-            
+
+            title = (data.get('title') or '').strip()
+            content = (data.get('content') or '').strip()
             if title:
                 news.title = title
             if content:
                 news.content = content
             news.updated_at = datetime.now(timezone.utc)
-            
             db.commit()
 
-            # Инвалидация кэша новостей
             try:
                 from optimizations.multilevel_cache import get_cache
                 cache = get_cache()
                 cache.invalidate_pattern('cache:news')
                 try:
                     latest = db.query(News).order_by(News.created_at.desc()).limit(5).all()
-                    warmed = [
-                        {'id': r.id,'title': r.title,'content': r.content,'created_at': r.created_at.isoformat() if r.created_at else None}
-                        for r in latest
+                    warm_payload = [
+                        {
+                            'id': r.id,
+                            'title': r.title,
+                            'content': r.content,
+                            'created_at': r.created_at.isoformat() if r.created_at else None
+                        } for r in latest
                     ]
-                    cache.set('news', warmed, 'limit:5:offset:0')
+                    cache.set('news', warm_payload, 'limit:5:offset:0')
                 except Exception:
                     pass
             except Exception as _e:
                 app.logger.warning(f"news cache invalidate (update) failed: {_e}")
-            
-            return jsonify({
-                'status': 'success',
-                'id': news.id,
-                'title': news.title,
-                'content': news.content
-            })
+
+            return jsonify({'status': 'success', 'id': news.id, 'title': news.title, 'content': news.content})
         finally:
             db.close()
     except Exception as e:
         app.logger.error(f"news update error: {e}")
         return jsonify({'error': 'Ошибка при обновлении новости'}), 500
 
+
 @app.route('/api/admin/news/<int:news_id>', methods=['DELETE'])
 def api_admin_news_delete(news_id):
-    """Удалить новость"""
+    """Удалить новость (админ)."""
     try:
         if News is None:
-            return jsonify({'error':'Модель новостей недоступна'}), 500
+            return jsonify({'error': 'Модель новостей недоступна'}), 500
         parsed = parse_and_verify_telegram_init_data(request.args.get('initData', ''))
         if not parsed or not parsed.get('user'):
             return jsonify({'error': 'Недействительные данные'}), 401
-        
         user_id = str(parsed['user'].get('id'))
         admin_id = os.environ.get('ADMIN_USER_ID', '')
         if not admin_id or user_id != admin_id:
             return jsonify({'error': 'Доступ запрещен'}), 403
-            
         if not SessionLocal:
             return jsonify({'error': 'База данных недоступна'}), 500
-            
-        db = get_db()
+
+        db = _get_news_session()
         try:
             news = db.query(News).filter(News.id == news_id).first()
             if not news:
                 return jsonify({'error': 'Новость не найдена'}), 404
-                
             db.delete(news)
             db.commit()
 
-            # Инвалидация кэша новостей
             try:
                 from optimizations.multilevel_cache import get_cache
                 cache = get_cache()
                 cache.invalidate_pattern('cache:news')
                 try:
                     latest = db.query(News).order_by(News.created_at.desc()).limit(5).all()
-                    warmed = [
-                        {'id': r.id,'title': r.title,'content': r.content,'created_at': r.created_at.isoformat() if r.created_at else None}
-                        for r in latest
+                    warm_payload = [
+                        {
+                            'id': r.id,
+                            'title': r.title,
+                            'content': r.content,
+                            'created_at': r.created_at.isoformat() if r.created_at else None
+                        } for r in latest
                     ]
-                    cache.set('news', warmed, 'limit:5:offset:0')
+                    cache.set('news', warm_payload, 'limit:5:offset:0')
                 except Exception:
                     pass
             except Exception as _e:
                 app.logger.warning(f"news cache invalidate (delete) failed: {_e}")
-            
+
             return jsonify({'status': 'success'})
         finally:
             db.close()
@@ -8508,22 +8502,22 @@ def api_admin_news_delete(news_id):
         app.logger.error(f"news delete error: {e}")
         return jsonify({'error': 'Ошибка при удалении новости'}), 500
 
+
 @app.route('/api/news', methods=['GET'])
 def api_news_public():
-    """Публичный API для получения новостей"""
+    """Публичный список новостей (кэш + ETag)."""
     try:
         if News is None:
             return jsonify({'news': []})
         if not SessionLocal:
             return jsonify({'error': 'База данных недоступна'}), 500
-        # Ключ кэша зависит только от limit (offset для первых 50 не используем в кэше чтобы упростить)
         from optimizations.multilevel_cache import get_cache
         cache = get_cache()
         limit = min(int(request.args.get('limit', 5)), 50)
         offset = max(int(request.args.get('offset', 0)), 0)
 
-        def load_news():
-            db = get_db()
+        def _load():
+            db = _get_news_session()
             try:
                 q = db.query(News).order_by(News.created_at.desc())
                 if offset:
@@ -8541,12 +8535,11 @@ def api_news_public():
             finally:
                 db.close()
 
-        news_list = cache.get('news', identifier=f"limit:{limit}:offset:{offset}", loader_func=load_news) or []
-        # ETag generation
+        news_list = cache.get('news', identifier=f"limit:{limit}:offset:{offset}", loader_func=_load) or []
         try:
             import hashlib as _hl, json as _json
-            core = _json.dumps(news_list, ensure_ascii=False, sort_keys=True).encode('utf-8')
-            etag = _hl.md5(core).hexdigest()
+            _core = _json.dumps(news_list, ensure_ascii=False, sort_keys=True).encode('utf-8')
+            etag = _hl.md5(_core).hexdigest()
             inm = request.headers.get('If-None-Match')
             if inm and inm == etag:
                 resp = app.response_class(status=304)
