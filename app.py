@@ -7625,6 +7625,185 @@ def admin_logout():
     resp.delete_cookie('admin_auth')
     return resp
 
+# ---- Админ: сезонный rollover (дублируем здесь, т.к. blueprint admin не зарегистрирован) ----
+def _admin_cookie_or_telegram_ok():
+    """True если запрос от админа: либо валидный Telegram initData, либо cookie admin_auth."""
+    admin_id = os.environ.get('ADMIN_USER_ID','')
+    if not admin_id:
+        return False
+    # Telegram initData
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.form.get('initData','') or request.args.get('initData',''))
+        if parsed and parsed.get('user') and str(parsed['user'].get('id')) == admin_id:
+            return True
+    except Exception:
+        pass
+    # Cookie fallback
+    try:
+        cookie_token = request.cookies.get('admin_auth')
+        admin_pass = os.environ.get('ADMIN_PASSWORD','')
+        if cookie_token and admin_pass:
+            expected = hmac.new(admin_pass.encode('utf-8'), admin_id.encode('utf-8'), hashlib.sha256).hexdigest()
+            if hmac.compare_digest(cookie_token, expected):
+                return True
+    except Exception:
+        pass
+    return False
+
+@app.route('/api/admin/season/rollover', methods=['POST'])
+def api_admin_season_rollover_inline():
+    """Endpoint сезонного rollover (cookie или Telegram)."""
+    if not _admin_cookie_or_telegram_ok():
+        return jsonify({'error': 'Недействительные данные'}), 401
+    try:
+        # Расширенная схема
+        from database.database_models import db_manager as adv_db_manager, Tournament
+        adv_db_manager._ensure_initialized()
+    except Exception as e:
+        return jsonify({'error': f'advanced schema unavailable: {e}'}), 500
+    dry_run = request.args.get('dry') in ('1','true','yes')
+    soft_mode = request.args.get('soft') in ('1','true','yes')
+    adv_sess = adv_db_manager.get_session()
+    from sqlalchemy import text as _sql_text
+    import json as _json, hashlib as _hashlib
+    try:
+        active = (adv_sess.query(Tournament)
+                  .filter(Tournament.status=='active')
+                  .order_by(Tournament.start_date.desc().nullslast(), Tournament.created_at.desc())
+                  .first())
+        def _compute_next(season_str: str|None):
+            import re, datetime as _dt
+            if season_str:
+                m = re.match(r'^(\d{2})[-/](\d{2})$', season_str.strip())
+                if m:
+                    a=int(m.group(1)); b=int(m.group(2))
+                    return f"{(a+1)%100:02d}-{(b+1)%100:02d}"
+            now=_dt.date.today()
+            if now.month>=7:
+                a=now.year%100; b=(now.year+1)%100
+            else:
+                a=(now.year-1)%100; b=now.year%100
+            return f"{a:02d}-{b:02d}"
+        new_season = _compute_next(active.season if active else None)
+        # rate-limit (10 мин) если не dry
+        if not dry_run:
+            try:
+                last_row = adv_sess.execute(_sql_text("SELECT created_at FROM season_rollovers ORDER BY created_at DESC LIMIT 1")).fetchone()
+                if last_row:
+                    from datetime import datetime as _dtm, timezone as _tz
+                    delta = (_dtm.now(_tz.utc) - last_row[0]).total_seconds()
+                    if delta < 600:
+                        return jsonify({'error':'rate_limited','retry_after_seconds': int(600-delta)}), 429
+            except Exception as _rl_err:
+                app.logger.warning(f"season rollover rate-limit check failed: {_rl_err}")
+        def _collect_summary():
+            summary={}
+            try:
+                t_total = adv_sess.execute(_sql_text('SELECT COUNT(*) FROM tournaments')).scalar() or 0
+                t_active = adv_sess.execute(_sql_text("SELECT COUNT(*) FROM tournaments WHERE status='active'" )).scalar() or 0
+                last_season_row = adv_sess.execute(_sql_text('SELECT season FROM tournaments ORDER BY created_at DESC LIMIT 1')).fetchone()
+                summary['tournaments_total']=t_total
+                summary['tournaments_active']=t_active
+                summary['last_season']= last_season_row[0] if last_season_row else None
+                ps_rows = adv_sess.execute(_sql_text('SELECT COUNT(*) FROM player_statistics')).scalar() or 0
+                summary['player_statistics_rows']=ps_rows
+            except Exception as _e:
+                summary['error_tournaments']=str(_e)
+            legacy_counts={}
+            legacy_db_local = get_db()
+            try:
+                for tbl in ['team_player_stats','match_scores','match_player_events','match_lineups','match_stats','match_flags']:
+                    try:
+                        cnt = legacy_db_local.execute(_sql_text(f'SELECT COUNT(*) FROM {tbl}')).scalar() or 0
+                        legacy_counts[tbl]=cnt
+                    except Exception as _tbl_e:
+                        legacy_counts[tbl]=f'err:{_tbl_e}'
+            finally:
+                try: legacy_db_local.close()
+                except Exception: pass
+            summary['legacy']=legacy_counts
+            try:
+                summary['_hash'] = _hashlib.sha256(_json.dumps(summary, sort_keys=True).encode()).hexdigest()
+            except Exception:
+                summary['_hash']=None
+            return summary
+        pre_summary=_collect_summary()
+        if dry_run:
+            return jsonify({'ok':True,'dry_run':True,'would_complete': active.season if active else None,'would_create': new_season,'soft_mode': soft_mode,'legacy_cleanup': [] if soft_mode else ['team_player_stats','match_scores','match_player_events','match_lineups','match_stats','match_flags'],'pre_hash': pre_summary.get('_hash'),'pre_summary': pre_summary})
+        prev_id = active.id if active else None
+        prev_season = active.season if active else None
+        from datetime import date as _date
+        if active:
+            active.status='completed'; active.end_date=_date.today()
+        new_tournament = Tournament(name=f"Лига Обнинска {new_season}",season=new_season,status='active',start_date=_date.today(),description=f"Сезон {new_season}")
+        adv_sess.add(new_tournament)
+        adv_sess.flush()
+        # ensure audit table
+        try:
+            adv_sess.execute(_sql_text("""
+                CREATE TABLE IF NOT EXISTS season_rollovers (
+                    id SERIAL PRIMARY KEY,
+                    prev_tournament_id INT NULL,
+                    prev_season TEXT NULL,
+                    new_tournament_id INT NOT NULL,
+                    new_season TEXT NOT NULL,
+                    soft_mode BOOLEAN NOT NULL DEFAULT FALSE,
+                    legacy_cleanup_done BOOLEAN NOT NULL DEFAULT FALSE,
+                    pre_hash TEXT NULL,
+                    post_hash TEXT NULL,
+                    pre_meta TEXT NULL,
+                    post_meta TEXT NULL,
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                )"""))
+            for col in ['pre_hash TEXT','post_hash TEXT','pre_meta TEXT','post_meta TEXT']:
+                try: adv_sess.execute(_sql_text(f'ALTER TABLE season_rollovers ADD COLUMN IF NOT EXISTS {col}'))
+                except Exception: pass
+        except Exception as _crt_err:
+            app.logger.warning(f'season_rollovers create/alter failed: {_crt_err}')
+        legacy_cleanup_done=False
+        if not soft_mode:
+            legacy_db = get_db()
+            try:
+                for tbl in ['team_player_stats','match_scores','match_player_events','match_lineups','match_stats','match_flags']:
+                    try: legacy_db.execute(_sql_text(f'DELETE FROM {tbl}'))
+                    except Exception as tbl_err: app.logger.warning(f'Failed to clear {tbl}: {tbl_err}')
+                legacy_db.commit(); legacy_cleanup_done=True
+            finally:
+                try: legacy_db.close()
+                except Exception: pass
+        audit_id=None
+        try:
+            res = adv_sess.execute(_sql_text("""
+                INSERT INTO season_rollovers (prev_tournament_id, prev_season, new_tournament_id, new_season, soft_mode, legacy_cleanup_done, pre_hash, pre_meta)
+                VALUES (:pid,:ps,:nid,:ns,:soft,:lcd,:ph,:pm) RETURNING id
+            """), {'pid': prev_id,'ps': prev_season,'nid': new_tournament.id,'ns': new_season,'soft': soft_mode,'lcd': legacy_cleanup_done,'ph': pre_summary.get('_hash'),'pm': _json.dumps(pre_summary, ensure_ascii=False)})
+            row = res.fetchone(); audit_id = row and row[0]
+        except Exception as _ins_err:
+            app.logger.warning(f'season_rollovers audit insert failed: {_ins_err}')
+        post_summary=_collect_summary()
+        try:
+            if audit_id is not None:
+                adv_sess.execute(_sql_text('UPDATE season_rollovers SET post_hash=:h, post_meta=:pm WHERE id=:id'), {'h': post_summary.get('_hash'),'pm': _json.dumps(post_summary, ensure_ascii=False),'id': audit_id})
+        except Exception as _upd_err:
+            app.logger.warning(f'season_rollovers audit post update failed: {_upd_err}')
+        adv_sess.commit()
+        # инвалидация кэшей
+        try:
+            from optimizations.multilevel_cache import get_cache as _gc
+            cache=_gc();
+            for key in ('league_table','stats_table','results','schedule','tours','betting-tours'):
+                try: cache.invalidate(key)
+                except Exception: pass
+        except Exception as _c_err:
+            app.logger.warning(f'cache invalidate failed season rollover: {_c_err}')
+        return jsonify({'ok':True,'previous_season': prev_season,'new_season': new_season,'tournament_id': new_tournament.id,'soft_mode': soft_mode,'legacy_cleanup_done': (not soft_mode) and legacy_cleanup_done,'pre_hash': pre_summary.get('_hash'),'post_hash': post_summary.get('_hash')})
+    except Exception as e:
+        app.logger.error(f'Season rollover error (inline): {e}')
+        return jsonify({'error':'season rollover failed'}), 500
+    finally:
+        try: adv_sess.close()
+        except Exception: pass
+
 @app.route('/test-themes')
 def test_themes():
     """Тестирование цветовых схем"""
