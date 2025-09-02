@@ -94,6 +94,20 @@
     if (statsRefreshBtn) {
       statsRefreshBtn.addEventListener('click', loadStats);
     }
+
+  // Season rollover buttons
+  const btnDry = document.getElementById('admin-season-dry');
+  const btnSoft = document.getElementById('admin-season-soft');
+  const btnRoll = document.getElementById('admin-season-roll');
+  if (btnDry) btnDry.onclick = ()=> seasonRollover('dry');
+  if (btnSoft) btnSoft.onclick = ()=> seasonRollover('soft');
+    if (btnRoll) btnRoll.onclick = ()=> {
+      const first = confirm('Полный сброс сезона? Это удалит legacy статистику матчей. Продолжить?');
+      if(!first) return;
+      const phrase = prompt('Введите СБРОС для подтверждения:');
+      if(phrase !== 'СБРОС') { alert('Отменено'); return; }
+      seasonRollover('full');
+    };
   }
 
   // Match management functions
@@ -384,6 +398,20 @@
     
     // For now, show placeholder
     container.innerHTML = '<div class="status-text">Статистика в разработке</div>';
+  }
+
+  function seasonRollover(mode){
+    const initData = window.Telegram?.WebApp?.initData || '';
+    let url='/api/admin/season/rollover';
+    if(mode==='dry') url+='?dry=1'; else if(mode==='soft') url+='?soft=1';
+    const logEl=document.getElementById('season-rollover-log');
+    if(logEl){ logEl.style.display='block'; logEl.textContent='Выполняю '+mode+'...'; }
+    const fd=new FormData(); fd.append('initData', initData);
+    fetch(url,{ method:'POST', body:fd }).then(r=>r.json().then(d=>({ok:r.ok, d}))).then(res=>{
+      if(!res.ok || res.d.error){ throw new Error(res.d.error||'Ошибка'); }
+      if(logEl){ logEl.textContent=JSON.stringify(res.d,null,2); }
+      if(!res.d.dry_run){ alert('Новый сезон: '+res.d.new_season); }
+    }).catch(e=>{ if(logEl){ logEl.textContent='Ошибка: '+e.message; } alert('Ошибка: '+e.message); });
   }
 
   // News management functions
