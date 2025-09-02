@@ -8287,6 +8287,8 @@ def api_admin_bulk_lineups():
 def api_admin_news_list():
     """Получить список новостей для админа"""
     try:
+        if News is None:
+            return jsonify({'error':'Модель новостей недоступна'}), 500
         parsed = parse_and_verify_telegram_init_data(request.args.get('initData', ''))
         if not parsed or not parsed.get('user'):
             return jsonify({'error': 'Недействительные данные'}), 401
@@ -8323,6 +8325,8 @@ def api_admin_news_list():
 def api_admin_news_create():
     """Создать новость"""
     try:
+        if News is None:
+            return jsonify({'error':'Модель новостей недоступна'}), 500
         data = request.get_json()
         if not data:
             return jsonify({'error': 'Неверные данные'}), 400
@@ -8360,6 +8364,16 @@ def api_admin_news_create():
                 from optimizations.multilevel_cache import get_cache
                 cache = get_cache()
                 cache.invalidate_pattern('cache:news')
+                # Прогрев стандартного набора (limit=5, offset=0)
+                try:
+                    latest = db.query(News).order_by(News.created_at.desc()).limit(5).all()
+                    warmed = [
+                        {'id': r.id,'title': r.title,'content': r.content,'created_at': r.created_at.isoformat() if r.created_at else None}
+                        for r in latest
+                    ]
+                    cache.set('news', warmed, 'limit:5:offset:0')
+                except Exception:  # прогрев не критичен
+                    pass
             except Exception as _e:
                 app.logger.warning(f"news cache invalidate (create) failed: {_e}")
             
@@ -8379,6 +8393,8 @@ def api_admin_news_create():
 def api_admin_news_update(news_id):
     """Обновить новость"""
     try:
+        if News is None:
+            return jsonify({'error':'Модель новостей недоступна'}), 500
         data = request.get_json()
         if not data:
             return jsonify({'error': 'Неверные данные'}), 400
@@ -8417,6 +8433,15 @@ def api_admin_news_update(news_id):
                 from optimizations.multilevel_cache import get_cache
                 cache = get_cache()
                 cache.invalidate_pattern('cache:news')
+                try:
+                    latest = db.query(News).order_by(News.created_at.desc()).limit(5).all()
+                    warmed = [
+                        {'id': r.id,'title': r.title,'content': r.content,'created_at': r.created_at.isoformat() if r.created_at else None}
+                        for r in latest
+                    ]
+                    cache.set('news', warmed, 'limit:5:offset:0')
+                except Exception:
+                    pass
             except Exception as _e:
                 app.logger.warning(f"news cache invalidate (update) failed: {_e}")
             
@@ -8436,6 +8461,8 @@ def api_admin_news_update(news_id):
 def api_admin_news_delete(news_id):
     """Удалить новость"""
     try:
+        if News is None:
+            return jsonify({'error':'Модель новостей недоступна'}), 500
         parsed = parse_and_verify_telegram_init_data(request.args.get('initData', ''))
         if not parsed or not parsed.get('user'):
             return jsonify({'error': 'Недействительные данные'}), 401
@@ -8462,6 +8489,15 @@ def api_admin_news_delete(news_id):
                 from optimizations.multilevel_cache import get_cache
                 cache = get_cache()
                 cache.invalidate_pattern('cache:news')
+                try:
+                    latest = db.query(News).order_by(News.created_at.desc()).limit(5).all()
+                    warmed = [
+                        {'id': r.id,'title': r.title,'content': r.content,'created_at': r.created_at.isoformat() if r.created_at else None}
+                        for r in latest
+                    ]
+                    cache.set('news', warmed, 'limit:5:offset:0')
+                except Exception:
+                    pass
             except Exception as _e:
                 app.logger.warning(f"news cache invalidate (delete) failed: {_e}")
             
@@ -8476,6 +8512,8 @@ def api_admin_news_delete(news_id):
 def api_news_public():
     """Публичный API для получения новостей"""
     try:
+        if News is None:
+            return jsonify({'news': []})
         if not SessionLocal:
             return jsonify({'error': 'База данных недоступна'}), 500
         # Ключ кэша зависит только от limit (offset для первых 50 не используем в кэше чтобы упростить)
@@ -8503,8 +8541,24 @@ def api_news_public():
             finally:
                 db.close()
 
-        news_list = cache.get('news', identifier=f"limit:{limit}:offset:{offset}", loader_func=load_news)
-        return jsonify({'news': news_list or []})
+        news_list = cache.get('news', identifier=f"limit:{limit}:offset:{offset}", loader_func=load_news) or []
+        # ETag generation
+        try:
+            import hashlib as _hl, json as _json
+            core = _json.dumps(news_list, ensure_ascii=False, sort_keys=True).encode('utf-8')
+            etag = _hl.md5(core).hexdigest()
+            inm = request.headers.get('If-None-Match')
+            if inm and inm == etag:
+                resp = app.response_class(status=304)
+                resp.headers['ETag'] = etag
+                resp.headers['Cache-Control'] = 'public, max-age=120, stale-while-revalidate=60'
+                return resp
+            resp = jsonify({'news': news_list, 'version': etag})
+            resp.headers['ETag'] = etag
+            resp.headers['Cache-Control'] = 'public, max-age=120, stale-while-revalidate=60'
+            return resp
+        except Exception:
+            return jsonify({'news': news_list})
     except Exception as e:
         app.logger.error(f"public news error: {e}")
         return jsonify({'error': 'Ошибка при получении новостей'}), 500
