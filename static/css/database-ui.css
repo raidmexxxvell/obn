@@ -273,6 +273,55 @@
     background: var(--primary-dark);
 }
 
+/* Bulk Lineup Input */
+.bulk-lineup-input {
+    width: 100%;
+    min-height: 120px;
+    padding: 12px;
+    border: 2px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--input-bg, var(--bg));
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 14px;
+    resize: vertical;
+    margin-bottom: 12px;
+    transition: border-color 0.2s ease;
+}
+
+.bulk-lineup-input:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
+.bulk-lineup-input::placeholder {
+    color: var(--text-secondary);
+    opacity: 0.7;
+}
+
+.update-lineup-btn {
+    background: var(--primary);
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    width: 100%;
+    transition: all 0.2s ease;
+    margin-top: 8px;
+}
+
+.update-lineup-btn:hover {
+    background: var(--primary-dark);
+    transform: translateY(-1px);
+}
+
+.update-lineup-btn:active {
+    transform: translateY(0);
+}
+
 /* Action Buttons */
 .action-btn {
     background: var(--primary);

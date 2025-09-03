@@ -4,7 +4,7 @@
   
   // Global variables for lineup management
   let currentMatchId = null;
-  let currentLineups = { home: { main: [], sub: [] }, away: { main: [], sub: [] } };
+  let currentLineups = { home: { main: [] }, away: { main: [] } };
 
   // Initialize admin dashboard
   function initAdminDashboard() {
@@ -239,24 +239,23 @@
     console.log('[Admin] Rendering lineups:', currentLineups);
     
     ['home', 'away'].forEach(team => {
-      ['main', 'sub'].forEach(type => {
-        const container = document.getElementById(`${team}-${type}-lineup`);
-        if (!container) return;
-        
-        container.innerHTML = '';
-        
-        currentLineups[team][type].forEach((player, index) => {
-          const playerEl = document.createElement('div');
-          playerEl.className = 'player-item';
-          playerEl.innerHTML = `
-            <div class="player-info">
-              <span class="player-name">${player.name}</span>
-              <span class="player-details">#${player.number || '-'} • ${player.position || 'N/A'}</span>
-            </div>
-            <button class="remove-player" onclick="window.AdminEnhanced.removePlayer('${team}', '${type}', ${index})">×</button>
-          `;
-          container.appendChild(playerEl);
-        });
+      // Рендерим только основной состав (main)
+      const container = document.getElementById(`${team}-main-lineup`);
+      if (!container) return;
+      
+      container.innerHTML = '';
+      
+      currentLineups[team].main.forEach((player, index) => {
+        const playerEl = document.createElement('div');
+        playerEl.className = 'player-item';
+        playerEl.innerHTML = `
+          <div class="player-info">
+            <span class="player-name">${player.name}</span>
+            <span class="player-details">#${player.number || '-'}</span>
+          </div>
+          <button class="remove-player" onclick="window.AdminEnhanced.removePlayer('${team}', 'main', ${index})">×</button>
+        `;
+        container.appendChild(playerEl);
       });
     });
   }
@@ -278,6 +277,43 @@
     renderLineups();
   }
 
+  function updateTeamLineup(team) {
+    const inputId = `${team}-main-lineup-input`;
+    const textarea = document.getElementById(inputId);
+    if (!textarea) return;
+    
+    const lines = textarea.value
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0);
+    
+    if (lines.length === 0) {
+      alert('Введите список игроков');
+      return;
+    }
+    
+    // Очищаем текущий состав
+    currentLineups[team].main = [];
+    
+    // Добавляем новых игроков
+    lines.forEach((name, index) => {
+      const player = {
+        name: name,
+        number: index + 1, // Автоматическая нумерация
+        position: null
+      };
+      currentLineups[team].main.push(player);
+    });
+    
+    // Очищаем textarea
+    textarea.value = '';
+    
+    // Обновляем отображение
+    renderLineups();
+    
+    console.log(`[Admin] Updated ${team} lineup:`, currentLineups[team].main);
+  }
+
   function removePlayer(team, type, index) {
     currentLineups[team][type].splice(index, 1);
     renderLineups();
@@ -286,7 +322,13 @@
   function saveLineups() {
     if (!currentMatchId) return;
     
-    console.log('[Admin] Saving lineups:', currentLineups);
+    // Готовим данные только с основными составами
+    const lineupsToSave = {
+      home: { main: currentLineups.home.main, sub: [] },
+      away: { main: currentLineups.away.main, sub: [] }
+    };
+    
+    console.log('[Admin] Saving lineups:', lineupsToSave);
     
     const btn = document.getElementById('save-lineups-btn');
     btn.disabled = true;
@@ -294,7 +336,7 @@
     
     const fd = new FormData();
     fd.append('initData', window.Telegram?.WebApp?.initData || '');
-    fd.append('lineups', JSON.stringify(currentLineups));
+    fd.append('lineups', JSON.stringify(lineupsToSave));
     
     fetch(`/api/admin/match/${currentMatchId}/lineups/save`, {
       method: 'POST',
@@ -623,6 +665,7 @@
     openMatchModal,
     closeMatchModal,
     addPlayerToLineup,
+    updateTeamLineup,
     removePlayer,
     openPlayerModal,
     closePlayerModal,

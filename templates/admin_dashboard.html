@@ -17,9 +17,6 @@
     <div class="app-container">
         <!-- Header -->
         <div class="header">
-            <div class="logo-container">
-                <img src="/static/img/logo_liga.png" alt="Лига Обнинска" class="logo">
-            </div>
             <h1 class="app-title">Админ-панель</h1>
         </div>
 
@@ -58,17 +55,12 @@
                                     <h4 id="home-team-name">Команда 1</h4>
                                     <div class="lineup-section">
                                         <h5>Основной состав</h5>
+                                        <textarea id="home-main-lineup-input" class="bulk-lineup-input" 
+                                                  placeholder="Введите список игроков (по одному на строку):&#10;Иванов Иван&#10;Петров Петр&#10;Сидоров Сидор"></textarea>
                                         <div id="home-main-lineup" class="lineup-list">
                                             <!-- Основной состав команды хозяев -->
                                         </div>
-                                        <button class="add-player-btn" onclick="addPlayerToLineup('home', 'main')">+ Добавить игрока</button>
-                                    </div>
-                                    <div class="lineup-section">
-                                        <h5>Запасные</h5>
-                                        <div id="home-sub-lineup" class="lineup-list">
-                                            <!-- Запасные команды хозяев -->
-                                        </div>
-                                        <button class="add-player-btn" onclick="addPlayerToLineup('home', 'sub')">+ Добавить запасного</button>
+                                        <button class="update-lineup-btn" onclick="window.AdminEnhanced.updateTeamLineup('home')">Обновить состав</button>
                                     </div>
                                 </div>
 
@@ -77,17 +69,12 @@
                                     <h4 id="away-team-name">Команда 2</h4>
                                     <div class="lineup-section">
                                         <h5>Основной состав</h5>
+                                        <textarea id="away-main-lineup-input" class="bulk-lineup-input" 
+                                                  placeholder="Введите список игроков (по одному на строку):&#10;Иванов Иван&#10;Петров Петр&#10;Сидоров Сидор"></textarea>
                                         <div id="away-main-lineup" class="lineup-list">
                                             <!-- Основной состав команды гостей -->
                                         </div>
-                                        <button class="add-player-btn" onclick="addPlayerToLineup('away', 'main')">+ Добавить игрока</button>
-                                    </div>
-                                    <div class="lineup-section">
-                                        <h5>Запасные</h5>
-                                        <div id="away-sub-lineup" class="lineup-list">
-                                            <!-- Запасные команды гостей -->
-                                        </div>
-                                        <button class="add-player-btn" onclick="addPlayerToLineup('away', 'sub')">+ Добавить запасного</button>
+                                        <button class="update-lineup-btn" onclick="window.AdminEnhanced.updateTeamLineup('away')">Обновить состав</button>
                                     </div>
                                 </div>
                             </div>
