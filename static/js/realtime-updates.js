@@ -159,11 +159,40 @@ class RealtimeUpdater {
             case 'betting_odds':
                 this.refreshBettingOdds(data);
                 break;
+            case 'lineups_updated':
+                // Авто-обновление составов конкретного матча
+                this.handleLineupsUpdated(data);
+                break;
                 
             default:
                 // Общее обновление данных
                 this.triggerDataRefresh(dataType);
         }
+    }
+
+    handleLineupsUpdated(data){
+        try {
+            if(!data) return;
+            // Проверяем, есть ли на странице что-то связанное с матчем (ростер или карточка матча)
+            const selectorMatchCard = `[data-match-home="${data.home}"][data-match-away="${data.away}"]`;
+            const rosterPresent = document.querySelector('.roster-table') || document.querySelector(selectorMatchCard);
+            if(!rosterPresent){
+                // Ничего подходящего – пропускаем тихо
+                return;
+            }
+            // Фетчим свежие детали матча, чтобы получить обновлённые составы
+            if(data.home && data.away){
+                const params = new URLSearchParams({ home: data.home, away: data.away });
+                fetch(`/api/match-details?${params.toString()}`, { headers: { 'Cache-Control':'no-store' } })
+                  .then(r=> r.ok? r.json(): Promise.reject(new Error('HTTP '+r.status)))
+                  .then(details => {
+                      // Пушим в стандартный канал обновления деталей
+                      this.refreshMatchDetails(details);
+                      this.showNotification(`Обновлены составы: ${data.home} vs ${data.away}`);
+                  })
+                  .catch(err => { /* тихо */ });
+            }
+        } catch(_) {}
     }
     
     updateMatchScore(home, away, data) {

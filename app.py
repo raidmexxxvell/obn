@@ -19,14 +19,6 @@ try:
     from utils.middleware import SecurityMiddleware, PerformanceMiddleware, DatabaseMiddleware, ErrorHandlingMiddleware
     from api.monitoring import monitoring_bp
     from api.security_test import security_test_bp
-    try:
-        from api.betting import betting_bp, init_betting_routes
-        BETTING_API_AVAILABLE = True
-    except ImportError as e:
-        print(f"[WARN] Betting API not available: {e}")
-        BETTING_API_AVAILABLE = False
-        betting_bp = None
-        init_betting_routes = None
     from config import Config
     SECURITY_SYSTEM_AVAILABLE = True
     print("[INFO] Phase 3: Security and monitoring system initialized")
@@ -179,10 +171,6 @@ if SECURITY_SYSTEM_AVAILABLE:
         ErrorHandlingMiddleware(app)
         app.register_blueprint(monitoring_bp, url_prefix='/api/monitoring')
         app.register_blueprint(security_test_bp, url_prefix='/api/security-test')
-        
-        # Регистрация модернизированного betting API
-        if BETTING_API_AVAILABLE:
-            app.register_blueprint(betting_bp)
         app.config.update(
             input_validator=input_validator,
             telegram_security=telegram_security,
@@ -254,20 +242,6 @@ if DATABASE_SYSTEM_AVAILABLE:
         # Регистрируем API blueprint для новой системы БД
         app.register_blueprint(db_api)
         print("[INFO] Database API registered successfully")
-        
-        # Инициализация betting routes с зависимостями
-        if BETTING_API_AVAILABLE and init_betting_routes:
-            try:
-                init_betting_routes(
-                    app, get_db, SessionLocal, User, Bet, parse_and_verify_telegram_init_data,
-                    _build_betting_tours_payload, _snapshot_get, _snapshot_set, _load_all_tours_from_sheet,
-                    BET_MIN_STAKE, BET_MAX_STAKE, BET_DAILY_MAX_STAKE, BET_LOCK_AHEAD_MINUTES,
-                    _compute_1x2_odds, _compute_totals_odds, _compute_specials_odds, mirror_user_to_sheets,
-                    cache_manager
-                )
-                print("[INFO] Betting API routes initialized successfully")
-            except Exception as e:
-                print(f"[WARN] Failed to initialize betting routes: {e}")
         
         # Инициализируем таблицы БД если нужно
         if os.getenv('INIT_DATABASE_TABLES', '').lower() in ('1', 'true', 'yes'):
@@ -1769,6 +1743,17 @@ def api_admin_save_lineups(match_id: str):
             ins('away', (data.get('away') or {}).get('main'), 'starting_eleven')
             ins('away', (data.get('away') or {}).get('sub'), 'substitute')
             db.commit()
+            # WebSocket уведомление о обновлении составов
+            try:
+                if 'websocket_manager' in app.config and app.config['websocket_manager']:
+                    app.config['websocket_manager'].notify_data_change('lineups_updated', {
+                        'match_id': match_id,
+                        'home': home,
+                        'away': away,
+                        'updated_at': datetime.utcnow().isoformat()
+                    })
+            except Exception as _ws_e:
+                app.logger.warning(f"websocket lineup notify failed: {_ws_e}")
             return jsonify({'success': True})
         finally:
             db.close()
@@ -2572,11 +2557,6 @@ def _compute_specials_odds(home: str, away: str, market: str) -> dict:
         except Exception:
             return 1.10
     return { 'yes': to_odds(p_yes), 'no': to_odds(p_no) }
-
-# Алиас для совместимости с betting API
-def _compute_1x2_odds(home: str, away: str, date_key: str = None) -> dict:
-    """Алиас для _compute_match_odds для совместимости с betting API"""
-    return _compute_match_odds(home, away, date_key)
 
 def get_referrals_sheet():
     """Возвращает лист 'referrals', создаёт при отсутствии."""

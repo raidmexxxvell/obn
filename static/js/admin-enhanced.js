@@ -1,6 +1,26 @@
 // static/js/admin-enhanced.js
 // Enhanced admin module with lineup management
 (function(){
+  // Toast system
+  function ensureToastContainer(){
+    if(document.getElementById('toast-container')) return;
+    const c=document.createElement('div');
+    c.id='toast-container';
+    c.style.position='fixed';
+    c.style.top='12px';
+    c.style.right='12px';
+    c.style.zIndex='9999';
+    c.style.display='flex';
+    c.style.flexDirection='column';
+    c.style.gap='8px';
+    c.style.pointerEvents='none';
+    document.addEventListener('DOMContentLoaded',()=>{ document.body.appendChild(c); });
+  }
+  function showToast(msg,type='info',timeout=3000){
+    try { ensureToastContainer(); const c=document.getElementById('toast-container'); if(!c) return; const box=document.createElement('div'); box.textContent=msg; box.style.pointerEvents='auto'; box.style.padding='10px 14px'; box.style.borderRadius='8px'; box.style.fontSize='13px'; box.style.maxWidth='340px'; box.style.lineHeight='1.35'; box.style.fontFamily='inherit'; box.style.color='#fff'; box.style.background= type==='error'? 'linear-gradient(135deg,#d9534f,#b52a25)': (type==='success'? 'linear-gradient(135deg,#28a745,#1e7e34)': 'linear-gradient(135deg,#444,#222)'); box.style.boxShadow='0 4px 12px rgba(0,0,0,0.35)'; box.style.opacity='0'; box.style.transform='translateY(-6px)'; box.style.transition='opacity .25s ease, transform .25s ease'; const close=document.createElement('span'); close.textContent='×'; close.style.marginLeft='8px'; close.style.cursor='pointer'; close.style.fontWeight='600'; close.onclick=()=>{ box.style.opacity='0'; box.style.transform='translateY(-6px)'; setTimeout(()=>box.remove(),220); }; const wrap=document.createElement('div'); wrap.style.display='flex'; wrap.style.alignItems='flex-start'; wrap.style.justifyContent='space-between'; wrap.style.gap='6px'; const textSpan=document.createElement('span'); textSpan.style.flex='1'; textSpan.textContent=msg; wrap.append(textSpan,close); box.innerHTML=''; box.appendChild(wrap); c.appendChild(box); requestAnimationFrame(()=>{ box.style.opacity='1'; box.style.transform='translateY(0)'; }); if(timeout>0){ setTimeout(()=>close.click(), timeout); } } catch(e){ console.warn('toast fail',e); }
+  }
+  window.showToast = showToast;
+  ensureToastContainer();
   
   // Global variables for lineup management
   let currentMatchId = null;
@@ -245,15 +265,16 @@
       
       container.innerHTML = '';
       
+      const counts = currentLineups[team].main.reduce((a,p)=>{const k=p.name.toLowerCase();a[k]=(a[k]||0)+1;return a;},{});
       currentLineups[team].main.forEach((player, index) => {
+        const dup = counts[player.name.toLowerCase()] > 1;
         const playerEl = document.createElement('div');
         playerEl.className = 'player-item';
         playerEl.innerHTML = `
           <div class="player-info">
-            <span class="player-name">${player.name}</span>
-            <span class="player-details">#${player.number || '-'}</span>
+            <span class="player-name ${dup ? 'dup-player' : ''}" data-player-index="${index}">${player.name}</span>
           </div>
-          <button class="remove-player" onclick="window.AdminEnhanced.removePlayer('${team}', 'main', ${index})">×</button>
+          <button class="remove-player" title="Удалить" onclick="window.AdminEnhanced.removePlayer('${team}', 'main', ${index})">×</button>
         `;
         container.appendChild(playerEl);
       });
@@ -288,24 +309,23 @@
       .filter(line => line.length > 0);
     
     if (lines.length === 0) {
-      alert('Введите список игроков');
+      showToast('Введите список игроков','error');
       return;
     }
     
-    // Очищаем текущий состав
-    currentLineups[team].main = [];
-    
-    // Добавляем новых игроков
-    lines.forEach((name, index) => {
-      const player = {
-        name: name,
-        number: index + 1, // Автоматическая нумерация
-        position: null
-      };
-      currentLineups[team].main.push(player);
-    });
-    
-    // Очищаем textarea
+    // Проверка дублей
+    const counts = lines.reduce((acc,l)=>{const k=l.toLowerCase();acc[k]=(acc[k]||0)+1;return acc;},{});
+    const dups = Object.entries(counts).filter(([_,c])=>c>1).map(([k])=>k);
+    if (dups.length){
+      textarea.classList.add('has-dup');
+      showToast('Дубликаты: '+dups.join(', '),'error',6000);
+      return;
+    } else {
+      textarea.classList.remove('has-dup');
+    }
+    // Сохраняем
+    currentLineups[team].main = lines.map(name => ({ name, number: null, position: null }));
+    // Очищаем textarea после применения
     textarea.value = '';
     
     // Обновляем отображение
@@ -324,8 +344,8 @@
     
     // Готовим данные только с основными составами
     const lineupsToSave = {
-      home: { main: currentLineups.home.main, sub: [] },
-      away: { main: currentLineups.away.main, sub: [] }
+  home: { main: currentLineups.home.main.map(p => ({ name: p.name })), sub: [] },
+  away: { main: currentLineups.away.main.map(p => ({ name: p.name })), sub: [] }
     };
     
     console.log('[Admin] Saving lineups:', lineupsToSave);
@@ -349,16 +369,16 @@
     .then(data => {
       console.log('[Admin] Lineups saved:', data);
       if (data.success) {
-        alert('Составы сохранены!');
+        showToast('Составы сохранены','success');
         closeMatchModal();
         loadMatches(); // Refresh matches list
       } else {
-        alert('Ошибка сохранения: ' + (data.error || 'Неизвестная ошибка'));
+        showToast('Ошибка сохранения: ' + (data.error || 'Неизвестная'),'error',6000);
       }
     })
     .catch(err => {
       console.error('[Admin] Error saving lineups:', err);
-      alert('Ошибка сохранения составов');
+      showToast('Ошибка сохранения составов','error',6000);
     })
     .finally(() => {
       btn.disabled = false;
@@ -419,11 +439,7 @@
     ])
     .then(results => {
       const failed = results.filter(r => r.status === 'rejected').length;
-      if (failed === 0) {
-        alert('Все данные обновлены!');
-      } else {
-        alert(`Обновлено с ошибками: ${failed} из ${results.length} запросов не выполнены`);
-      }
+  if (failed === 0) showToast('Все данные обновлены','success'); else showToast(`Ошибки: ${failed} / ${results.length}`,'error',6000);
     })
     .finally(() => {
       btn.disabled = false;
@@ -459,8 +475,8 @@
     fetch(url,{ method:'POST', body:fd }).then(r=>r.json().then(d=>({ok:r.ok, d}))).then(res=>{
       if(!res.ok || res.d.error){ throw new Error(res.d.error||'Ошибка'); }
       if(logEl){ logEl.textContent=JSON.stringify(res.d,null,2); }
-      if(!res.d.dry_run){ alert('Новый сезон: '+res.d.new_season); }
-    }).catch(e=>{ if(logEl){ logEl.textContent='Ошибка: '+e.message; } alert('Ошибка: '+e.message); });
+      if(!res.d.dry_run){ showToast('Новый сезон: '+res.d.new_season,'success'); }
+    }).catch(e=>{ if(logEl){ logEl.textContent='Ошибка: '+e.message; } showToast('Ошибка: '+e.message,'error',6000); });
   }
 
   // News management functions
@@ -567,8 +583,8 @@
       }
     })
     .catch(err => {
-      console.error('[Admin] Error loading news data:', err);
-      alert('Ошибка загрузки данных новости');
+  console.error('[Admin] Error loading news data:', err);
+  showToast('Ошибка загрузки данных новости','error',6000);
     });
   }
 
@@ -579,7 +595,7 @@
     const content = document.getElementById('news-content').value.trim();
     
     if (!title || !content) {
-      alert('Заполните все поля');
+      showToast('Заполните все поля','error');
       return;
     }
     
@@ -612,16 +628,16 @@
     .then(data => {
       console.log('[Admin] News saved:', data);
       if (data.status === 'success') {
-        alert(newsId ? 'Новость обновлена!' : 'Новость создана!');
+        showToast(newsId ? 'Новость обновлена!' : 'Новость создана!','success');
         closeNewsModal();
         loadNews(); // Refresh news list
       } else {
-        alert('Ошибка сохранения: ' + (data.error || 'Неизвестная ошибка'));
+        showToast('Ошибка сохранения: ' + (data.error || 'Неизвестная'),'error',6000);
       }
     })
     .catch(err => {
       console.error('[Admin] Error saving news:', err);
-      alert('Ошибка сохранения новости');
+      showToast('Ошибка сохранения новости','error',6000);
     })
     .finally(() => {
       btn.disabled = false;
@@ -648,15 +664,15 @@
     .then(data => {
       console.log('[Admin] News deleted:', data);
       if (data.status === 'success') {
-        alert('Новость удалена!');
+        showToast('Новость удалена!','success');
         loadNews(); // Refresh news list
       } else {
-        alert('Ошибка удаления: ' + (data.error || 'Неизвестная ошибка'));
+        showToast('Ошибка удаления: ' + (data.error || 'Неизвестная'),'error',6000);
       }
     })
     .catch(err => {
       console.error('[Admin] Error deleting news:', err);
-      alert('Ошибка удаления новости');
+      showToast('Ошибка удаления новости','error',6000);
     });
   }
 
