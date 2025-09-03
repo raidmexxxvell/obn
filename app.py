@@ -1689,6 +1689,16 @@ def api_admin_get_lineups(match_id: str):
                     entry = { 'name': r.player, 'number': r.jersey_number, 'position': None if r.position=='starting_eleven' else r.position }
                     bucket = 'main' if r.position=='starting_eleven' else 'sub'
                     result[r.team][bucket].append(entry)
+                # fallback из team_roster если нет данных по матчу
+                if not rows:
+                    try:
+                        from sqlalchemy import text as _sa_text
+                        home_rows = db.execute(_sa_text("SELECT player FROM team_roster WHERE team=:t ORDER BY id ASC"), {'t': home}).fetchall()
+                        away_rows = db.execute(_sa_text("SELECT player FROM team_roster WHERE team=:t ORDER BY id ASC"), {'t': away}).fetchall()
+                        result['home']['main'] = [ { 'name': r.player, 'number': None, 'position': None } for r in home_rows ]
+                        result['away']['main'] = [ { 'name': r.player, 'number': None, 'position': None } for r in away_rows ]
+                    except Exception as _fe:
+                        app.logger.warning(f"team_roster fallback failed: {_fe}")
             except Exception:
                 pass
             finally:
@@ -1717,7 +1727,21 @@ def api_admin_save_lineups(match_id: str):
             return jsonify({'error': 'db_unavailable'}), 500
         db: Session = get_db()
         try:
-            # удаляем прежние
+            # ensure persistent team_roster table
+            try:
+                from sqlalchemy import text as _sa_text
+                db.execute(_sa_text("""
+                    CREATE TABLE IF NOT EXISTS team_roster (
+                        id SERIAL PRIMARY KEY,
+                        team TEXT NOT NULL,
+                        player TEXT NOT NULL,
+                        created_at TIMESTAMP DEFAULT (NOW() AT TIME ZONE 'UTC')
+                    );
+                    CREATE INDEX IF NOT EXISTS ix_team_roster_team ON team_roster(team);
+                """))
+            except Exception as _te:
+                app.logger.warning(f"team_roster ensure failed: {_te}")
+            # удаляем прежние (матчевые)
             db.query(MatchLineupPlayer).filter(MatchLineupPlayer.home==home, MatchLineupPlayer.away==away).delete()
             def ins(team, arr, pos_label):
                 for p in arr or []:
@@ -1742,6 +1766,43 @@ def api_admin_save_lineups(match_id: str):
             ins('home', (data.get('home') or {}).get('sub'), 'substitute')
             ins('away', (data.get('away') or {}).get('main'), 'starting_eleven')
             ins('away', (data.get('away') or {}).get('sub'), 'substitute')
+
+            # --- Sync persistent roster for both real teams (main lineups only) ---
+            import re as _re
+            def _norm_player(n: str) -> str:
+                n = (n or '').strip()
+                n = _re.sub(r'\s+', ' ', n)
+                return n
+            def _key(n: str) -> str:
+                return _norm_player(n).lower()
+            from sqlalchemy import text as _sa_text
+            def sync_team(real_team: str, payload_label: str):
+                main_list = (data.get(payload_label) or {}).get('main') or []
+                seen = set(); ordered=[]
+                for p in main_list:
+                    nm = _norm_player(p.get('name') if isinstance(p, dict) else p)
+                    if not nm: continue
+                    k=_key(nm)
+                    if k in seen: continue
+                    seen.add(k); ordered.append((k,nm))
+                # load existing
+                existing = db.execute(_sa_text("SELECT id, player FROM team_roster WHERE team=:t ORDER BY id ASC"), {'t': real_team}).fetchall()
+                existing_map = { _key(r.player): r for r in existing }
+                # additions
+                for k,nm in ordered:
+                    if k not in existing_map:
+                        db.execute(_sa_text("INSERT INTO team_roster(team, player) VALUES (:t,:p)"), {'t': real_team, 'p': nm})
+                # deletions (player removed)
+                new_keys = {k for k,_ in ordered}
+                for k_old, row in existing_map.items():
+                    if k_old not in new_keys:
+                        db.execute(_sa_text("DELETE FROM team_roster WHERE id=:id"), {'id': row.id})
+            try:
+                sync_team(home, 'home')
+                sync_team(away, 'away')
+            except Exception as _sr_e:
+                app.logger.warning(f"team_roster sync failed: {_sr_e}")
+
             db.commit()
             # WebSocket уведомление о обновлении составов
             try:
@@ -1759,6 +1820,41 @@ def api_admin_save_lineups(match_id: str):
             db.close()
     except Exception as e:
         app.logger.error(f"admin save lineups error: {e}")
+        return jsonify({'error': 'internal'}), 500
+
+@app.route('/api/match/lineups', methods=['GET'])
+def api_public_match_lineups():
+    """Публичный эндпоинт получения составов матча из БД (без Google Sheets).
+    Параметры: home, away (строки).
+    Формат ответа:
+        {
+          "rosters": { "home": ["Игрок"...], "away": ["Игрок"...] },
+          "source": "db",
+          "updated_at": "ISO"
+        }
+    Если составов нет, возвращает пустые списки.
+    """
+    try:
+        home = (request.args.get('home') or '').strip()
+        away = (request.args.get('away') or '').strip()
+        if not home or not away:
+            return jsonify({'error': 'home и away обязательны'}), 400
+        rosters = {'home': [], 'away': []}
+        if SessionLocal is not None:
+            db: Session = get_db()
+            try:
+                rows = db.query(MatchLineupPlayer).filter(MatchLineupPlayer.home==home, MatchLineupPlayer.away==away).order_by(MatchLineupPlayer.id.asc()).all()
+                for r in rows:
+                    # сохраняем порядок вставки и только имя игрока
+                    if r.team in ('home','away'):
+                        name = (r.player or '').strip()
+                        if name:
+                            rosters[r.team].append(name)
+            finally:
+                db.close()
+        return jsonify({'rosters': rosters, 'source': 'db', 'updated_at': datetime.utcnow().isoformat()})
+    except Exception as e:
+        app.logger.error(f"public match lineups error: {e}")
         return jsonify({'error': 'internal'}), 500
 
 @app.route('/api/shop/my-orders', methods=['POST'])

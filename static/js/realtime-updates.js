@@ -182,15 +182,23 @@ class RealtimeUpdater {
             }
             // Фетчим свежие детали матча, чтобы получить обновлённые составы
             if(data.home && data.away){
-                const params = new URLSearchParams({ home: data.home, away: data.away });
-                fetch(`/api/match-details?${params.toString()}`, { headers: { 'Cache-Control':'no-store' } })
-                  .then(r=> r.ok? r.json(): Promise.reject(new Error('HTTP '+r.status)))
-                  .then(details => {
-                      // Пушим в стандартный канал обновления деталей
-                      this.refreshMatchDetails(details);
-                      this.showNotification(`Обновлены составы: ${data.home} vs ${data.away}`);
-                  })
-                  .catch(err => { /* тихо */ });
+                                const params = new URLSearchParams({ home: data.home, away: data.away });
+                                // сначала пробуем новый компактный эндпоинт из БД
+                                fetch(`/api/match/lineups?${params.toString()}`, { headers: { 'Cache-Control':'no-store' } })
+                                    .then(r=> r.ok? r.json(): Promise.reject(new Error('HTTP '+r.status)))
+                                    .then(dbPayload => {
+                                            // Трансформируем в формат match-details (минимум, чтобы слушатели отработали)
+                                            const details = { rosters: dbPayload.rosters || {home:[],away:[]}, source: 'db' };
+                                            this.refreshMatchDetails(details);
+                                            this.showNotification(`Обновлены составы: ${data.home} vs ${data.away}`);
+                                    })
+                                    .catch(_=>{
+                                        // fallback на старый эндпоинт, если ошибка
+                                        fetch(`/api/match-details?${params.toString()}`, { headers: { 'Cache-Control':'no-store' } })
+                                            .then(r=> r.ok? r.json(): Promise.reject(new Error('HTTP '+r.status)))
+                                            .then(details => { this.refreshMatchDetails(details); this.showNotification(`Обновлены составы: ${data.home} vs ${data.away}`); })
+                                            .catch(()=>{});
+                                    });
             }
         } catch(_) {}
     }
