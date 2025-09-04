@@ -9,9 +9,9 @@
     <title>Лига Обнинска</title>
     <!-- ИСПРАВЛЕНО: Убраны лишние пробелы в URL Telegram WebApp SDK -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <!-- WebSocket отключён (можно вернуть, раскомментировав) -->
-    <!-- <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script> -->
-    <script>window.__WEBSOCKETS_ENABLED__ = false; // отключено для диагностики мобильной загрузки</script>
+    <!-- WebSocket поддержка для real-time обновлений -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script>window.__WEBSOCKETS_ENABLED__ = true; // включено для системы автоподписок</script>
         {# Подключаем оверлей ошибок только администратору #}
         {% if admin_user_id %}
         <script>
@@ -571,6 +571,8 @@
     <script src="/static/js/predictions.js"></script>
     <!-- Real-time обновления через WebSocket -->
     <script src="/static/js/realtime-updates.js"></script>
+    <!-- Система автоподписок для оптимизированных обновлений -->
+    <script src="/static/js/subscription-client.js"></script>
         <script>
         // Fallback навигации: активируется, если основной скрипт не сработал (некоторые мобильные WebView срезают ошибки)
         (function(){

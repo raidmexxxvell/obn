@@ -128,6 +128,7 @@ try:
     from optimizations.optimized_sheets import get_sheets_manager
     from optimizations.background_tasks import get_task_manager, TaskPriority, background_task
     from optimizations.websocket_manager import WebSocketManager
+    from optimizations.subscription_manager import init_subscription_manager, get_subscription_manager, SubscriptionType
     OPTIMIZATIONS_AVAILABLE = True
 except ImportError as e:
     print(f"[WARN] Optimizations not available: {e}")
@@ -201,7 +202,11 @@ if OPTIMIZATIONS_AVAILABLE:
             websocket_manager = WebSocketManager(socketio)
             # Делаем доступным через current_app.config
             app.config['websocket_manager'] = websocket_manager
-            print("[INFO] WebSocket system initialized successfully")
+            
+            # Инициализируем систему автоподписок
+            subscription_manager = init_subscription_manager(socketio, websocket_manager)
+            app.config['subscription_manager'] = subscription_manager
+            print("[INFO] WebSocket system with subscriptions initialized successfully")
         except ImportError:
             print("[WARN] Flask-SocketIO not available, WebSocket disabled")
             socketio = None
@@ -1813,6 +1818,23 @@ def api_admin_save_lineups(match_id: str):
                         'away': away,
                         'updated_at': datetime.utcnow().isoformat()
                     })
+                
+                # Публикуем через систему автоподписок
+                if 'subscription_manager' in app.config:
+                    sub_manager = app.config['subscription_manager']
+                    match_key = f"{home}_{away}"
+                    sub_manager.publish(
+                        SubscriptionType.MATCH_LINEUP,
+                        {
+                            'match_id': match_id,
+                            'home_team': home,
+                            'away_team': away,
+                            'updated_at': datetime.utcnow().isoformat()
+                        },
+                        match_key
+                    )
+            except Exception as e:
+                app.logger.warning(f"Failed to send lineup update notification: {e}")
             except Exception as _ws_e:
                 app.logger.warning(f"websocket lineup notify failed: {_ws_e}")
             return jsonify({'success': True})
@@ -3590,6 +3612,20 @@ def _sync_league_table():
         # Отправляем WebSocket уведомление
         if websocket_manager:
             websocket_manager.notify_data_change('league_table', league_payload)
+        
+        # Публикуем через систему автоподписок
+        try:
+            if app and 'subscription_manager' in app.config:
+                sub_manager = app.config['subscription_manager']
+                sub_manager.publish(
+                    SubscriptionType.LEAGUE_TABLE,
+                    {
+                        'table': league_payload.get('values', []),
+                        'updated_at': datetime.now(timezone.utc).isoformat()
+                    }
+                )
+        except Exception as e:
+            app.logger.warning(f"Failed to publish league table update: {e}")
             
         # Сохраняем в реляционную таблицу (фоновая задача низкого приоритета)
         if task_manager:
@@ -6243,6 +6279,34 @@ def api_match_score_set():
                     mirror_match_score_to_schedule(home, away, int(row.score_home), int(row.score_away))
             except Exception:
                 pass
+            
+            # Публикуем обновление через систему автоподписок
+            try:
+                if 'subscription_manager' in app.config:
+                    sub_manager = app.config['subscription_manager']
+                    match_key = f"{home}_{away}"
+                    sub_manager.publish(
+                        SubscriptionType.MATCH_SCORE,
+                        {
+                            'home_team': home,
+                            'away_team': away,
+                            'home_score': row.score_home,
+                            'away_score': row.score_away,
+                            'updated_at': row.updated_at.isoformat()
+                        },
+                        match_key
+                    )
+                    # Также публикуем в legacy формате для совместимости
+                    sub_manager.publish_legacy('match_score', {
+                        'home': home,
+                        'away': away,
+                        'home_score': row.score_home,
+                        'away_score': row.score_away,
+                        'updated_at': row.updated_at.isoformat()
+                    })
+            except Exception as e:
+                print(f"[WARN] Failed to publish match score update: {e}")
+            
             return jsonify({'status': 'ok', 'score_home': row.score_home, 'score_away': row.score_away})
         finally:
             db.close()
@@ -8485,6 +8549,21 @@ def api_admin_news_create():
                         } for r in latest
                     ]
                     cache.set('news', warm_payload, 'limit:5:offset:0')
+                    
+                    # Публикуем обновление новостей через автоподписки
+                    try:
+                        if 'subscription_manager' in app.config:
+                            sub_manager = app.config['subscription_manager']
+                            sub_manager.publish(
+                                SubscriptionType.NEWS,
+                                {
+                                    'items': warm_payload,
+                                    'updated_at': datetime.now(timezone.utc).isoformat(),
+                                    'action': 'created'
+                                }
+                            )
+                    except Exception as pub_e:
+                        app.logger.warning(f"Failed to publish news update: {pub_e}")
                 except Exception:
                     pass
             except Exception as _e:
@@ -8662,6 +8741,36 @@ def api_news_public():
     except Exception as e:
         app.logger.error(f"public news error: {e}")
         return jsonify({'error': 'Ошибка при получении новостей'}), 500
+
+@app.route('/api/admin/subscriptions/stats', methods=['GET'])
+def api_admin_subscription_stats():
+    """Статистика системы автоподписок (только для админа)."""
+    try:
+        parsed = parse_and_verify_telegram_init_data(request.args.get('initData', ''))
+        if not parsed or not parsed.get('user'):
+            return jsonify({'error': 'Недействительные данные'}), 401
+        
+        user_id = str(parsed['user'].get('id'))
+        admin_id = os.environ.get('ADMIN_USER_ID', '')
+        if not admin_id or user_id != admin_id:
+            return jsonify({'error': 'forbidden'}), 403
+            
+        if 'subscription_manager' in app.config:
+            sub_manager = app.config['subscription_manager']
+            stats = sub_manager.get_stats()
+            
+            # Добавляем информацию о WebSocket подключениях
+            if 'websocket_manager' in app.config:
+                ws_manager = app.config['websocket_manager']
+                stats['websocket_connections'] = ws_manager.get_connected_count()
+            
+            return jsonify(stats)
+        else:
+            return jsonify({'error': 'Subscription manager not available'}), 503
+            
+    except Exception as e:
+        app.logger.error(f"subscription stats error: {e}")
+        return jsonify({'error': 'Ошибка при получении статистики'}), 500
 
 @app.route('/api/stats-table', methods=['GET'])
 def api_stats_table():
@@ -9717,6 +9826,110 @@ def api_lineup_bulk_set():
     except Exception as e:
         app.logger.error(f"Ошибка lineup/bulk_set: {e}")
         return jsonify({'error': 'Не удалось выполнить массовый импорт'}), 500
+
+# ===== WEBSOCKET ОБРАБОТЧИКИ ДЛЯ СИСТЕМЫ АВТОПОДПИСОК =====
+try:
+    if 'socketio' in globals() and socketio is not None:
+        from flask_socketio import request as socketio_request
+        
+        @socketio.on('connect')
+        def handle_connect():
+            """Обработчик подключения к WebSocket"""
+            try:
+                # Получаем данные пользователя из сессии Flask
+                user_id = flask.session.get('user_id')
+                if not user_id:
+                    # Пытаемся извлечь из Telegram WebApp данных
+                    initData = socketio_request.args.get('initData', '')
+                    if initData:
+                        # Простая валидация Telegram данных (базовая)
+                        try:
+                            import urllib.parse
+                            parsed = urllib.parse.parse_qs(initData)
+                            if 'user' in parsed:
+                                user_data = json.loads(parsed['user'][0])
+                                user_id = user_data.get('id')
+                        except:
+                            pass
+                
+                if user_id:
+                    # Подключаем к менеджеру подписок
+                    if 'subscription_manager' in app.config:
+                        sub_manager = app.config['subscription_manager']
+                        sub_manager.on_connect(socketio_request.sid, {'user_id': str(user_id)})
+                    
+                    print(f"[WebSocket] User {user_id} connected")
+                else:
+                    print("[WebSocket] Anonymous user connected")
+                    
+            except Exception as e:
+                print(f"[WebSocket] Connect error: {e}")
+
+        @socketio.on('disconnect')
+        def handle_disconnect():
+            """Обработчик отключения от WebSocket"""
+            try:
+                if 'subscription_manager' in app.config:
+                    sub_manager = app.config['subscription_manager']
+                    sub_manager.on_disconnect(socketio_request.sid)
+                print(f"[WebSocket] Client {socketio_request.sid} disconnected")
+            except Exception as e:
+                print(f"[WebSocket] Disconnect error: {e}")
+
+        @socketio.on('subscribe')
+        def handle_subscribe(data):
+            """Обработчик подписки на обновления"""
+            try:
+                sub_type = data.get('type')
+                object_id = data.get('object_id')
+                
+                if not sub_type:
+                    return {'error': 'Missing subscription type'}
+                
+                if 'subscription_manager' in app.config:
+                    sub_manager = app.config['subscription_manager']
+                    try:
+                        subscription_type = SubscriptionType(sub_type)
+                        result = sub_manager.subscribe(socketio_request.sid, subscription_type, object_id)
+                        return {'success': result}
+                    except ValueError:
+                        return {'error': f'Invalid subscription type: {sub_type}'}
+                else:
+                    return {'error': 'Subscription manager not available'}
+                    
+            except Exception as e:
+                print(f"[WebSocket] Subscribe error: {e}")
+                return {'error': 'Subscription failed'}
+
+        @socketio.on('unsubscribe')
+        def handle_unsubscribe(data):
+            """Обработчик отписки от обновлений"""
+            try:
+                sub_type = data.get('type')
+                object_id = data.get('object_id')
+                
+                if not sub_type:
+                    return {'error': 'Missing subscription type'}
+                
+                if 'subscription_manager' in app.config:
+                    sub_manager = app.config['subscription_manager']
+                    try:
+                        subscription_type = SubscriptionType(sub_type)
+                        result = sub_manager.unsubscribe(socketio_request.sid, subscription_type, object_id)
+                        return {'success': result}
+                    except ValueError:
+                        return {'error': f'Invalid subscription type: {sub_type}'}
+                else:
+                    return {'error': 'Subscription manager not available'}
+                    
+            except Exception as e:
+                print(f"[WebSocket] Unsubscribe error: {e}")
+                return {'error': 'Unsubscribe failed'}
+
+        print("[INFO] WebSocket subscription handlers registered")
+        
+except Exception as e:
+    print(f"[WARN] Failed to register WebSocket handlers: {e}")
 
 if __name__ == '__main__':
     # Локальный standalone запуск (в прод Gunicorn вызывает wsgi:app)
