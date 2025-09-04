@@ -202,6 +202,63 @@ if OPTIMIZATIONS_AVAILABLE:
             # Делаем доступным через current_app.config
             app.config['websocket_manager'] = websocket_manager
             print("[INFO] WebSocket system initialized successfully")
+            # SubscriptionManager (Фаза 2 — Шаг 2): условная инициализация без замены legacy
+            try:
+                from config import Config as _Cfg
+                if getattr(_Cfg, 'ENABLE_SUBSCRIPTIONS', False):
+                    from optimizations.subscription_manager import get_subscription_manager, SubscriptionType
+                    subscription_manager = get_subscription_manager(socketio)
+                    app.config['subscription_manager'] = subscription_manager
+                    print('[INFO] SubscriptionManager enabled (feature-flag)')
+
+                    # Регистрация минимальных socketio событий
+                    @socketio.on('connect')  # type: ignore
+                    def _sub_connect():  # noqa: D401
+                        """Подключение клиента (селективные подписки).
+                        TODO (позже): извлекать user_id строго из проверенного Telegram initData,
+                        переданного при установке сокет-соединения (handshake query / token).
+                        Сейчас временный источник: request.args.get('user_id') для отладки в Telegram WebApp среде.
+                        """
+                        if 'subscription_manager' not in app.config:
+                            return
+                        user_id = request.args.get('user_id')  # временно; будет заменено на верифицированный
+                        app.config['subscription_manager'].on_connect(request.sid, str(user_id) if user_id else None)
+
+                    @socketio.on('disconnect')  # type: ignore
+                    def _sub_disconnect():
+                        if 'subscription_manager' not in app.config:
+                            return
+                        app.config['subscription_manager'].on_disconnect(request.sid)
+
+                    @socketio.on('subscribe')  # type: ignore
+                    def _sub_subscribe(data):
+                        if 'subscription_manager' not in app.config:
+                            return {'success': False}
+                        try:
+                            stype_raw = data.get('type') if isinstance(data, dict) else None
+                            obj_id = data.get('object_id') if isinstance(data, dict) else None
+                            stype = SubscriptionType(stype_raw)
+                            ok = app.config['subscription_manager'].subscribe(request.sid, stype, obj_id)
+                            return {'success': ok}
+                        except Exception:  # noqa: BLE001
+                            return {'success': False}
+
+                    @socketio.on('unsubscribe')  # type: ignore
+                    def _sub_unsubscribe(data):
+                        if 'subscription_manager' not in app.config:
+                            return {'success': False}
+                        try:
+                            stype_raw = data.get('type') if isinstance(data, dict) else None
+                            obj_id = data.get('object_id') if isinstance(data, dict) else None
+                            stype = SubscriptionType(stype_raw)
+                            ok = app.config['subscription_manager'].unsubscribe(request.sid, stype, obj_id)
+                            return {'success': ok}
+                        except Exception:  # noqa: BLE001
+                            return {'success': False}
+                else:
+                    print('[INFO] SubscriptionManager disabled (feature-flag off)')
+            except Exception as _se:  # noqa: BLE001
+                print(f'[WARN] SubscriptionManager init skipped: {_se}')
         except ImportError:
             print("[WARN] Flask-SocketIO not available, WebSocket disabled")
             socketio = None
@@ -1813,6 +1870,21 @@ def api_admin_save_lineups(match_id: str):
                         'away': away,
                         'updated_at': datetime.utcnow().isoformat()
                     })
+                # Parallel publish (Фаза 2 — Шаг 4) селективной системы подписок
+                try:
+                    if 'subscription_manager' in app.config:
+                        from optimizations.subscription_manager import SubscriptionType
+                        app.config['subscription_manager'].publish(
+                            SubscriptionType.MATCH_LINEUP,
+                            {
+                                'home': home,
+                                'away': away,
+                                'updated_at': datetime.utcnow().isoformat()
+                            },
+                            str(match_id)
+                        )
+                except Exception as _sub_e:
+                    app.logger.debug(f"Subscription publish (lineups) skipped: {_sub_e}")
             except Exception as _ws_e:
                 app.logger.warning(f"websocket lineup notify failed: {_ws_e}")
             return jsonify({'success': True})
@@ -1896,6 +1968,50 @@ def api_shop_my_orders():
     except Exception as e:
         app.logger.error(f"Shop my-orders error: {e}")
         return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
+
+
+# ------------------------------
+# Subscriptions Monitoring (Фаза 2 — Шаг 3)
+# ------------------------------
+@app.route('/api/admin/monitoring/subscriptions', methods=['GET'])
+@require_admin()
+def api_admin_monitor_subscriptions():
+    """Возвращает статистику SubscriptionManager (если ENABLE_SUBSCRIPTIONS включён).
+    Поля ответа:
+    enabled: bool — включена ли система
+    stats: агрегированные счетчики (если enabled)
+    types: разбивка по типам {type: {objects: N, unique_subscribers: M}}
+    """
+    try:
+        from config import Config as _Cfg  # локальный импорт чтобы избежать циклов
+        enabled = bool(getattr(_Cfg, 'ENABLE_SUBSCRIPTIONS', False)) and 'subscription_manager' in app.config
+        if not enabled:
+            return jsonify({
+                'enabled': False,
+                'stats': {},
+                'types': {},
+                'message': 'SubscriptionManager disabled (feature flag off)'
+            })
+        mgr = app.config['subscription_manager']
+        stats = mgr.get_stats()
+        type_breakdown = {}
+        for t, obj_map in mgr.object_subscribers.items():
+            # obj_map: object_id -> set(user_id)
+            unique_users = set()
+            for _oid, users in obj_map.items():
+                unique_users.update(users)
+            type_breakdown[t] = {
+                'objects': len(obj_map),
+                'unique_subscribers': len(unique_users)
+            }
+        return jsonify({
+            'enabled': True,
+            'stats': stats,
+            'types': type_breakdown
+        })
+    except Exception as e:  # noqa: BLE001
+        app.logger.warning(f"Subscription monitoring error: {e}")
+        return jsonify({'error': 'monitoring_unavailable'}), 500
 
 @app.route('/api/admin/orders', methods=['POST'])
 def api_admin_orders():
@@ -3590,6 +3706,17 @@ def _sync_league_table():
         # Отправляем WebSocket уведомление
         if websocket_manager:
             websocket_manager.notify_data_change('league_table', league_payload)
+        # Parallel publish (Фаза 2 — Шаг 4)
+        try:
+            if 'subscription_manager' in app.config:
+                from optimizations.subscription_manager import SubscriptionType
+                app.config['subscription_manager'].publish(
+                    SubscriptionType.LEAGUE_TABLE,
+                    league_payload,
+                    None
+                )
+        except Exception as _sub_e:
+            app.logger.debug(f"Subscription publish (league_table) skipped: {_sub_e}")
             
         # Сохраняем в реляционную таблицу (фоновая задача низкого приоритета)
         if task_manager:

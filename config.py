@@ -56,6 +56,10 @@ class Config:
     CSP_SCRIPT_SRC = "'self' 'unsafe-inline' https://telegram.org"
     CSP_STYLE_SRC = "'self' 'unsafe-inline'"
     
+    # Feature flags
+    # Включаем по умолчанию (можно отключить явно ENABLE_SUBSCRIPTIONS=0)
+    ENABLE_SUBSCRIPTIONS = os.environ.get('ENABLE_SUBSCRIPTIONS', '1').lower() in ('1', 'true', 'yes')
+    
     @classmethod
     def validate(cls) -> tuple[bool, list[str]]:
         """Validates required configuration"""

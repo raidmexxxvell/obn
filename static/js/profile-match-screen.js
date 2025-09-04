@@ -4,6 +4,8 @@
   if (window.openMatchScreen) return;
   function withTeamCount(n){ try { return window.withTeamCount? window.withTeamCount(n): n; } catch(_) { return n; } }
   function openMatchScreen(match, details){
+    // Авто-подписка селективной системы на составы матча (если доступен SubscriptionClient)
+    try { if(window.SubscriptionClient && match && match.id!=null){ window.SubscriptionClient.subscribeMatchLineup({ id: match.id, home: match.home, away: match.away }); } } catch(_) {}
     try { window.__CURRENT_MATCH_KEY__ = `${(match?.home||'').toLowerCase().trim()}__${(match?.away||'').toLowerCase().trim()}__${((match?.datetime||match?.date||'').toString().slice(0,10))}`; } catch(_) {}
     const schedulePane = document.getElementById('ufo-schedule');
     const mdPane = document.getElementById('ufo-match-details');
