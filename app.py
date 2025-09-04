@@ -202,63 +202,6 @@ if OPTIMIZATIONS_AVAILABLE:
             # Делаем доступным через current_app.config
             app.config['websocket_manager'] = websocket_manager
             print("[INFO] WebSocket system initialized successfully")
-            # SubscriptionManager (Фаза 2 — Шаг 2): условная инициализация без замены legacy
-            try:
-                from config import Config as _Cfg
-                if getattr(_Cfg, 'ENABLE_SUBSCRIPTIONS', False):
-                    from optimizations.subscription_manager import get_subscription_manager, SubscriptionType
-                    subscription_manager = get_subscription_manager(socketio)
-                    app.config['subscription_manager'] = subscription_manager
-                    print('[INFO] SubscriptionManager enabled (feature-flag)')
-
-                    # Регистрация минимальных socketio событий
-                    @socketio.on('connect')  # type: ignore
-                    def _sub_connect():  # noqa: D401
-                        """Подключение клиента (селективные подписки).
-                        TODO (позже): извлекать user_id строго из проверенного Telegram initData,
-                        переданного при установке сокет-соединения (handshake query / token).
-                        Сейчас временный источник: request.args.get('user_id') для отладки в Telegram WebApp среде.
-                        """
-                        if 'subscription_manager' not in app.config:
-                            return
-                        user_id = request.args.get('user_id')  # временно; будет заменено на верифицированный
-                        app.config['subscription_manager'].on_connect(request.sid, str(user_id) if user_id else None)
-
-                    @socketio.on('disconnect')  # type: ignore
-                    def _sub_disconnect():
-                        if 'subscription_manager' not in app.config:
-                            return
-                        app.config['subscription_manager'].on_disconnect(request.sid)
-
-                    @socketio.on('subscribe')  # type: ignore
-                    def _sub_subscribe(data):
-                        if 'subscription_manager' not in app.config:
-                            return {'success': False}
-                        try:
-                            stype_raw = data.get('type') if isinstance(data, dict) else None
-                            obj_id = data.get('object_id') if isinstance(data, dict) else None
-                            stype = SubscriptionType(stype_raw)
-                            ok = app.config['subscription_manager'].subscribe(request.sid, stype, obj_id)
-                            return {'success': ok}
-                        except Exception:  # noqa: BLE001
-                            return {'success': False}
-
-                    @socketio.on('unsubscribe')  # type: ignore
-                    def _sub_unsubscribe(data):
-                        if 'subscription_manager' not in app.config:
-                            return {'success': False}
-                        try:
-                            stype_raw = data.get('type') if isinstance(data, dict) else None
-                            obj_id = data.get('object_id') if isinstance(data, dict) else None
-                            stype = SubscriptionType(stype_raw)
-                            ok = app.config['subscription_manager'].unsubscribe(request.sid, stype, obj_id)
-                            return {'success': ok}
-                        except Exception:  # noqa: BLE001
-                            return {'success': False}
-                else:
-                    print('[INFO] SubscriptionManager disabled (feature-flag off)')
-            except Exception as _se:  # noqa: BLE001
-                print(f'[WARN] SubscriptionManager init skipped: {_se}')
         except ImportError:
             print("[WARN] Flask-SocketIO not available, WebSocket disabled")
             socketio = None
@@ -1870,21 +1813,6 @@ def api_admin_save_lineups(match_id: str):
                         'away': away,
                         'updated_at': datetime.utcnow().isoformat()
                     })
-                # Parallel publish (Фаза 2 — Шаг 4) селективной системы подписок
-                try:
-                    if 'subscription_manager' in app.config:
-                        from optimizations.subscription_manager import SubscriptionType
-                        app.config['subscription_manager'].publish(
-                            SubscriptionType.MATCH_LINEUP,
-                            {
-                                'home': home,
-                                'away': away,
-                                'updated_at': datetime.utcnow().isoformat()
-                            },
-                            str(match_id)
-                        )
-                except Exception as _sub_e:
-                    app.logger.debug(f"Subscription publish (lineups) skipped: {_sub_e}")
             except Exception as _ws_e:
                 app.logger.warning(f"websocket lineup notify failed: {_ws_e}")
             return jsonify({'success': True})
@@ -1968,50 +1896,6 @@ def api_shop_my_orders():
     except Exception as e:
         app.logger.error(f"Shop my-orders error: {e}")
         return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
-
-
-# ------------------------------
-# Subscriptions Monitoring (Фаза 2 — Шаг 3)
-# ------------------------------
-@app.route('/api/admin/monitoring/subscriptions', methods=['GET'])
-@require_admin()
-def api_admin_monitor_subscriptions():
-    """Возвращает статистику SubscriptionManager (если ENABLE_SUBSCRIPTIONS включён).
-    Поля ответа:
-    enabled: bool — включена ли система
-    stats: агрегированные счетчики (если enabled)
-    types: разбивка по типам {type: {objects: N, unique_subscribers: M}}
-    """
-    try:
-        from config import Config as _Cfg  # локальный импорт чтобы избежать циклов
-        enabled = bool(getattr(_Cfg, 'ENABLE_SUBSCRIPTIONS', False)) and 'subscription_manager' in app.config
-        if not enabled:
-            return jsonify({
-                'enabled': False,
-                'stats': {},
-                'types': {},
-                'message': 'SubscriptionManager disabled (feature flag off)'
-            })
-        mgr = app.config['subscription_manager']
-        stats = mgr.get_stats()
-        type_breakdown = {}
-        for t, obj_map in mgr.object_subscribers.items():
-            # obj_map: object_id -> set(user_id)
-            unique_users = set()
-            for _oid, users in obj_map.items():
-                unique_users.update(users)
-            type_breakdown[t] = {
-                'objects': len(obj_map),
-                'unique_subscribers': len(unique_users)
-            }
-        return jsonify({
-            'enabled': True,
-            'stats': stats,
-            'types': type_breakdown
-        })
-    except Exception as e:  # noqa: BLE001
-        app.logger.warning(f"Subscription monitoring error: {e}")
-        return jsonify({'error': 'monitoring_unavailable'}), 500
 
 @app.route('/api/admin/orders', methods=['POST'])
 def api_admin_orders():
@@ -3706,17 +3590,6 @@ def _sync_league_table():
         # Отправляем WebSocket уведомление
         if websocket_manager:
             websocket_manager.notify_data_change('league_table', league_payload)
-        # Parallel publish (Фаза 2 — Шаг 4)
-        try:
-            if 'subscription_manager' in app.config:
-                from optimizations.subscription_manager import SubscriptionType
-                app.config['subscription_manager'].publish(
-                    SubscriptionType.LEAGUE_TABLE,
-                    league_payload,
-                    None
-                )
-        except Exception as _sub_e:
-            app.logger.debug(f"Subscription publish (league_table) skipped: {_sub_e}")
             
         # Сохраняем в реляционную таблицу (фоновая задача низкого приоритета)
         if task_manager:
@@ -6288,30 +6161,15 @@ def _get_match_total_goals(home: str, away: str):
         finally:
             db.close()
     # 2) Fallback to sheet
-    # Короткий кэш туров (чтобы не читать лист многократно при серии запросов тоталов)
-    global _TOURS_FALLBACK_CACHE
-    try:
-        _TOURS_FALLBACK_CACHE  # noqa: B018
-    except NameError:
-        _TOURS_FALLBACK_CACHE = {'ts':0,'data':[]}
-    now_ts = time.time()
-    if now_ts - _TOURS_FALLBACK_CACHE['ts'] > 60:  # 60 секунд
-        try:
-            tours = _load_all_tours_from_sheet()
-            _TOURS_FALLBACK_CACHE = {'ts': now_ts, 'data': tours}
-        except Exception:
-            tours = _TOURS_FALLBACK_CACHE.get('data') or []
-    else:
-        tours = _TOURS_FALLBACK_CACHE.get('data') or []
+    tours = _load_all_tours_from_sheet()
     for t in tours:
         for m in t.get('matches', []):
             if (m.get('home') == home and m.get('away') == away):
                 h = _parse_score(m.get('score_home',''))
                 a = _parse_score(m.get('score_away',''))
                 if h is None or a is None:
-                    # Понизим уровень шума: часто счёт пуст пока матч не сыгран — это не ошибка
                     try:
-                        app.logger.debug(f"_get_match_total_goals: pending score {home} vs {away} (sheet) raw='{m.get('score_home','')}-{m.get('score_away','')}'")
+                        app.logger.warning(f"_get_match_total_goals: Found match {home} vs {away} in sheet but invalid scores: {m.get('score_home','')} - {m.get('score_away','')}")
                     except: pass
                     return None
                 total = h + a
@@ -6666,48 +6524,6 @@ def api_match_details():
             resp.headers['Cache-Control'] = 'private, max-age=3600'
             return resp
 
-        # FAST PATH: если в БД уже есть расширенные составы (MatchLineupPlayer), то возвращаем их без чтения Google Sheets.
-        if SessionLocal is not None:
-            try:
-                db_fast = get_db()
-                try:
-                    lrows_fast = db_fast.query(MatchLineupPlayer).filter(MatchLineupPlayer.home==home, MatchLineupPlayer.away==away).all()
-                    if lrows_fast:
-                        ext = { 'home': {'starting_eleven': [], 'substitutes': []}, 'away': {'starting_eleven': [], 'substitutes': []} }
-                        for r in lrows_fast:
-                            side = 'home' if (r.team or 'home')=='home' else 'away'
-                            bucket = 'starting_eleven' if r.position=='starting_eleven' else 'substitutes'
-                            ext[side][bucket].append({ 'player': r.player, 'jersey_number': r.jersey_number, 'is_captain': bool(getattr(r,'is_captain', False)) })
-                        for s in ('home','away'):
-                            for b in ('starting_eleven','substitutes'):
-                                ext[s][b].sort(key=lambda x: (999 if x['jersey_number'] is None else x['jersey_number'], (x['player'] or '').lower()))
-                        flat_home = [p['player'] for p in ext['home']['starting_eleven']] + [p['player'] for p in ext['home']['substitutes']]
-                        flat_away = [p['player'] for p in ext['away']['starting_eleven']] + [p['player'] for p in ext['away']['substitutes']]
-                        events_quick = {'home': [], 'away': []}
-                        try:
-                            rows_ev = db_fast.query(MatchPlayerEvent).filter(MatchPlayerEvent.home==home, MatchPlayerEvent.away==away).order_by(MatchPlayerEvent.minute.asc().nulls_last()).all()
-                            for e in rows_ev:
-                                side = 'home' if (e.team or 'home')=='home' else 'away'
-                                events_quick[side].append({'minute': (int(e.minute) if e.minute is not None else None), 'player': e.player, 'type': e.type, 'note': e.note or ''})
-                        except Exception:
-                            events_quick = {'home': [], 'away': []}
-                        payload_core_fast = {
-                            'teams': {'home': home, 'away': away},
-                            'rosters': {'home': flat_home, 'away': flat_away},
-                            'lineups': ext,
-                            'events': events_quick
-                        }
-                        etag_fast = hashlib.md5(json.dumps(payload_core_fast, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
-                        MATCH_DETAILS_CACHE[cache_key] = { 'ts': now_ts, 'etag': etag_fast, 'payload': payload_core_fast }
-                        resp = jsonify({ **payload_core_fast, 'version': etag_fast })
-                        resp.headers['ETag'] = etag_fast
-                        resp.headers['Cache-Control'] = 'private, max-age=900'
-                        return resp
-                finally:
-                    db_fast.close()
-            except Exception:
-                pass
-
         ws = get_rosters_sheet()
         # Сначала попробуем получить фиксированный диапазон, чтобы сохранить реальные индексы колонок (A=1..ZZ)
         headers = []
@@ -6778,18 +6594,6 @@ def api_match_details():
             # убираем заголовок
             players = [v.strip() for v in col_vals[1:] if v and v.strip()]
             return {'team': headers[col_idx-1] or team_name, 'players': players}
-
-        # Дополнительное кеширование "not-found" чтобы не бить лист при спаме
-        NOT_FOUND_TTL = 120  # секунд
-        nf_key = f"NF:{cache_key}"
-        nf_entry = MATCH_DETAILS_CACHE.get(nf_key)
-        if nf_entry and now_ts - nf_entry['ts'] < NOT_FOUND_TTL:
-            # быстрый пустой ответ
-            etag_nf = nf_entry['etag']
-            resp = jsonify({ 'teams': {'home': home, 'away': away}, 'rosters': {'home': [], 'away': []}, 'events': {'home': [], 'away': []}, 'version': etag_nf })
-            resp.headers['ETag'] = etag_nf
-            resp.headers['Cache-Control'] = 'private, max-age=120'
-            return resp
 
         home_data = extract(home)
         away_data = extract(away)
@@ -6871,8 +6675,6 @@ def api_match_details():
                 app.logger.info("Rosters not found for %s vs %s; keys: %s", home, away, ','.join(sorted(set(idx_map.keys()))))
             except Exception:
                 pass
-            # сохраним negative cache
-            MATCH_DETAILS_CACHE[nf_key] = { 'ts': now_ts, 'etag': etag }
         # Сохраняем в кеш
         MATCH_DETAILS_CACHE[cache_key] = { 'ts': now_ts, 'etag': etag, 'payload': payload_core }
         resp = jsonify({ **payload_core, 'version': etag })
