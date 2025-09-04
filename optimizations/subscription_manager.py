@@ -7,7 +7,7 @@ from __future__ import annotations
 from typing import Dict, Set, Optional, Any, Iterable
 from dataclasses import dataclass, field
 from enum import Enum
-import time
+import time, json, hashlib
 
 class SubscriptionType(str, Enum):
     MATCH_SCORE = "match_score"
@@ -36,6 +36,15 @@ class SubscriptionManager:
         self.object_subscribers: Dict[str, Dict[str, Set[str]]] = {}  # type -> {object_id -> {user_id}}
         self.stats = SubscriptionStats()
         self.socketio = socketio  # ссылка на Flask-SocketIO для эмита событий
+        # Hash-skip кеш последнего отпарвленного payload: (type, object_id)->hash
+        self._last_payload_hash: Dict[tuple, str] = {}
+        # Debounce таймеры: (type, object_id)->next_allowed_ts
+        self._debounce_until: Dict[tuple, float] = {}
+        # Конфигурация debounce (секунды) для шумных типов
+        self._debounce_config: Dict[str, float] = {
+            SubscriptionType.BETTING_ODDS.value: 2.0,
+            SubscriptionType.MATCH_SCORE.value: 0.5,
+        }
 
     # --- Lifecycle ---
     def on_connect(self, sid: str, user_id: Optional[str]) -> None:
@@ -94,13 +103,34 @@ class SubscriptionManager:
         return True
 
     # Публикация (Шаг 5 частичная реализация): отправка targeted или broadcast событий
-    def publish(self, sub_type: SubscriptionType, data: Dict[str, Any], object_id: Optional[str] = None) -> bool:
+    def publish(self, sub_type: SubscriptionType, data: Dict[str, Any], object_id: Optional[str] = None, force: bool = False) -> bool:
         try:
             # Если сокета нет – считаем успешным (чтобы не ломать логику)
             if not self.socketio:
                 return True
 
             delivered = 0
+            key = (sub_type.value, object_id or '__GLOBAL__')
+            # Debounce
+            if not force:
+                db_cfg = self._debounce_config.get(sub_type.value)
+                if db_cfg:
+                    now = time.time()
+                    until = self._debounce_until.get(key, 0)
+                    if now < until:
+                        return True  # пропускаем без ошибки
+                    self._debounce_until[key] = now + db_cfg
+            # Hash-skip
+            try:
+                # Стабильная сериализация
+                payload_bytes = json.dumps(data, sort_keys=True, separators=(',', ':')).encode('utf-8')
+                payload_hash = hashlib.md5(payload_bytes).hexdigest()
+                last_hash = self._last_payload_hash.get(key)
+                if last_hash == payload_hash and not force:
+                    return True
+                self._last_payload_hash[key] = payload_hash
+            except Exception:
+                pass
             # Targeted рассылка если object_id указан и у нас есть подписчики на этот объект
             if object_id is not None:
                 uids: Iterable[str] = self.object_subscribers.get(sub_type.value, {}).get(object_id, set())
