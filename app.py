@@ -6651,6 +6651,48 @@ def api_match_details():
             resp.headers['Cache-Control'] = 'private, max-age=3600'
             return resp
 
+        # FAST PATH: если в БД уже есть расширенные составы (MatchLineupPlayer), то возвращаем их без чтения Google Sheets.
+        if SessionLocal is not None:
+            try:
+                db_fast = get_db()
+                try:
+                    lrows_fast = db_fast.query(MatchLineupPlayer).filter(MatchLineupPlayer.home==home, MatchLineupPlayer.away==away).all()
+                    if lrows_fast:
+                        ext = { 'home': {'starting_eleven': [], 'substitutes': []}, 'away': {'starting_eleven': [], 'substitutes': []} }
+                        for r in lrows_fast:
+                            side = 'home' if (r.team or 'home')=='home' else 'away'
+                            bucket = 'starting_eleven' if r.position=='starting_eleven' else 'substitutes'
+                            ext[side][bucket].append({ 'player': r.player, 'jersey_number': r.jersey_number, 'is_captain': bool(getattr(r,'is_captain', False)) })
+                        for s in ('home','away'):
+                            for b in ('starting_eleven','substitutes'):
+                                ext[s][b].sort(key=lambda x: (999 if x['jersey_number'] is None else x['jersey_number'], (x['player'] or '').lower()))
+                        flat_home = [p['player'] for p in ext['home']['starting_eleven']] + [p['player'] for p in ext['home']['substitutes']]
+                        flat_away = [p['player'] for p in ext['away']['starting_eleven']] + [p['player'] for p in ext['away']['substitutes']]
+                        events_quick = {'home': [], 'away': []}
+                        try:
+                            rows_ev = db_fast.query(MatchPlayerEvent).filter(MatchPlayerEvent.home==home, MatchPlayerEvent.away==away).order_by(MatchPlayerEvent.minute.asc().nulls_last()).all()
+                            for e in rows_ev:
+                                side = 'home' if (e.team or 'home')=='home' else 'away'
+                                events_quick[side].append({'minute': (int(e.minute) if e.minute is not None else None), 'player': e.player, 'type': e.type, 'note': e.note or ''})
+                        except Exception:
+                            events_quick = {'home': [], 'away': []}
+                        payload_core_fast = {
+                            'teams': {'home': home, 'away': away},
+                            'rosters': {'home': flat_home, 'away': flat_away},
+                            'lineups': ext,
+                            'events': events_quick
+                        }
+                        etag_fast = hashlib.md5(json.dumps(payload_core_fast, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+                        MATCH_DETAILS_CACHE[cache_key] = { 'ts': now_ts, 'etag': etag_fast, 'payload': payload_core_fast }
+                        resp = jsonify({ **payload_core_fast, 'version': etag_fast })
+                        resp.headers['ETag'] = etag_fast
+                        resp.headers['Cache-Control'] = 'private, max-age=900'
+                        return resp
+                finally:
+                    db_fast.close()
+            except Exception:
+                pass
+
         ws = get_rosters_sheet()
         # Сначала попробуем получить фиксированный диапазон, чтобы сохранить реальные индексы колонок (A=1..ZZ)
         headers = []
@@ -6721,6 +6763,18 @@ def api_match_details():
             # убираем заголовок
             players = [v.strip() for v in col_vals[1:] if v and v.strip()]
             return {'team': headers[col_idx-1] or team_name, 'players': players}
+
+        # Дополнительное кеширование "not-found" чтобы не бить лист при спаме
+        NOT_FOUND_TTL = 120  # секунд
+        nf_key = f"NF:{cache_key}"
+        nf_entry = MATCH_DETAILS_CACHE.get(nf_key)
+        if nf_entry and now_ts - nf_entry['ts'] < NOT_FOUND_TTL:
+            # быстрый пустой ответ
+            etag_nf = nf_entry['etag']
+            resp = jsonify({ 'teams': {'home': home, 'away': away}, 'rosters': {'home': [], 'away': []}, 'events': {'home': [], 'away': []}, 'version': etag_nf })
+            resp.headers['ETag'] = etag_nf
+            resp.headers['Cache-Control'] = 'private, max-age=120'
+            return resp
 
         home_data = extract(home)
         away_data = extract(away)
@@ -6802,6 +6856,8 @@ def api_match_details():
                 app.logger.info("Rosters not found for %s vs %s; keys: %s", home, away, ','.join(sorted(set(idx_map.keys()))))
             except Exception:
                 pass
+            # сохраним negative cache
+            MATCH_DETAILS_CACHE[nf_key] = { 'ts': now_ts, 'etag': etag }
         # Сохраняем в кеш
         MATCH_DETAILS_CACHE[cache_key] = { 'ts': now_ts, 'etag': etag, 'payload': payload_core }
         resp = jsonify({ **payload_core, 'version': etag })
