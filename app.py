@@ -6288,15 +6288,30 @@ def _get_match_total_goals(home: str, away: str):
         finally:
             db.close()
     # 2) Fallback to sheet
-    tours = _load_all_tours_from_sheet()
+    # Короткий кэш туров (чтобы не читать лист многократно при серии запросов тоталов)
+    global _TOURS_FALLBACK_CACHE
+    try:
+        _TOURS_FALLBACK_CACHE  # noqa: B018
+    except NameError:
+        _TOURS_FALLBACK_CACHE = {'ts':0,'data':[]}
+    now_ts = time.time()
+    if now_ts - _TOURS_FALLBACK_CACHE['ts'] > 60:  # 60 секунд
+        try:
+            tours = _load_all_tours_from_sheet()
+            _TOURS_FALLBACK_CACHE = {'ts': now_ts, 'data': tours}
+        except Exception:
+            tours = _TOURS_FALLBACK_CACHE.get('data') or []
+    else:
+        tours = _TOURS_FALLBACK_CACHE.get('data') or []
     for t in tours:
         for m in t.get('matches', []):
             if (m.get('home') == home and m.get('away') == away):
                 h = _parse_score(m.get('score_home',''))
                 a = _parse_score(m.get('score_away',''))
                 if h is None or a is None:
+                    # Понизим уровень шума: часто счёт пуст пока матч не сыгран — это не ошибка
                     try:
-                        app.logger.warning(f"_get_match_total_goals: Found match {home} vs {away} in sheet but invalid scores: {m.get('score_home','')} - {m.get('score_away','')}")
+                        app.logger.debug(f"_get_match_total_goals: pending score {home} vs {away} (sheet) raw='{m.get('score_home','')}-{m.get('score_away','')}'")
                     except: pass
                     return None
                 total = h + a
