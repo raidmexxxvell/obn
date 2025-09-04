@@ -18,18 +18,40 @@
     const today = new Date().toISOString().split('T')[0];
     const lastCheckin = (user.last_checkin_date||'').split('T')[0];
     const checkedToday = lastCheckin === today;
+    // Определяем был ли пропуск (более 1 календарного дня)
+    let gapBroken = false;
+    if (lastCheckin && !checkedToday){
+      try {
+        const dLast = new Date(lastCheckin+ 'T00:00:00Z');
+        const dToday = new Date(today + 'T00:00:00Z');
+        const diffDays = Math.floor((dToday - dLast)/86400000);
+        if (diffDays > 1) gapBroken = true; // streak сброшен
+      } catch(_) {}
+    }
     const mod = (user.consecutive_days||0) % 7;
-    const completedCount = checkedToday ? (mod === 0 ? 7 : mod) : mod;
-    const activeDay = checkedToday ? null : (mod + 1);
+    const completedCount = (checkedToday ? (mod === 0 ? 7 : mod) : mod);
+    // Если серия сброшена gapBroken, активный день всегда 1
+    const activeDay = gapBroken ? 1 : (checkedToday ? null : (mod + 1));
     if (elements.currentStreak) elements.currentStreak.textContent = user.consecutive_days || 0;
     for (let i=1;i<=7;i++){
       const d=document.createElement('div');
       d.className='checkin-day'; d.textContent=i;
-      if (i <= completedCount) d.classList.add('completed');
-      else if (activeDay && i===activeDay) d.classList.add('active');
+      if (!gapBroken){
+        if (i <= completedCount) d.classList.add('completed');
+        else if (activeDay && i===activeDay) d.classList.add('active');
+      } else {
+        // При сбросе показываем только первый день как active-reset
+        if (i===1) d.classList.add('active','reset-start');
+      }
       elements.checkinDays.appendChild(d);
     }
-    if (checkedToday){
+    if (gapBroken && !checkedToday){
+      if (elements.checkinBtn) elements.checkinBtn.disabled=false;
+      if (elements.checkinStatus){
+        elements.checkinStatus.textContent='Серия прервана — начните заново';
+        elements.checkinStatus.style.color='var(--warning, #ffb347)';
+      }
+    } else if (checkedToday){
       if (elements.checkinBtn) elements.checkinBtn.disabled=true;
       if (elements.checkinStatus) elements.checkinStatus.textContent='✅ Награда получена сегодня';
     } else {

@@ -228,6 +228,8 @@
     document.getElementById('match-details-modal').style.display = 'none';
     currentMatchId = null;
   }
+  // Legacy global alias for existing inline onclick="closeMatchModal()" in template
+  window.closeMatchModal = closeMatchModal;
 
   function loadLineups(matchId) {
     console.log('[Admin] Loading lineups for match:', matchId);

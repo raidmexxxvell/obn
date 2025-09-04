@@ -602,6 +602,20 @@ body.allow-landscape #md-pane-stream.fs-mode * {
     color: #fff;
 }
 
+/* Начало новой серии после пропуска */
+.checkin-day.reset-start {
+        outline: 2px dashed rgba(255,200,80,0.9);
+        outline-offset: -3px;
+        position: relative;
+}
+/* Тонкая вибрация подсветки (опционально) */
+@keyframes pulse-reset {
+    0% { box-shadow: 0 0 0 0 rgba(255,200,80,0.4); }
+    70% { box-shadow: 0 0 0 6px rgba(255,200,80,0); }
+    100% { box-shadow: 0 0 0 0 rgba(255,200,80,0); }
+}
+.checkin-day.reset-start { animation: pulse-reset 2.4s ease-in-out infinite; }
+
 .checkin-button {
     background: var(--accent1);
     color: white;
