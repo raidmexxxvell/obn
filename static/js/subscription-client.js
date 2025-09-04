@@ -22,8 +22,31 @@ class SubscriptionClient {
         document.addEventListener('visibilitychange', () => this._handleVisibilityChange());
         window.addEventListener('beforeunload', () => this._cleanup());
         
+        // Отправляем идентификацию пользователя на сервер
+        this._identifyUser();
+        
         this._initDefaultHandlers();
         this._log('SubscriptionClient initialized');
+    }
+    
+    // Идентификация пользователя на сервере
+    _identifyUser() {
+        try {
+            const initData = window.Telegram?.WebApp?.initData;
+            if (initData) {
+                this.socket.emit('user_connected', { initData }, (response) => {
+                    if (response && response.success) {
+                        this._log('User successfully identified on server');
+                    } else {
+                        this._log('Failed to identify user on server', true);
+                    }
+                });
+            } else {
+                this._log('No Telegram initData available for user identification');
+            }
+        } catch (error) {
+            this._log(`User identification error: ${error}`, true);
+        }
     }
     
     // Инициализация обработчиков по умолчанию

@@ -9830,7 +9830,7 @@ def api_lineup_bulk_set():
 # ===== WEBSOCKET ОБРАБОТЧИКИ ДЛЯ СИСТЕМЫ АВТОПОДПИСОК =====
 try:
     if 'socketio' in globals() and socketio is not None:
-        from flask_socketio import request as socketio_request
+        from flask_socketio import emit
         
         @socketio.on('connect')
         def handle_connect():
@@ -9838,29 +9838,21 @@ try:
             try:
                 # Получаем данные пользователя из сессии Flask
                 user_id = flask.session.get('user_id')
-                if not user_id:
-                    # Пытаемся извлечь из Telegram WebApp данных
-                    initData = socketio_request.args.get('initData', '')
-                    if initData:
-                        # Простая валидация Telegram данных (базовая)
-                        try:
-                            import urllib.parse
-                            parsed = urllib.parse.parse_qs(initData)
-                            if 'user' in parsed:
-                                user_data = json.loads(parsed['user'][0])
-                                user_id = user_data.get('id')
-                        except:
-                            pass
                 
-                if user_id:
+                # В Flask-SocketIO session ID доступен через request.sid в контексте обработчика
+                from flask import request
+                session_id = request.sid if hasattr(request, 'sid') else 'unknown'
+                
+                if not user_id:
+                    # Для Telegram WebApp попробуем получить данные позже через событие
+                    print(f"[WebSocket] Anonymous user connected with sid: {session_id}")
+                else:
                     # Подключаем к менеджеру подписок
                     if 'subscription_manager' in app.config:
                         sub_manager = app.config['subscription_manager']
-                        sub_manager.on_connect(socketio_request.sid, {'user_id': str(user_id)})
+                        sub_manager.on_connect(session_id, {'user_id': str(user_id)})
                     
-                    print(f"[WebSocket] User {user_id} connected")
-                else:
-                    print("[WebSocket] Anonymous user connected")
+                    print(f"[WebSocket] User {user_id} connected with sid: {session_id}")
                     
             except Exception as e:
                 print(f"[WebSocket] Connect error: {e}")
@@ -9869,17 +9861,53 @@ try:
         def handle_disconnect():
             """Обработчик отключения от WebSocket"""
             try:
+                from flask import request
+                session_id = request.sid if hasattr(request, 'sid') else 'unknown'
+                
                 if 'subscription_manager' in app.config:
                     sub_manager = app.config['subscription_manager']
-                    sub_manager.on_disconnect(socketio_request.sid)
-                print(f"[WebSocket] Client {socketio_request.sid} disconnected")
+                    sub_manager.on_disconnect(session_id)
+                print(f"[WebSocket] Client {session_id} disconnected")
             except Exception as e:
                 print(f"[WebSocket] Disconnect error: {e}")
+
+        @socketio.on('user_connected')
+        def handle_user_connected(data):
+            """Обработчик идентификации пользователя через Telegram WebApp"""
+            try:
+                from flask import request
+                session_id = request.sid if hasattr(request, 'sid') else 'unknown'
+                
+                initData = data.get('initData', '')
+                if initData:
+                    # Простая валидация Telegram данных
+                    try:
+                        import urllib.parse
+                        parsed = urllib.parse.parse_qs(initData)
+                        if 'user' in parsed:
+                            user_data = json.loads(parsed['user'][0])
+                            user_id = user_data.get('id')
+                            
+                            if user_id and 'subscription_manager' in app.config:
+                                sub_manager = app.config['subscription_manager']
+                                sub_manager.on_connect(session_id, {'user_id': str(user_id)})
+                                print(f"[WebSocket] User {user_id} identified for session {session_id}")
+                                return {'success': True}
+                    except Exception as parse_e:
+                        print(f"[WebSocket] Failed to parse user data: {parse_e}")
+                
+                return {'success': False}
+            except Exception as e:
+                print(f"[WebSocket] User identification error: {e}")
+                return {'success': False}
 
         @socketio.on('subscribe')
         def handle_subscribe(data):
             """Обработчик подписки на обновления"""
             try:
+                from flask import request
+                session_id = request.sid if hasattr(request, 'sid') else 'unknown'
+                
                 sub_type = data.get('type')
                 object_id = data.get('object_id')
                 
@@ -9890,7 +9918,7 @@ try:
                     sub_manager = app.config['subscription_manager']
                     try:
                         subscription_type = SubscriptionType(sub_type)
-                        result = sub_manager.subscribe(socketio_request.sid, subscription_type, object_id)
+                        result = sub_manager.subscribe(session_id, subscription_type, object_id)
                         return {'success': result}
                     except ValueError:
                         return {'error': f'Invalid subscription type: {sub_type}'}
@@ -9905,6 +9933,9 @@ try:
         def handle_unsubscribe(data):
             """Обработчик отписки от обновлений"""
             try:
+                from flask import request
+                session_id = request.sid if hasattr(request, 'sid') else 'unknown'
+                
                 sub_type = data.get('type')
                 object_id = data.get('object_id')
                 
@@ -9915,7 +9946,7 @@ try:
                     sub_manager = app.config['subscription_manager']
                     try:
                         subscription_type = SubscriptionType(sub_type)
-                        result = sub_manager.unsubscribe(socketio_request.sid, subscription_type, object_id)
+                        result = sub_manager.unsubscribe(session_id, subscription_type, object_id)
                         return {'success': result}
                     except ValueError:
                         return {'error': f'Invalid subscription type: {sub_type}'}
